@@ -14,9 +14,9 @@ drafting, critiquing). Any agent that can run bun can use this skill.
 
 - bun installed.
 - No API keys required for this skill's scripts. (Skills that generate
-  images/audio resolve `GEMINI_API_KEY` through the secrets fallback chain:
-  TinyCloud vault `secrets/GEMINI_API_KEY`, then env
-  `GOOGLE_AI_API_KEY` | `GEMINI_API_KEY` | `GOOGLE_API_KEY`.)
+  images/audio resolve `GEMINI_API_KEY` from env vars:
+  `GOOGLE_AI_API_KEY` | `GEMINI_API_KEY` | `GOOGLE_API_KEY`, in that order.
+  Copy the key from the TinyCloud Secret Manager into `.env` for now.)
 
 ## Procedure
 

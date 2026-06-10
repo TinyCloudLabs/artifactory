@@ -57,21 +57,37 @@ code): `~/Obsidian Vaults/TinyCloud 2025/Team Relays/TinyCloud Team
 Space/Fireflies-Transcripts` — 336 Fireflies .md files in `YYYY-MM/`
 folders. Tests use small synthetic fixtures, never real meeting content.
 
-### Secrets — vault-first with env fallback
+### Secrets — env vars (v1)
 
-`getSecret(name)` in `_shared/lib/secrets.ts` resolves in order:
+`getSecret(name)` in `_shared/lib/secrets.ts` resolves from env vars only:
+the secret's exact name, with aliases for Gemini mirroring pulse-radio's
+`resolveGeminiKey` precedence —
+`GOOGLE_AI_API_KEY` > `GEMINI_API_KEY` > `GOOGLE_API_KEY`. When nothing
+resolves, the error lists every attempted source. Keys canonically live in
+the TinyCloud Secret Manager (secrets.tinycloud.xyz) and are copied into
+env / `.env` manually for now.
 
-1. **TinyCloud secrets vault** (secrets.tinycloud.xyz): key
-   `secrets/<NAME>` in the `secrets` space. The headless transport
-   (tc CLI / `@tinycloud/node-sdk`) is being verified by a parallel spike;
-   `fetchFromVault` is a stub marked `TODO(vault-spike)` and the chain is
-   structured so landing it is a one-function swap.
-2. **Env vars**: the secret's own name, with aliases for Gemini mirroring
-   pulse-radio's `resolveGeminiKey` precedence —
-   `GOOGLE_AI_API_KEY` > `GEMINI_API_KEY` > `GOOGLE_API_KEY`.
+Internally getSecret walks an ordered resolver chain (currently just the
+env resolver), so a vault resolver can be added later as one function.
 
-When nothing resolves, the error lists every attempted source. Artifact
-skills are unblocked on env vars even before the vault transport lands.
+### Future: TinyCloud secrets vault integration
+
+Deferred from v1. The spike verdict (2026-06-10, `../distillery-spike/
+spike.mjs`) was **no headless access today**:
+
+- **Browser path proven** (pulse-radio): vault unlock + `secrets/<NAME>`
+  reads in the `secrets` space work with a signed-in TinyCloudWeb instance.
+- **Headless blocked**: the vault master key requires the root OpenKey
+  passkey signature — user presence by design. The SDK's signature cache is
+  `isBrowser()`-gated; the only session key on disk is for the wrong space
+  (no secrets-space delegation exists on disk); and no tc CLI is installed.
+  This is a TinyCloud product gap, not a distillery bug.
+- **Candidate transports evaluated** (pick one when this phase opens):
+  1. one-time vault → `.env` sync tool (browser unlock, writes local env);
+  2. local gateway daemon — persistent browser profile + Hono server on
+     127.0.0.1 that proxies vault reads;
+  3. true headless via a secrets-space delegation + exported
+     master-signature bootstrap.
 
 ### Artifact output contract — feed-ready
 
@@ -146,10 +162,11 @@ Both resolve keys via `getSecret("GEMINI_API_KEY")` unless given one.
 1. **Scaffold + shared plumbing** (this phase, done): repo, SPEC, secrets
    chain, transcript parser, artifact contract, gemini clients,
    extract-insights template skill, tests.
-2. **Vault transport** (parallel spike → swap into `fetchFromVault`).
-3. **Artifact skills**: illustrate-card (image gen on insight cards) →
+2. **Artifact skills**: illustrate-card (image gen on insight cards) →
    write-article → make-podcast. Each copies the extract-insights pattern
    and the quality loop.
+3. **Vault transport** (deferred; pick a candidate transport from "Future:
+   TinyCloud secrets vault integration" and add it as a resolver).
 4. **Listen input adapter**: Transcript[] from TinyCloud instead of disk.
 5. **Feed UI consumer**: pulse-radio-style card feed over artifacts/.
 
@@ -162,8 +179,11 @@ Both resolve keys via `getSecret("GEMINI_API_KEY")` unless given one.
 - **2026-06-10** Input contract v1 is source-agnostic plain files; Listen
   integration designed as a future adapter behind `loadTranscripts`.
 - **2026-06-10** Repo name: **distillery**.
-- **2026-06-10** Secrets: vault-first (`secrets/<NAME>` in the TinyCloud
-  `secrets` space) with env-var fallback mirroring pulse-radio precedence.
+- **2026-06-10** Secrets: env vars mirroring pulse-radio precedence; the
+  TinyCloud Secret Manager (`secrets/<NAME>` in the `secrets` space) is the
+  canonical key home, copied manually for now.
+- **2026-06-10** v1 env-vars-only; vault deferred (headless access blocked
+  by passkey security; spike at `../distillery-spike/spike.mjs`).
 - **2026-06-10** Quality architecture is the top priority: explicit
   extract → triage → draft → critic → verify-quotes loop; required
   `quality` block in the artifact contract; critic pass discards rather

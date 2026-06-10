@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getSecret, vaultKeyFor } from "../skills/_shared/lib/secrets.ts";
+import { getSecret } from "../skills/_shared/lib/secrets.ts";
 
 const GEMINI_ENVS = ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"];
 const saved: Record<string, string | undefined> = {};
@@ -18,10 +18,10 @@ afterEach(() => {
   }
 });
 
-// Vault transport is a stub pending the spike; these tests cover the env
-// path only. envOnly:true additionally exercises the skip-vault option.
+// v1 resolves from env vars only (vault integration deferred — see SPEC.md,
+// "Future: TinyCloud secrets vault integration").
 
-describe("getSecret — env fallback chain", () => {
+describe("getSecret — env resolver chain", () => {
   test("GEMINI_API_KEY honors pulse-radio precedence (GOOGLE_AI_API_KEY first)", async () => {
     clearAll();
     process.env.GOOGLE_AI_API_KEY = "from-google-ai";
@@ -49,34 +49,22 @@ describe("getSecret — env fallback chain", () => {
     expect(await getSecret("DISTILLERY_TEST_SECRET")).toBe("hello");
   });
 
-  test("envOnly skips the vault source", async () => {
-    clearAll();
-    process.env.DISTILLERY_TEST_SECRET = "env-only";
-    expect(await getSecret("DISTILLERY_TEST_SECRET", { envOnly: true })).toBe("env-only");
-  });
-
-  test("error lists every attempted source", async () => {
+  test("error lists every attempted env var in precedence order", async () => {
     clearAll();
     expect(getSecret("GEMINI_API_KEY")).rejects.toThrow(
-      /secrets\/GEMINI_API_KEY[\s\S]*GOOGLE_AI_API_KEY[\s\S]*GEMINI_API_KEY[\s\S]*GOOGLE_API_KEY/,
+      /env: GOOGLE_AI_API_KEY[\s\S]*env: GEMINI_API_KEY[\s\S]*env: GOOGLE_API_KEY/,
     );
   });
 
-  test("envOnly error omits the vault source", async () => {
+  test("error points at the Secret Manager as the canonical key home", async () => {
     clearAll();
     try {
-      await getSecret("DISTILLERY_TEST_SECRET", { envOnly: true });
+      await getSecret("DISTILLERY_TEST_SECRET");
       throw new Error("should have thrown");
     } catch (e) {
       const msg = (e as Error).message;
       expect(msg).toContain("env: DISTILLERY_TEST_SECRET");
-      expect(msg).not.toContain("TinyCloud vault:");
+      expect(msg).toContain("secrets.tinycloud.xyz");
     }
-  });
-});
-
-describe("vaultKeyFor", () => {
-  test("uses the secrets/<NAME> convention", () => {
-    expect(vaultKeyFor("GEMINI_API_KEY")).toBe("secrets/GEMINI_API_KEY");
   });
 });

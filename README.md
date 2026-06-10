@@ -11,7 +11,7 @@ artifacts under `artifacts/`.
 ```
 skills/
   _shared/lib/        shared plumbing every skill imports
-    secrets.ts        getSecret(): TinyCloud vault → env-var fallback chain
+    secrets.ts        getSecret(): env-var resolver chain (vault deferred)
     transcript.ts     parse/load/chunk transcripts, verify quotes
     artifact.ts       the artifact output contract + writer
     gemini.ts         Gemini image (nano-banana) + text helpers
@@ -36,11 +36,12 @@ Skills are independently callable — no skill depends on another having run.
 
 ## Secrets
 
-`getSecret("GEMINI_API_KEY")` tries the TinyCloud secrets vault
-(`secrets/GEMINI_API_KEY` in the `secrets` space at secrets.tinycloud.xyz;
-headless transport pending), then env vars
-`GOOGLE_AI_API_KEY` | `GEMINI_API_KEY` | `GOOGLE_API_KEY`. Copy
-`.env.example` to `.env` for local env-based setup.
+v1 is env-vars only: `getSecret("GEMINI_API_KEY")` reads
+`GOOGLE_AI_API_KEY` | `GEMINI_API_KEY` | `GOOGLE_API_KEY` (in that order);
+other secrets read their exact name. Keys canonically live in the TinyCloud
+Secret Manager (secrets.tinycloud.xyz) — copy them into `.env` manually for
+now (see `.env.example`). Direct vault integration is deferred; see
+SPEC.md, "Future: TinyCloud secrets vault integration".
 
 ## Develop
 

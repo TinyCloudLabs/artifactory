@@ -1,88 +1,66 @@
 // Secret resolution for distillery skills.
 //
-// Fallback chain, in order:
-//   1. TinyCloud secrets vault (secrets.tinycloud.xyz) — canonical key
-//      "secrets/<NAME>" in the "secrets" space. Headless transport is
-//      pending a parallel spike; see fetchFromVault below. The chain is
-//      structured so landing the transport is a one-function swap.
-//   2. Environment variables — the secret's own name plus any aliases
-//      (GEMINI_API_KEY mirrors pulse-radio's resolveGeminiKey precedence:
-//      GOOGLE_AI_API_KEY > GEMINI_API_KEY > GOOGLE_API_KEY).
+// v1 is env-vars only. The canonical home for keys is the TinyCloud Secret
+// Manager (secrets.tinycloud.xyz); they are copied into env vars / .env
+// manually for now. Headless vault access is blocked today — the vault
+// master key requires the root OpenKey passkey signature (user presence by
+// design) — so vault integration is deferred. See SPEC.md, "Future:
+// TinyCloud secrets vault integration".
 //
-// Skills call getSecret("GEMINI_API_KEY") and never care where it came from.
-
-/** Vault key convention used by the TinyCloud Secret Manager. */
-export function vaultKeyFor(name: string): string {
-  return `secrets/${name}`;
-}
+// Structure: getSecret walks an ordered resolver chain. Adding the vault
+// later means writing one resolver function and prepending it to RESOLVERS —
+// no skill or call-site changes.
+//
+// Env precedence for GEMINI_API_KEY mirrors pulse-radio's resolveGeminiKey:
+// GOOGLE_AI_API_KEY > GEMINI_API_KEY > GOOGLE_API_KEY. Any other secret
+// resolves from the env var matching its exact name.
 
 /**
  * Env-var aliases checked (in order) for a given canonical secret name.
- * The canonical name itself is always checked; aliases listed here are
- * checked in the order given, BEFORE the canonical name when the alias
- * list explicitly includes it (as with GEMINI_API_KEY, where pulse-radio's
- * precedence puts GOOGLE_AI_API_KEY first).
+ * Names without an alias entry are checked under their own name only.
  */
 const ENV_ALIASES: Record<string, readonly string[]> = {
   GEMINI_API_KEY: ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"],
 };
 
-function envNamesFor(name: string): readonly string[] {
-  return ENV_ALIASES[name] ?? [name];
+interface Resolution {
+  value?: string;
+  /** Human-readable labels of every source this resolver tried. */
+  attempted: string[];
 }
 
-/**
- * TODO(vault-spike): headless TinyCloud vault transport.
- *
- * A parallel spike (distillery-spike) is verifying headless access to the
- * TinyCloud secrets vault via the tc CLI / @tinycloud/node-sdk. Once it
- * lands, implement this function to unlock the vault and read
- * vaultKeyFor(name) from the "secrets" space — nothing else in this module
- * (or in any skill) needs to change.
- *
- * Returns undefined when the vault is unavailable or the key is absent, so
- * the chain falls through to env vars instead of failing hard.
- */
-async function fetchFromVault(name: string): Promise<string | undefined> {
-  void vaultKeyFor(name); // key convention, ready for the transport
-  return undefined;
-}
+type SecretResolver = (name: string) => Promise<Resolution>;
 
-export interface GetSecretOptions {
-  /** Skip the vault and only consult env vars (used by tests / offline). */
-  envOnly?: boolean;
-}
-
-/**
- * Resolve a secret by canonical name through the fallback chain.
- * Throws with every attempted source listed when nothing resolves.
- */
-export async function getSecret(
-  name: string,
-  opts: GetSecretOptions = {},
-): Promise<string> {
+async function resolveFromEnv(name: string): Promise<Resolution> {
   const attempted: string[] = [];
-
-  if (!opts.envOnly) {
-    attempted.push(`TinyCloud vault: ${vaultKeyFor(name)} (secrets space)`);
-    try {
-      const fromVault = await fetchFromVault(name);
-      if (fromVault?.trim()) return fromVault.trim();
-    } catch {
-      // Vault errors must never block the env fallback.
-    }
-  }
-
-  for (const envName of envNamesFor(name)) {
+  for (const envName of ENV_ALIASES[name] ?? [name]) {
     attempted.push(`env: ${envName}`);
     const value = process.env[envName]?.trim();
-    if (value) return value;
+    if (value) return { value, attempted };
   }
+  return { attempted };
+}
 
+// Ordered chain. When headless TinyCloud vault access lands, prepend its
+// resolver here (vault key convention: "secrets/<NAME>" in the "secrets"
+// space) — nothing else changes.
+const RESOLVERS: readonly SecretResolver[] = [resolveFromEnv];
+
+/**
+ * Resolve a secret by canonical name through the resolver chain.
+ * Throws with every attempted source listed when nothing resolves.
+ */
+export async function getSecret(name: string): Promise<string> {
+  const attempted: string[] = [];
+  for (const resolver of RESOLVERS) {
+    const result = await resolver(name);
+    attempted.push(...result.attempted);
+    if (result.value) return result.value;
+  }
   throw new Error(
     `Secret "${name}" not found. Attempted sources (in order):\n` +
       attempted.map((s) => `  - ${s}`).join("\n") +
-      `\nFix: add it to the TinyCloud Secret Manager (secrets.tinycloud.xyz) ` +
-      `as "${vaultKeyFor(name)}", or export one of the env vars above.`,
+      `\nFix: export one of the env vars above. Keys live in the TinyCloud ` +
+      `Secret Manager (secrets.tinycloud.xyz) — copy manually for now.`,
   );
 }
