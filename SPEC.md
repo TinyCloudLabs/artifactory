@@ -194,6 +194,10 @@ Both resolve keys via `getSecret("GEMINI_API_KEY")` unless given one.
   write-article, make-podcast); Gemini TTS shape grounded on
   ai.google.dev speech-generation docs, live-unverified pending
   `GEMINI_API_KEY`.
+- **2026-06-10** Phase 2.5 live quality eval complete — 4 illustrated
+  cards, 1 article, 1 podcast generated from real corpus; TTS + image
+  pipelines live-verified first-try; review.html + feed UI shipped;
+  3 rounds of dogfood fixes applied.
 
 ## Assumptions
 
