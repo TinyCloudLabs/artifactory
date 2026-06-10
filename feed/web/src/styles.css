@@ -1,0 +1,364 @@
+/* Distillery feed — dark pocket-operator.
+   Lifted (economically) from pulse-radio's POSkin: monospace everything,
+   inset LCD screens, 2-letter type codes, dot-matrix labels, one red accent.
+   Here the case is matte black and the LCD glows in the dark. */
+
+:root {
+  --case: #121214;          /* page background — the device case */
+  --case-deep: #2c2c33;     /* chassis borders */
+  --panel: #1b1b1f;         /* card chassis */
+  --btn-bg: #232329;
+  --lcd: #0d1710;           /* screen glass */
+  --lcd-deep: #27402a;      /* screen border */
+  --lcd-ink: #c9e6ad;       /* lit pixels */
+  --lcd-faint: #74936b;     /* dim pixels */
+  --signal: #ff5347;        /* the only accent */
+  --mono: "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--case);
+  color: var(--lcd-ink);
+  font-family: var(--mono);
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 8px 8px calc(24px + env(safe-area-inset-bottom));
+}
+
+button {
+  font-family: var(--mono);
+}
+
+a {
+  color: var(--lcd-ink);
+}
+
+/* ---- chassis (masthead + cards share the case-panel look) ---- */
+.chassis {
+  background: var(--panel);
+  border: 2px solid var(--case-deep);
+  border-radius: 6px;
+  padding: 8px;
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* ---- LCD screen ---- */
+.screen {
+  background: var(--lcd);
+  border: 1px solid var(--lcd-deep);
+  padding: 8px 10px;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 0 14px rgba(160, 220, 130, 0.05);
+}
+
+/* ---- masthead ---- */
+.masthead {
+  position: sticky;
+  top: 4px;
+  z-index: 5;
+  margin-bottom: 10px;
+}
+
+.masthead .screen {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.masthead-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+
+.masthead-sub {
+  font-size: 9px;
+  color: var(--lcd-faint);
+  letter-spacing: 0.15em;
+  margin-top: 3px;
+}
+
+.masthead-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 9px;
+  color: var(--lcd-faint);
+  letter-spacing: 0.15em;
+}
+
+/* ---- buttons ---- */
+.po-btn {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  padding: 8px 10px;
+  background: var(--btn-bg);
+  color: var(--lcd-ink);
+  border: 1px solid var(--case-deep);
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow:
+    inset 0 -2px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.po-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.po-btn.accent {
+  background: var(--signal);
+  color: #fff;
+  border-color: #7e2620;
+}
+
+/* ---- feed ---- */
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-status {
+  font-size: 11px;
+  color: var(--lcd-faint);
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.feed-error {
+  font-size: 11px;
+  color: var(--signal);
+  padding: 6px 8px;
+  border: 1px dashed var(--signal);
+  margin-bottom: 8px;
+}
+
+/* ---- card ---- */
+.card-hero {
+  margin-bottom: 6px;
+  background: var(--lcd);
+  border: 1px solid var(--lcd-deep);
+  padding: 6px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+.card-hero-frame {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--lcd-deep);
+  background: #000;
+}
+
+.card-hero-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  filter: saturate(0.75) contrast(0.96);
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--lcd-faint);
+  font-weight: 700;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--lcd-deep);
+}
+
+.card-meta .dot {
+  color: var(--signal);
+}
+
+.card-headline {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  color: var(--lcd-ink);
+}
+
+.card-headline a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card-quote {
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--signal);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.card-attribution {
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--lcd-faint);
+  font-weight: 700;
+}
+
+.card-body {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--lcd-ink);
+  overflow-wrap: break-word;
+}
+
+.card-body p {
+  margin: 0 0 8px;
+}
+
+.card-body p:last-child {
+  margin-bottom: 0;
+}
+
+.card-body h1,
+.card-body h2,
+.card-body h3 {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lcd-faint);
+  margin: 14px 0 6px;
+}
+
+.card-body a {
+  color: var(--lcd-ink);
+}
+
+.card-body blockquote {
+  margin: 8px 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--lcd-deep);
+  color: var(--lcd-faint);
+}
+
+.card-body code {
+  font-family: var(--mono);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 3px;
+}
+
+.card-body img {
+  max-width: 100%;
+}
+
+.read-full {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+  color: var(--signal);
+  text-decoration: none;
+  border: 1px dashed var(--signal);
+  padding: 4px 8px;
+}
+
+/* ---- audio (podcast) ---- */
+.card-audio {
+  margin-top: 10px;
+  padding: 6px;
+  border: 1px dashed var(--lcd-deep);
+}
+
+.card-audio-label {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--lcd-faint);
+  margin-bottom: 6px;
+}
+
+.card-audio audio {
+  width: 100%;
+  height: 36px;
+  display: block;
+  filter: invert(0.88) hue-rotate(150deg) saturate(0.5);
+  border-radius: 4px;
+}
+
+/* ---- tags + footer ---- */
+.card-tags {
+  margin-top: 10px;
+  display: flex;
+  gap: 4px 6px;
+  flex-wrap: wrap;
+}
+
+.card-tag {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--lcd-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+
+.card-tag.active {
+  color: var(--lcd-ink);
+  border-color: var(--lcd-ink);
+}
+
+.card-foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--lcd-deep);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--lcd-faint);
+}
+
+/* ---- full article view ---- */
+.article-back {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+  color: var(--lcd-ink);
+  text-decoration: none;
+  border: 1px solid var(--case-deep);
+  background: var(--btn-bg);
+  border-radius: 3px;
+  padding: 6px 10px;
+}
+
+.article .card-body {
+  font-size: 13px;
+  line-height: 1.65;
+}

@@ -1,0 +1,127 @@
+// Hono app factory — kept separate from the serve entrypoint so tests can
+// exercise the full HTTP surface via app.request() without binding a port.
+
+import { Hono } from "hono";
+import { join, resolve, sep } from "node:path";
+import { scanArtifacts } from "./scan.ts";
+import type { CardsResponse } from "./types.ts";
+
+export interface AppOptions {
+  /** Absolute path to the artifacts root. */
+  artifactsDir: string;
+  /** Absolute path to the built SPA (web/dist). Optional for API-only tests. */
+  distDir?: string;
+}
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+/** Resolve a child path and refuse anything that escapes the base dir. */
+function safeJoin(base: string, ...parts: string[]): string | null {
+  const target = resolve(base, ...parts);
+  if (target === base || target.startsWith(base + sep)) return target;
+  return null;
+}
+
+function fileResponse(file: ReturnType<typeof Bun.file>, rangeHeader: string | null): Response {
+  const size = file.size;
+  const type = file.type || "application/octet-stream";
+
+  // Range support — iOS Safari requires it to seek (and often to play) audio.
+  if (rangeHeader) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    if (m && (m[1] || m[2])) {
+      let start = m[1] ? parseInt(m[1], 10) : NaN;
+      let end = m[2] ? parseInt(m[2], 10) : NaN;
+      if (Number.isNaN(start)) {
+        // suffix range: last N bytes
+        start = Math.max(0, size - end!);
+        end = size - 1;
+      } else if (Number.isNaN(end) || end >= size) {
+        end = size - 1;
+      }
+      if (start >= size || start > end) {
+        return new Response(null, {
+          status: 416,
+          headers: { "Content-Range": `bytes */${size}` },
+        });
+      }
+      return new Response(file.slice(start, end + 1), {
+        status: 206,
+        headers: {
+          "Content-Type": type,
+          "Content-Range": `bytes ${start}-${end}/${size}`,
+          "Content-Length": String(end - start + 1),
+          "Accept-Ranges": "bytes",
+        },
+      });
+    }
+  }
+
+  return new Response(file, {
+    headers: {
+      "Content-Type": type,
+      "Content-Length": String(size),
+      "Accept-Ranges": "bytes",
+    },
+  });
+}
+
+export function createApp(opts: AppOptions): Hono {
+  const artifactsDir = resolve(opts.artifactsDir);
+  const distDir = opts.distDir ? resolve(opts.distDir) : null;
+  const app = new Hono();
+
+  app.get("/api/cards", async (c) => {
+    const limitRaw = parseInt(c.req.query("limit") ?? "", 10);
+    const offsetRaw = parseInt(c.req.query("offset") ?? "", 10);
+    const limit = Math.min(
+      MAX_LIMIT,
+      Math.max(1, Number.isNaN(limitRaw) ? DEFAULT_LIMIT : limitRaw),
+    );
+    const offset = Math.max(0, Number.isNaN(offsetRaw) ? 0 : offsetRaw);
+
+    const all = await scanArtifacts(artifactsDir);
+    const page = all.slice(offset, offset + limit);
+    const body: CardsResponse = {
+      cards: page,
+      total: all.length,
+      offset,
+      hasMore: offset + page.length < all.length,
+    };
+    return c.json(body);
+  });
+
+  app.get("/api/cards/:type/:slug", async (c) => {
+    const { type, slug } = c.req.param();
+    const all = await scanArtifacts(artifactsDir);
+    const card = all.find((x) => x.type === type && x.slug === slug);
+    if (!card) return c.json({ error: "not found" }, 404);
+    return c.json(card);
+  });
+
+  app.get("/media/:type/:slug/:file", async (c) => {
+    const { type, slug, file } = c.req.param();
+    const path = safeJoin(artifactsDir, type, slug, file);
+    if (!path) return c.text("forbidden", 403);
+    const f = Bun.file(path);
+    if (!(await f.exists())) return c.text("not found", 404);
+    return fileResponse(f, c.req.header("range") ?? null);
+  });
+
+  // Static SPA with index.html fallback (hash routing means this is mostly "/").
+  app.get("*", async (c) => {
+    if (!distDir) return c.text("feed not built — run: bun run build", 404);
+    const pathname = decodeURIComponent(new URL(c.req.url).pathname);
+    const path = safeJoin(distDir, "." + pathname);
+    if (path && path !== distDir) {
+      const f = Bun.file(path);
+      if (await f.exists()) return fileResponse(f, c.req.header("range") ?? null);
+    }
+    const index = Bun.file(join(distDir, "index.html"));
+    if (await index.exists()) return fileResponse(index, null);
+    return c.text("feed not built — run: bun run build", 404);
+  });
+
+  return app;
+}

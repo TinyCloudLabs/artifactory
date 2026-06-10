@@ -1,0 +1,28 @@
+{
+  "name": "distillery-feed",
+  "version": "0.1.0",
+  "description": "Pulse-radio-style feed UI for distillery artifacts.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "start": "bun src/server.ts",
+    "dev": "bun run build && bun --watch src/server.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "marked": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}
