@@ -1,32 +1,68 @@
 #!/usr/bin/env bun
 // verify-quotes.ts — prove every source_quote in an artifact JSON exists
-// verbatim (whitespace-insensitive) in its referenced transcript.
+// verbatim (whitespace-insensitive) in its referenced transcript's spoken
+// text (parsed speaker segments, not AI-generated summary headers).
 //
 // Usage:
-//   bun skills/extract-insights/scripts/verify-quotes.ts <artifact.json>
+//   bun skills/extract-insights/scripts/verify-quotes.ts <artifact.json> [--stamp]
 //
 // Exit 0: all quotes verified. Exit 1: at least one failed (listed).
-// The agent must run this before setting quality.quotes_verified.
+// With --stamp, full verification success writes quality.quotes_verified=true
+// back into the artifact JSON (atomic write) — the sanctioned way to set
+// that flag. Never hand-set it.
 
-import { readFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { parseTranscript, verifyQuote, type Transcript } from "../../_shared/lib/transcript.ts";
 import type { SourceQuote } from "../../_shared/lib/artifact.ts";
 
-const file = process.argv[2];
-if (!file) {
-  console.error("usage: bun skills/extract-insights/scripts/verify-quotes.ts <artifact.json>");
+function usage(): never {
+  console.error(
+    "usage: bun skills/extract-insights/scripts/verify-quotes.ts <artifact.json> [--stamp]",
+  );
   process.exit(2);
 }
 
-const artifact = JSON.parse(await readFile(file, "utf8")) as {
+let file: string | undefined;
+let stampFlag = false;
+for (const arg of process.argv.slice(2)) {
+  if (arg === "--stamp") {
+    stampFlag = true;
+  } else if (arg.startsWith("--")) {
+    usage();
+  } else if (!file) {
+    file = arg;
+  } else {
+    usage();
+  }
+}
+if (!file) usage();
+
+const artifact = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown> & {
   source_quotes?: SourceQuote[];
 };
+
+/** Set quality.quotes_verified=true and persist atomically (tmp + rename). */
+async function stamp(path: string): Promise<void> {
+  const quality =
+    typeof artifact.quality === "object" && artifact.quality !== null && !Array.isArray(artifact.quality)
+      ? (artifact.quality as Record<string, unknown>)
+      : {};
+  artifact.quality = { ...quality, quotes_verified: true };
+  const tmp = `${path}.tmp-${process.pid}`;
+  await writeFile(tmp, JSON.stringify(artifact, null, 2) + "\n");
+  await rename(tmp, path);
+  console.log(`Stamped quality.quotes_verified=true in ${path}`);
+}
+
 const quotes = artifact.source_quotes ?? [];
 if (quotes.length === 0) {
   console.log("No source_quotes present — nothing to verify.");
   console.log(
     "Note: insight artifacts SHOULD anchor claims with source_quotes; an empty list is suspicious.",
   );
+  if (stampFlag) {
+    console.log("--stamp skipped: nothing was verified, so nothing was stamped.");
+  }
   process.exit(0);
 }
 
@@ -61,3 +97,4 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log(`\nAll ${quotes.length} quote(s) verified.`);
+if (stampFlag) await stamp(file);

@@ -6,6 +6,10 @@ directory (`artifacts/<type>/<slug>/` containing a contract-valid
 `hero.png` (or `.jpg`/`.webp`, per the model's mimeType) written alongside
 `artifact.json`, with `hero_image` and `quality.notes` updated.
 
+Despite the name, this skill works on **any** artifact type — insight
+cards, articles, podcasts — anything with a contract-valid
+`artifact.json` whose headline + body can seed a prompt.
+
 As everywhere in distillery: the **script does the plumbing** (validate
 artifact, call the image model, write the file, update the JSON); **you —
 the agent — do the judgment** (craft the prompt, view the result, decide
@@ -132,13 +136,21 @@ against the artifact:
 1. **Does the scene depict the insight?** Someone seeing the card should
    feel the headline in the picture without reading a caption.
 2. **Any text artifacts?** Letters, garbled pseudo-words, numbers, or
-   logo-like marks anywhere → reject.
+   logo-like marks anywhere → reject. **Zoom-inspect any region containing
+   panels, pages, screens, or labels before accepting** — that's where
+   garbled pseudo-text hides at full-image zoom.
 3. **Any garbled elements?** Mangled hands/objects, incoherent
    composition, muddy non-editorial style → reject.
 
+Benign model embellishments (an extra cloud, a small prop you didn't ask
+for) are acceptable as long as the metaphor still reads clearly — judge
+the scene, not prompt-conformance.
+
 If sub-bar, refine the prompt — simplify to ONE subject, swap to a more
 literal physical metaphor, restate the hard rules — and rerun step 3 with
-`--note "retry: <what was wrong>"`. The script overwrites the hero image.
+`--note "retry: <what was wrong>"`. **Retries overwrite `hero.<ext>` in
+place** — if you want to compare attempts side by side, copy the current
+one aside (e.g. to `/tmp`) before rerunning.
 **Max 2 retries** (3 generations total); past that, keep the best attempt.
 
 ### 5. Record the outcome (script)

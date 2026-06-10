@@ -202,6 +202,37 @@ function stripQuotes(s: string): string {
 }
 
 /**
+ * Best-available duration string for a transcript. Fireflies sometimes emits
+ * a broken "**Duration:** 0 min" header even for hour-long meetings, so when
+ * the parsed turns carry timestamps we compute the span from the first to the
+ * last stamped turn and trust THAT; the header value is only a fallback.
+ * Returns e.g. "62 min" (rounded, min 1), or the header string, or undefined.
+ *
+ * Timestamp convention: "HH:MM:SS" or "MM:SS" (two-part stamps are
+ * minutes:seconds, matching Fireflies/diarizer output).
+ */
+export function transcriptDuration(transcript: Transcript): string | undefined {
+  const stamps = transcript.turns
+    .map((turn) => turn.timestamp)
+    .filter((s): s is string => s !== undefined)
+    .map(timestampToSeconds)
+    .filter((s): s is number => s !== undefined);
+  if (stamps.length >= 2) {
+    const span = stamps[stamps.length - 1]! - stamps[0]!;
+    if (span > 0) return `${Math.max(1, Math.round(span / 60))} min`;
+  }
+  return transcript.duration;
+}
+
+function timestampToSeconds(stamp: string): number | undefined {
+  const parts = stamp.split(":").map(Number);
+  if (parts.some((n) => !Number.isFinite(n))) return undefined;
+  if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
+  if (parts.length === 2) return parts[0]! * 60 + parts[1]!;
+  return undefined;
+}
+
+/**
  * Load transcripts from a mix of file and directory paths (directories are
  * walked recursively; only .md/.txt files are picked up). This is the v1
  * input boundary: a future Listen adapter replaces "paths on disk" with
@@ -278,10 +309,45 @@ export function chunkTranscript(
  * Verify a quote appears in a transcript, whitespace-insensitively.
  * The quality loop's deterministic half: agents propose quotes, this proves
  * they exist verbatim in the source.
+ *
+ * Matches against parsed speaker-segment text when segments exist — NOT the
+ * raw file, which can carry AI-generated Summary / Action Items headers
+ * (Fireflies) that were never actually spoken. Only the plain-text fallback
+ * (no speaker structure found) verifies against the raw content.
  */
 export function verifyQuote(transcript: Transcript, quote: string): boolean {
   const normalize = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   const needle = normalize(quote);
   if (!needle) return false;
-  return normalize(transcript.raw).includes(needle);
+  const hasSegments = transcript.turns.some((turn) => turn.speaker !== undefined);
+  const haystack = hasSegments
+    ? transcript.turns.map((turn) => turn.text).join("\n")
+    : transcript.raw;
+  return normalize(haystack).includes(needle);
+}
+
+export interface QuoteTurnMatch {
+  /** Index into transcript.turns of the first matching turn. */
+  index: number;
+  turn: TranscriptTurn;
+}
+
+/**
+ * Locate the first speaker turn whose text contains the quote, using the
+ * same whitespace-insensitive matching as verifyQuote. Returns null when no
+ * single turn contains it. A quote can still pass verifyQuote while this
+ * returns null when it spans adjacent turns — callers should treat
+ * (verifyQuote=true, findQuoteTurn=null) as "present, but spans turns".
+ *
+ * Note: a turn match proves the words were spoken, not who spoke them —
+ * diarization speaker labels can be wrong.
+ */
+export function findQuoteTurn(transcript: Transcript, quote: string): QuoteTurnMatch | null {
+  const normalize = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  const needle = normalize(quote);
+  if (!needle) return null;
+  for (const [index, turn] of transcript.turns.entries()) {
+    if (normalize(turn.text).includes(needle)) return { index, turn };
+  }
+  return null;
 }

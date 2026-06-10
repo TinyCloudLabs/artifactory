@@ -13,10 +13,8 @@ drafting, critiquing). Any agent that can run bun can use this skill.
 ## Prerequisites
 
 - bun installed.
-- No API keys required for this skill's scripts. (Skills that generate
-  images/audio resolve `GEMINI_API_KEY` from env vars:
-  `GOOGLE_AI_API_KEY` | `GEMINI_API_KEY` | `GOOGLE_API_KEY`, in that order.
-  Copy the key from the TinyCloud Secret Manager into `.env` for now.)
+- No API key required — the scripts are deterministic plumbing; everything
+  else is agent judgment.
 
 ## Procedure
 
@@ -48,6 +46,10 @@ For each candidate, draft an artifact JSON per the contract in
 **exact verbatim quotes** from the transcript that anchor every claim.
 Never paraphrase inside `source_quotes`.
 
+Write draft artifact JSONs to `drafts/` at the repo root (gitignored),
+one file per candidate, e.g. `drafts/<slug>.json`. That is the sanctioned
+pre-save workspace; `save.ts` moves survivors into `artifacts/`.
+
 ### 3. Critic pass (your judgment — mandatory)
 
 Re-read each draft as a skeptical editor. Ask: Is this actually insightful,
@@ -60,18 +62,20 @@ explaining what was cut and why.
 ### 4. Verify quotes (script — mandatory before saving)
 
 ```sh
-bun skills/extract-insights/scripts/verify-quotes.ts <artifact.json>
+bun skills/extract-insights/scripts/verify-quotes.ts drafts/<slug>.json --stamp
 ```
 
 Checks every `source_quotes[].quote` verbatim (whitespace-insensitive)
-against its transcript. Fix or drop any artifact that fails; only then set
-`quality.quotes_verified: true`. Do not hand-set that flag without running
-the script.
+against the transcript's spoken text (parsed speaker turns — AI-generated
+summary/action-item headers don't count). With `--stamp`, full success
+writes `quality.quotes_verified: true` into the draft for you; on failure
+nothing is stamped — fix or drop the failing quotes and re-run. Never
+hand-set `quotes_verified`.
 
 ### 5. Save (script)
 
 ```sh
-bun skills/extract-insights/scripts/save.ts <artifact.json> [--out-dir artifacts]
+bun skills/extract-insights/scripts/save.ts drafts/<slug>.json [--out-dir artifacts]
 ```
 
 Validates against the contract and writes

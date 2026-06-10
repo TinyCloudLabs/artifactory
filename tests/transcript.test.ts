@@ -5,6 +5,7 @@ import {
   chunkTranscript,
   loadTranscripts,
   parseTranscript,
+  transcriptDuration,
   verifyQuote,
 } from "../skills/_shared/lib/transcript.ts";
 
@@ -181,6 +182,53 @@ describe("chunkTranscript", () => {
   });
 });
 
+describe("transcriptDuration", () => {
+  test("computes the span from first/last turn timestamps, overriding a lying header", () => {
+    const raw = [
+      "# Synthetic Long Meeting",
+      "**Date:** 2026-06-10",
+      "**Duration:** 0 min", // Fireflies emits this even for hour-long calls
+      "",
+      "## Transcript",
+      "",
+      "**Ada Lovelace (00:00:05):**",
+      "Kicking off.",
+      "",
+      "**Grace Hopper (00:31:40):**",
+      "Midpoint check.",
+      "",
+      "**Ada Lovelace (01:02:10):**",
+      "Wrapping up.",
+    ].join("\n");
+    const t = parseTranscript(raw, "long.md");
+    expect(t.duration).toBe("0 min"); // header parses as-is...
+    expect(transcriptDuration(t)).toBe("62 min"); // ...but the span wins
+  });
+
+  test("treats two-part stamps as MM:SS", () => {
+    const raw = ["[00:10] Ada: start", "[25:47] Grace: end"].join("\n");
+    const t = parseTranscript(raw, "short.md");
+    expect(transcriptDuration(t)).toBe("26 min"); // 1537s → 25.6 min
+  });
+
+  test("rounds sub-minute spans up to 1 min instead of echoing the 0-min bug", () => {
+    const raw = ["[00:01] Ada: hi", "[00:20] Grace: bye"].join("\n");
+    const t = parseTranscript(raw, "tiny.md");
+    expect(transcriptDuration(t)).toBe("1 min");
+  });
+
+  test("falls back to the header when timestamps are missing or unusable", () => {
+    const noStamps = parseTranscript(
+      "**Duration:** 30 min\n\n## Transcript\n\n**Ada Lovelace:**\nNo stamps here.",
+      "nostamps.md",
+    );
+    expect(transcriptDuration(noStamps)).toBe("30 min");
+
+    const oneStamp = parseTranscript("[05:00] Ada: only one stamped turn", "one.md");
+    expect(transcriptDuration(oneStamp)).toBeUndefined();
+  });
+});
+
 describe("verifyQuote", () => {
   test("matches verbatim quotes whitespace-insensitively", async () => {
     const path = join(CORPUS, "fireflies-style.md");
@@ -194,5 +242,47 @@ describe("verifyQuote", () => {
     const t = parseTranscript(await readFile(path, "utf8"), path);
     expect(verifyQuote(t, "pricing should align with revenue value")).toBe(false);
     expect(verifyQuote(t, "   ")).toBe(false);
+  });
+
+  test("regression: AI summary/action-item header text never verifies as speech", () => {
+    // Synthetic Fireflies-style file: the generated Summary and Action Items
+    // contain phrases that appear NOWHERE in the actual spoken transcript.
+    const raw = [
+      "# Synthetic Standup",
+      "**Date:** 2026-06-01",
+      "",
+      "## Summary",
+      "- The team unanimously ratified the kraken-deployment doctrine.",
+      "",
+      "## Action Items",
+      "",
+      "**Ada Lovelace**",
+      "Codify the kraken-deployment doctrine in the wiki (09:15)",
+      "",
+      "## Transcript",
+      "",
+      "**Ada Lovelace:**",
+      "Let's ship the release behind a feature flag on Tuesday.",
+      "",
+      "**Grace Hopper:**",
+      "Tuesday works if QA signs off Monday night.",
+    ].join("\n");
+    const t = parseTranscript(raw, "synthetic.md");
+    // Real speech verifies.
+    expect(verifyQuote(t, "ship the release behind a feature flag")).toBe(true);
+    expect(verifyQuote(t, "QA signs off Monday night")).toBe(true);
+    // Summary / action-item phrases (present in raw, absent from speech) do not.
+    expect(t.raw).toContain("kraken-deployment doctrine");
+    expect(verifyQuote(t, "unanimously ratified the kraken-deployment doctrine")).toBe(false);
+    expect(verifyQuote(t, "kraken-deployment doctrine")).toBe(false);
+    // Speaker markers aren't speech either.
+    expect(verifyQuote(t, "**Grace Hopper:**")).toBe(false);
+  });
+
+  test("plain-text fallback (no segments) still verifies against raw content", async () => {
+    const path = join(FIXTURES, "plain.txt");
+    const t = parseTranscript(await readFile(path, "utf8"), path);
+    expect(t.turns.every((turn) => turn.speaker === undefined)).toBe(true);
+    expect(verifyQuote(t, "no speakers at all")).toBe(true);
   });
 });

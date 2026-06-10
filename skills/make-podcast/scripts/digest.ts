@@ -13,6 +13,7 @@ import { writeFile } from "node:fs/promises";
 import {
   chunkTranscript,
   loadTranscripts,
+  transcriptDuration,
   type TranscriptChunk,
 } from "../../_shared/lib/transcript.ts";
 
@@ -69,7 +70,9 @@ const output: DigestOutput = {
     title: t.title,
     date: t.date,
     participants: t.participants,
-    duration: t.duration,
+    // Fireflies headers sometimes lie ("Duration: 0 min"); prefer the span
+    // computed from turn timestamps, fall back to the header value.
+    duration: transcriptDuration(t),
     summary: t.summary,
   })),
   chunks: transcripts.flatMap((t) => chunkTranscript(t, maxChunk)),

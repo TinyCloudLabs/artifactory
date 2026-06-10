@@ -2,8 +2,9 @@
 //
 // Request/response shapes are built from Google's official docs:
 //   https://ai.google.dev/gemini-api/docs/speech-generation
-// Verified against the docs on 2026-06-10, NOT yet against the live API
-// (no key on the build machine). Per the docs:
+// Verified against the docs on 2026-06-10 AND against the live API on
+// 2026-06-10 (single-voice + multi-speaker both worked unchanged; live
+// response mime was "audio/L16;codec=pcm;rate=24000"). Per the docs:
 //   - models: gemini-2.5-flash-preview-tts (default here),
 //     gemini-2.5-pro-preview-tts, gemini-3.1-flash-tts-preview
 //   - request: generateContent with generationConfig.responseModalities

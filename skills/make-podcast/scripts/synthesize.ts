@@ -10,6 +10,10 @@
 //     --speaker "Alex=Kore" --speaker "Sam=Puck" --out episode.wav
 //
 // Options: --model <id> (default gemini-2.5-flash-preview-tts).
+//          --smoke      one-sentence pipeline check: still reports bytes /
+//                       duration / pace, but skips the episode-length and
+//                       pace target warnings, which don't apply to a
+//                       deliberately tiny script.
 //
 // The whole script file is sent as the TTS text. Per the docs the API
 // returns raw PCM (s16le 24kHz mono); this script wraps it into a WAV so
@@ -31,7 +35,7 @@ function usage(): never {
   console.error(
     "usage: bun skills/make-podcast/scripts/synthesize.ts <script.md>\n" +
       "         (--voice NAME | --speaker NAME=VOICE [--speaker NAME=VOICE])\n" +
-      "         --out episode.wav [--model MODEL_ID]",
+      "         --out episode.wav [--model MODEL_ID] [--smoke]",
   );
   process.exit(2);
 }
@@ -41,6 +45,7 @@ let voice: string | undefined;
 const speakers: SpeakerVoice[] = [];
 let outFile: string | undefined;
 let model: string | undefined;
+let smoke = false;
 
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
@@ -59,6 +64,8 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === "--model") {
     model = args[++i];
     if (!model) usage();
+  } else if (arg === "--smoke") {
+    smoke = true;
   } else if (arg.startsWith("--")) {
     usage();
   } else if (!scriptFile) {
@@ -109,15 +116,21 @@ if (durationSeconds !== undefined) {
     `Duration (bytes/byte-rate): ${durationSeconds.toFixed(1)}s (~${mins}m${String(secs).padStart(2, "0")}s)`,
   );
   console.log(`Pace: ${wpm.toFixed(0)} words/min for ${words} script words`);
-  if (durationSeconds < 60 || durationSeconds > 360) {
-    console.error(
-      `WARNING: duration outside the 2-5 min micro-podcast target (allowing 1-6 min). Re-check the script length.`,
+  if (smoke) {
+    console.log(
+      "Smoke mode: episode duration/pace targets not checked (a one-sentence test is supposed to be short). Play the file to confirm audio.",
     );
-  }
-  if (wpm < 100 || wpm > 240) {
-    console.error(
-      `WARNING: implausible pace (${wpm.toFixed(0)} wpm). The audio may be truncated or padded — listen before saving.`,
-    );
+  } else {
+    if (durationSeconds < 60 || durationSeconds > 360) {
+      console.error(
+        `WARNING: duration outside the 2-5 min micro-podcast target (allowing 1-6 min). Re-check the script length.`,
+      );
+    }
+    if (wpm < 100 || wpm > 240) {
+      console.error(
+        `WARNING: implausible pace (${wpm.toFixed(0)} wpm). The audio may be truncated or padded — listen before saving.`,
+      );
+    }
   }
 } else {
   console.log("Duration unknown (non-PCM output) — verify by playing the file.");

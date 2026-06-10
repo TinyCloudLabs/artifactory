@@ -39,15 +39,20 @@ every step: one good article, or none.
 ### 1. Survey (script)
 
 ```sh
-bun skills/write-article/scripts/survey.ts <transcript-path>... [--max-chunk 8000] [--out digest.json]
+bun skills/write-article/scripts/survey.ts <transcript-path>... [--max-chunk 8000] [--format json|md] [--out digest.json]
 ```
 
-Emits a digest JSON: `mode` ("single" | "collection"), per-transcript
-metadata (title, date, participants, summary, speaker turn counts), and —
-in collection mode — `crossTranscript.sharedSpeakers` and
-`crossTranscript.recurringTerms` (term-frequency hints, not conclusions),
-plus the full chunked transcript text. Read all of it before deciding
-anything.
+Emits a digest: `mode` ("single" | "collection"), per-transcript metadata
+(title, date, participants, summary, per-speaker turn counts in
+`speakerTurnCounts`), and — in collection mode —
+`crossTranscript.sharedSpeakers` and `crossTranscript.recurringTerms`
+(stopword-filtered term-frequency **hints only**, never conclusions — read
+the chunks before claiming anything recurs), plus the full chunked
+transcript text. Read all of it before deciding anything.
+
+`--format md` renders the same digest as a readable markdown document
+(metadata up top, chunks as plain text sections) — usually the better
+choice for reading; the default JSON is for programmatic use.
 
 ### 2. Select ONE editorial angle (your judgment)
 
@@ -82,6 +87,30 @@ Write the article as markdown in the artifact's `body` field. Structure:
   `source_quotes` (exact verbatim transcript text — never paraphrase
   inside `source_quotes`; paraphrase in prose is fine when a verbatim
   anchor for the underlying fact still exists).
+
+**Check each quote the moment you draft it** — don't wait for the final
+verify pass to discover a paraphrase:
+
+```sh
+bun skills/_shared/scripts/check-quote.ts --quote "exact words you plan to use" <transcript-path>...
+```
+
+It checks the quote against each transcript (same matching as
+verify-quotes) and prints the matching speaker turn when found. Exit 0 =
+found somewhere; exit 1 = found nowhere, so fix the wording before it
+reaches the draft.
+
+**Attribution:** attribute quotes per the transcript's speaker labels —
+they're the only attribution source you have — but know that diarization
+labels can be wrong (Fireflies has put one speaker's lines under another's
+name). Quote verification proves the *text* was spoken, not *who* spoke
+it. Record this caveat in `quality.notes`. If turn counts or content make
+an attribution look implausible (one person answering their own
+questions), flag it explicitly there too.
+
+Write the draft artifact JSON to `drafts/<slug>.json` at the repo root
+(gitignored) — that is the sanctioned pre-save workspace; `save.ts` moves
+survivors into `artifacts/`.
 
 Fill the rest of the artifact per `skills/_shared/lib/artifact.ts`:
 `type: "article"`, `headline`, the lead pull quote in `quote` +
@@ -140,20 +169,22 @@ shipped). Set `quality.critic_pass: true` only on a survivor.
 ### 6. Verify quotes (script — must exit 0)
 
 ```sh
-bun skills/write-article/scripts/verify-quotes.ts <artifact.json>
+bun skills/write-article/scripts/verify-quotes.ts drafts/<slug>.json --stamp
 ```
 
 Checks every `source_quotes[].quote` verbatim (whitespace-insensitive)
 against its transcript. An empty `source_quotes` list fails — articles
 without anchors don't ship. Fix or drop failing quotes (and the claims
-that depended on them), then re-run until exit 0. Only then set
-`quality.quotes_verified: true`. Never hand-set that flag without a
-passing run.
+that depended on them), then re-run until exit 0. With `--stamp`, full
+success writes `quality.quotes_verified: true` into the draft for you
+(atomic write); on any failure nothing is stamped. **Never hand-set
+`quotes_verified`** — `--stamp` is the only sanctioned way. Remember:
+this proves the text, not the attribution (see the drafting-step caveat).
 
 ### 7. Save (script)
 
 ```sh
-bun skills/write-article/scripts/save.ts <artifact.json> [--out-dir artifacts]
+bun skills/write-article/scripts/save.ts drafts/<slug>.json [--out-dir artifacts]
 ```
 
 Validates against the contract and writes

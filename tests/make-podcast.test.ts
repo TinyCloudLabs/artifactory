@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -308,5 +308,172 @@ describe("podcast artifact saving", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verify-quotes.ts CLI — --stamp choreography (mirrors extract-insights;
+// podcasts keep zero-quotes → exit 0, but --stamp never stamps the unverified)
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = join(import.meta.dir, "..");
+const SCRIPTS = join(REPO_ROOT, "skills", "make-podcast", "scripts");
+
+// Synthetic fixture only — never real meeting content. Carries a broken
+// Fireflies "Duration: 0 min" header plus turn timestamps for the digest test.
+const TRANSCRIPT = `# Synthetic Pricing Sync
+**Date:** 2026-06-01
+**Duration:** 0 min
+**Participants:** ada@example.com, grace@example.com
+
+## Transcript
+
+**Ada Lovelace (00:00:10):**
+We should charge a single flat rate and see who screams.
+
+**Grace Hopper (00:41:20):**
+Run it for one cohort first and measure churn before rolling wide.
+`;
+
+let cliDir: string;
+let cliTranscriptPath: string;
+
+beforeAll(async () => {
+  cliDir = await mkdtemp(join(tmpdir(), "distillery-podcast-cli-"));
+  cliTranscriptPath = join(cliDir, "pricing-sync.md");
+  await writeFile(cliTranscriptPath, TRANSCRIPT);
+});
+
+afterAll(async () => {
+  await rm(cliDir, { recursive: true, force: true });
+});
+
+function podcastArtifact(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "test-podcast",
+    type: "podcast",
+    headline: "Flat-rate pricing gets a one-cohort trial",
+    body: "A two-minute episode on the flat-rate experiment.",
+    tags: ["pricing"],
+    source_transcripts: [cliTranscriptPath],
+    source_quotes: [
+      {
+        quote: "We should charge a single flat rate and see who screams.",
+        speaker: "Ada Lovelace",
+        transcript: cliTranscriptPath,
+      },
+      {
+        quote: "measure churn before rolling wide",
+        speaker: "Grace Hopper",
+        transcript: cliTranscriptPath,
+      },
+    ],
+    generated_at: "2026-06-10T12:00:00.000Z",
+    quality: { critic_pass: true, quotes_verified: false, notes: "synthetic test artifact" },
+    ...overrides,
+  };
+}
+
+async function writeArtifactFile(name: string, artifact: Record<string, unknown>): Promise<string> {
+  const path = join(cliDir, name);
+  await writeFile(path, JSON.stringify(artifact, null, 2) + "\n");
+  return path;
+}
+
+function runScript(script: string, ...args: string[]) {
+  const proc = Bun.spawnSync(["bun", join(SCRIPTS, script), ...args], {
+    cwd: REPO_ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    exitCode: proc.exitCode,
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+  };
+}
+
+describe("verify-quotes.ts CLI — make-podcast", () => {
+  test("exits 0 on verbatim quotes; without --stamp the file is untouched", async () => {
+    const path = await writeArtifactFile("good-no-stamp.json", podcastArtifact());
+    const before = await readFile(path, "utf8");
+    const res = runScript("verify-quotes.ts", path);
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("All 2 quote(s) verified.");
+    expect(res.stdout).not.toContain("Stamped");
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  test("--stamp on success sets quality.quotes_verified=true, preserving the rest", async () => {
+    const path = await writeArtifactFile("good-stamp.json", podcastArtifact());
+    const res = runScript("verify-quotes.ts", path, "--stamp");
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("Stamped quality.quotes_verified=true");
+    const after = JSON.parse(await readFile(path, "utf8"));
+    expect(after.quality.quotes_verified).toBe(true);
+    expect(after.quality.critic_pass).toBe(true);
+    expect(after.quality.notes).toBe("synthetic test artifact");
+    expect(after.headline).toBe(podcastArtifact().headline);
+    expect(after.source_quotes).toHaveLength(2);
+  });
+
+  test("--stamp on failure exits 1 and does not flip the flag", async () => {
+    const artifact = podcastArtifact();
+    (artifact.source_quotes as { quote: string }[])[0]!.quote =
+      "we ought to bill one flat price and observe reactions";
+    const path = await writeArtifactFile("bad-stamp.json", artifact);
+    const res = runScript("verify-quotes.ts", path, "--stamp");
+    expect(res.exitCode).toBe(1);
+    expect(res.stderr).toContain("FAIL");
+    const after = JSON.parse(await readFile(path, "utf8"));
+    expect(after.quality.quotes_verified).toBe(false);
+  });
+
+  test("zero source_quotes keeps podcast's exit 0, but --stamp refuses to stamp", async () => {
+    const path = await writeArtifactFile(
+      "empty-quotes.json",
+      podcastArtifact({ source_quotes: [] }),
+    );
+    const res = runScript("verify-quotes.ts", path, "--stamp");
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("--stamp skipped");
+    const after = JSON.parse(await readFile(path, "utf8"));
+    expect(after.quality.quotes_verified).toBe(false);
+  });
+
+  test("unknown flags exit 2 with usage", () => {
+    const res = runScript("verify-quotes.ts", "whatever.json", "--bogus");
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain("usage:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// digest.ts CLI — duration computed from turn timestamps beats the broken
+// Fireflies "Duration: 0 min" header
+// ---------------------------------------------------------------------------
+
+describe("digest.ts CLI — duration metadata", () => {
+  test("prefers the first/last-timestamp span over a lying 0-min header", () => {
+    const res = runScript("digest.ts", cliTranscriptPath);
+    expect(res.exitCode).toBe(0);
+    const digest = JSON.parse(res.stdout) as {
+      transcripts: { path: string; duration?: string }[];
+    };
+    expect(digest.transcripts).toHaveLength(1);
+    // 00:41:20 - 00:00:10 = 2470s ≈ 41 min, not the header's "0 min".
+    expect(digest.transcripts[0]?.duration).toBe("41 min");
+  });
+
+  test("falls back to the header when turns carry no timestamps", async () => {
+    const path = join(cliDir, "no-stamps.md");
+    await writeFile(
+      path,
+      "# No Stamps\n**Duration:** 30 min\n\n## Transcript\n\n**Ada Lovelace:**\nNo stamps in this one.\n",
+    );
+    const res = runScript("digest.ts", path);
+    expect(res.exitCode).toBe(0);
+    const digest = JSON.parse(res.stdout) as { transcripts: { duration?: string }[] };
+    expect(digest.transcripts[0]?.duration).toBe("30 min");
   });
 });

@@ -38,6 +38,8 @@ export interface DigestTranscript {
   summary?: string;
   turnCount: number;
   speakers: SpeakerStat[];
+  /** Per-speaker turn counts keyed by speaker label, e.g. {"Ada Lovelace": 7}. */
+  speakerTurnCounts: Record<string, number>;
 }
 
 export interface RecurringTerm {
@@ -65,9 +67,24 @@ export interface ArticleDigest {
 
 const MAX_RECURRING_TERMS = 30;
 
-// Small stopword set: common English glue + meeting filler. Deliberately
-// modest — recurringTerms is a hint for the agent, not an analysis product.
+// Small stopword set: common English glue + meeting filler + conversational
+// noise (contractions, hedges, generic nouns like "data"/"stuff" that
+// dominate any work conversation without saying anything). Deliberately a
+// simple wordlist, deliberately modest — recurringTerms is a hint for the
+// agent's angle selection, not an analysis product; false negatives here
+// cost nothing because the agent reads the full chunks anyway.
 const STOPWORDS = new Set([
+  // Conversational filler + hedges
+  "alright", "anyway", "anyways", "cool", "definitely", "exactly", "guess",
+  "gotta", "honestly", "kinda", "literally", "obviously", "sorta", "totally",
+  "wanna",
+  // Generic nouns that recur in any meeting without carrying signal
+  "data",
+  // Standard contractions (4+ chars; shorter ones never match TERM_RE)
+  "ain't", "aren't", "can't", "couldn't", "hadn't", "hasn't", "he'd", "he'll",
+  "he's", "i'll", "i've", "it'll", "she'd", "she'll", "she's", "shouldn't",
+  "that'll", "they'd", "they'll", "they've", "we'd", "weren't", "what'll",
+  "who's", "wouldn't", "you'd", "you'll", "you've",
   "about", "actually", "after", "again", "agree", "agreed", "all", "also",
   "always", "and", "anything", "around", "back", "basically", "because",
   "been", "before", "being", "between", "both", "but", "can", "cannot",
@@ -108,6 +125,9 @@ export function buildDigest(
       if (!turn.speaker) continue;
       turnsBySpeaker.set(turn.speaker, (turnsBySpeaker.get(turn.speaker) ?? 0) + 1);
     }
+    const speakers = [...turnsBySpeaker.entries()]
+      .map(([speaker, turns]) => ({ speaker, turns }))
+      .sort((a, b) => b.turns - a.turns || a.speaker.localeCompare(b.speaker));
     return {
       path: t.path,
       title: t.title,
@@ -115,9 +135,8 @@ export function buildDigest(
       participants: t.participants,
       summary: t.summary,
       turnCount: t.turns.length,
-      speakers: [...turnsBySpeaker.entries()]
-        .map(([speaker, turns]) => ({ speaker, turns }))
-        .sort((a, b) => b.turns - a.turns || a.speaker.localeCompare(b.speaker)),
+      speakers,
+      speakerTurnCounts: Object.fromEntries(speakers.map((s) => [s.speaker, s.turns])),
     };
   });
 
@@ -176,6 +195,76 @@ function buildCrossTranscript(transcripts: Transcript[]): CrossTranscriptDigest 
     .slice(0, MAX_RECURRING_TERMS);
 
   return { sharedSpeakers, recurringTerms };
+}
+
+/**
+ * Render the digest as a human/agent-readable markdown document: survey
+ * metadata, per-transcript speaker turn counts, cross-transcript hints, then
+ * every chunk as a plain text section. Same information as the JSON digest,
+ * built for reading rather than parsing.
+ */
+export function renderDigestMarkdown(digest: ArticleDigest): string {
+  const out: string[] = [];
+  out.push("# Article survey digest");
+  out.push("");
+  out.push(`- mode: ${digest.mode}`);
+  out.push(`- transcripts: ${digest.transcriptCount}`);
+  out.push(`- chunks: ${digest.chunks.length}`);
+
+  for (const t of digest.transcripts) {
+    out.push("");
+    out.push(`## Transcript: ${t.title ?? t.path}`);
+    out.push("");
+    out.push(`- path: ${t.path}`);
+    if (t.date) out.push(`- date: ${t.date}`);
+    if (t.participants?.length) out.push(`- participants: ${t.participants.join(", ")}`);
+    out.push(`- turns: ${t.turnCount}`);
+    if (t.speakers.length > 0) {
+      out.push("");
+      out.push("Speaker turn counts:");
+      out.push("");
+      for (const s of t.speakers) out.push(`- ${s.speaker}: ${s.turns}`);
+    }
+    if (t.summary) {
+      out.push("");
+      out.push("### Pre-written summary (AI-generated header — not spoken text)");
+      out.push("");
+      out.push(t.summary);
+    }
+  }
+
+  const cross = digest.crossTranscript;
+  if (cross) {
+    out.push("");
+    out.push("## Cross-transcript signals");
+    out.push("");
+    out.push("Shared speakers (appear in 2+ transcripts):");
+    out.push("");
+    if (cross.sharedSpeakers.length === 0) out.push("- (none)");
+    for (const s of cross.sharedSpeakers) {
+      out.push(`- ${s.speaker} — ${s.transcripts.join(", ")}`);
+    }
+    out.push("");
+    out.push("Recurring terms (frequency hints only — read the chunks before concluding anything):");
+    out.push("");
+    if (cross.recurringTerms.length === 0) out.push("- (none)");
+    for (const rt of cross.recurringTerms) {
+      out.push(
+        `- ${rt.term} — ${rt.transcriptCount} transcripts, ${rt.occurrences} occurrences`,
+      );
+    }
+  }
+
+  out.push("");
+  out.push("## Chunks");
+  for (const c of digest.chunks) {
+    out.push("");
+    out.push(`### Chunk ${c.index} — ${c.transcript}`);
+    out.push("");
+    out.push(c.text);
+  }
+  out.push("");
+  return out.join("\n");
 }
 
 // ---------------------------------------------------------------------------

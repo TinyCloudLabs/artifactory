@@ -18,16 +18,14 @@ angle, writing the script, critiquing it).
   order). Copy the key from the TinyCloud Secret Manager into `.env` for
   now. Digest, verify, and save need no key.
 
-## ⚠️ Until live-verified
+## Live-verified 2026-06-10
 
-The Gemini TTS request shape used by `synthesize.ts` and
-`skills/_shared/lib/tts.ts` was built from Google's official docs —
-https://ai.google.dev/gemini-api/docs/speech-generation (read 2026-06-10) —
-but has **not yet been verified against the live API** (no key on the
-build machine). On the first real run, start with the smallest possible
-script (one or two sentences) to confirm the request/response shape and
-audio format cheaply before synthesizing a full episode. If the API has
-drifted, fix `tts.ts` (the only TTS surface) and remove this warning.
+The Gemini TTS request shape in `skills/_shared/lib/tts.ts` (built from
+https://ai.google.dev/gemini-api/docs/speech-generation) was verified
+against the live API on 2026-06-10: single-voice and 2-speaker
+multi-speaker requests both succeeded unchanged, and the response was
+base64 raw PCM with mime `audio/L16;codec=pcm;rate=24000`, exactly as
+documented. No fixes were needed.
 
 Documented surface (same doc): models `gemini-2.5-flash-preview-tts`
 (our default), `gemini-2.5-pro-preview-tts`, `gemini-3.1-flash-tts-preview`;
@@ -49,6 +47,9 @@ bun skills/make-podcast/scripts/digest.ts <transcript-path>... [--max-chunk 8000
 
 Accepts .md/.txt files or directories (recursed). Emits JSON:
 `{ transcripts: [{path, title, date, participants, duration, summary?}], chunks: [...] }`.
+`duration` is computed from the first/last turn timestamps when present
+(Fireflies headers sometimes lie with "Duration: 0 min"), falling back to
+the header value.
 
 ### 2. Pick ONE through-line (your judgment)
 
@@ -107,13 +108,31 @@ critic.** Set `quality.critic_pass: true` only on the survivor, with
 Then verify the quote anchors (script — mandatory):
 
 ```sh
-bun skills/make-podcast/scripts/verify-quotes.ts <artifact.json>
+bun skills/make-podcast/scripts/verify-quotes.ts <artifact.json> --stamp
 ```
 
-Fix or drop failures; only after it passes set
-`quality.quotes_verified: true`. Never hand-set that flag.
+Fix or drop failures and re-run until exit 0. With `--stamp`, full
+verification success writes `quality.quotes_verified: true` into the
+artifact for you (atomic write); on any failure nothing is stamped, and
+an empty `source_quotes` list (exit 0 but suspicious) is never stamped.
+**Never hand-set `quotes_verified`** — `--stamp` is the only sanctioned
+way.
 
 ### 5. Synthesize (script — needs GEMINI_API_KEY)
+
+**First run on a machine/key: smoke-test with one sentence before
+spending on the full episode** (TTS bills per request). Pass `--smoke` so
+the deliberately tiny script doesn't trip the episode duration/pace
+warnings — they're for real episodes, and a one-sentence clip is
+*supposed* to be a few seconds long:
+
+```sh
+echo "This is a one-sentence smoke test." > /tmp/smoke.md
+bun skills/make-podcast/scripts/synthesize.ts /tmp/smoke.md --voice Kore --out /tmp/smoke.wav --smoke
+```
+
+Play the clip; if it sounds right, synthesize the real episode (no
+`--smoke`).
 
 Monologue:
 
@@ -122,7 +141,9 @@ bun skills/make-podcast/scripts/synthesize.ts script.md --voice Kore --out episo
 ```
 
 Dialogue (speaker names must match the script's `Name:` labels; pick two
-distinct voices):
+distinct voices — **suggested pairing: Kore + Puck**, live-verified
+2026-06-10 as clearly distinct and natural together; don't guess blind
+from the 30-voice list):
 
 ```sh
 bun skills/make-podcast/scripts/synthesize.ts script.md \

@@ -2,11 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadTranscripts } from "../skills/_shared/lib/transcript.ts";
+import { loadTranscripts, parseTranscript } from "../skills/_shared/lib/transcript.ts";
 import { slugify, type Artifact } from "../skills/_shared/lib/artifact.ts";
 import {
   buildDigest,
   countWords,
+  renderDigestMarkdown,
   saveArticle,
   verifyArtifactQuotes,
 } from "../skills/write-article/scripts/article.ts";
@@ -131,6 +132,15 @@ describe("buildDigest — single transcript", () => {
     expect(joined).toContain("unversioned");
   });
 
+  test("speakerTurnCounts maps each speaker label to its turn count", async () => {
+    const [t] = await loadTranscripts([pathOne]);
+    const digest = buildDigest([t!]);
+    expect(digest.transcripts[0]?.speakerTurnCounts).toEqual({
+      "Grace Hopper": 2,
+      "Ada Lovelace": 1,
+    });
+  });
+
   test("digest is deterministic", async () => {
     const transcripts = await loadTranscripts([pathOne, pathTwo]);
     const a = JSON.stringify(buildDigest(transcripts));
@@ -164,6 +174,34 @@ describe("buildDigest — collection (multi-transcript)", () => {
     expect(shared[0]?.transcripts.sort()).toEqual([pathOne, pathTwo].sort());
   });
 
+  test("conversational filler and contractions never surface as recurring terms", () => {
+    // Words from the round-2 dogfood report: "data", "cool", "i'll", "guess"
+    // recurring across transcripts drowned out the real signal.
+    const noisy = (title: string) =>
+      parseTranscript(
+        [
+          `# ${title}`,
+          "",
+          "## Transcript",
+          "",
+          "**Ada Lovelace:**",
+          "Cool, I'll guess the data pipeline needs versioned snapshots for replays.",
+          "",
+          "**Grace Hopper:**",
+          "I'll pull the data tomorrow; cool with me, but my guess is the pipeline schema drifted.",
+        ].join("\n"),
+        `${title}.md`,
+      );
+    const digest = buildDigest([noisy("Noisy One"), noisy("Noisy Two")]);
+    const terms = digest.crossTranscript!.recurringTerms.map((t) => t.term);
+    expect(terms).not.toContain("data");
+    expect(terms).not.toContain("cool");
+    expect(terms).not.toContain("i'll");
+    expect(terms).not.toContain("guess");
+    // Real signal survives the stopword pass.
+    expect(terms).toContain("pipeline");
+  });
+
   test("directory input loads both transcripts into one collection digest", async () => {
     const transcripts = await loadTranscripts([dir]);
     const digest = buildDigest(transcripts);
@@ -172,6 +210,23 @@ describe("buildDigest — collection (multi-transcript)", () => {
       "Infra Sync Alpha",
       "Infra Sync Beta",
     ]);
+  });
+});
+
+describe("renderDigestMarkdown", () => {
+  test("renders metadata, per-speaker turn counts, cross-transcript hints, and chunks", async () => {
+    const transcripts = await loadTranscripts([pathOne, pathTwo]);
+    const md = renderDigestMarkdown(buildDigest(transcripts));
+    expect(md).toContain("# Article survey digest");
+    expect(md).toContain("- mode: collection");
+    expect(md).toContain("## Transcript: Infra Sync Alpha");
+    expect(md).toContain("- Grace Hopper: 2");
+    expect(md).toContain("- Ada Lovelace: 1");
+    expect(md).toContain("## Cross-transcript signals");
+    expect(md).toContain("latency — 2 transcripts");
+    // Chunks carry the full transcript text as plain sections.
+    expect(md).toContain("## Chunks");
+    expect(md).toContain("unversioned");
   });
 });
 
@@ -184,10 +239,30 @@ describe("survey.ts CLI", () => {
     expect(digest.crossTranscript.recurringTerms.map((t: { term: string }) => t.term)).toContain(
       "latency",
     );
+    expect(digest.transcripts[0].speakerTurnCounts["Grace Hopper"]).toBe(2);
   });
 
-  test("exits non-zero without paths", () => {
+  test("--format md emits the markdown digest instead of JSON", () => {
+    const res = runScript("survey.ts", pathOne, pathTwo, "--format", "md");
+    expect(res.exitCode).toBe(0);
+    expect(() => JSON.parse(res.stdout)).toThrow();
+    expect(res.stdout).toContain("# Article survey digest");
+    expect(res.stdout).toContain("- Ada Lovelace: 1");
+    expect(res.stdout).toContain("unversioned");
+  });
+
+  test("--format md with --out writes the markdown file", async () => {
+    const outPath = join(dir, "digest.md");
+    const res = runScript("survey.ts", pathOne, "--format", "md", "--out", outPath);
+    expect(res.exitCode).toBe(0);
+    const md = await readFile(outPath, "utf8");
+    expect(md).toContain("- mode: single");
+    expect(md).toContain("Speaker turn counts:");
+  });
+
+  test("exits non-zero without paths or with a bad --format", () => {
     expect(runScript("survey.ts").exitCode).toBe(2);
+    expect(runScript("survey.ts", pathOne, "--format", "yaml").exitCode).toBe(2);
   });
 });
 
@@ -233,6 +308,65 @@ describe("verify-quotes.ts CLI integration", () => {
     await writeFile(artifactPath, JSON.stringify(articleArtifact({ source_quotes: [] })));
     const res = runScript("verify-quotes.ts", artifactPath);
     expect(res.exitCode).toBe(1);
+  });
+
+  test("without --stamp the artifact file is untouched on success", async () => {
+    const artifactPath = join(dir, "artifact-no-stamp.json");
+    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false } });
+    await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
+    const before = await readFile(artifactPath, "utf8");
+    const res = runScript("verify-quotes.ts", artifactPath);
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).not.toContain("Stamped");
+    expect(await readFile(artifactPath, "utf8")).toBe(before);
+  });
+
+  test("--stamp on success sets quality.quotes_verified=true, preserving the rest", async () => {
+    const artifactPath = join(dir, "artifact-stamp.json");
+    const artifact = articleArtifact({
+      quality: { critic_pass: true, quotes_verified: false, notes: "pre-stamp" },
+    });
+    await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
+    const res = runScript("verify-quotes.ts", artifactPath, "--stamp");
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("Stamped quality.quotes_verified=true");
+    const after = JSON.parse(await readFile(artifactPath, "utf8"));
+    expect(after.quality.quotes_verified).toBe(true);
+    expect(after.quality.critic_pass).toBe(true);
+    expect(after.quality.notes).toBe("pre-stamp");
+    expect(after.headline).toBe(artifact.headline);
+    expect(after.source_quotes).toHaveLength(2);
+  });
+
+  test("--stamp on failure exits 1 and does not flip the flag", async () => {
+    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false } });
+    (artifact.source_quotes as { quote: string }[])[0]!.quote =
+      "the cache keys lack versioning so deploys wipe the cache";
+    const artifactPath = join(dir, "artifact-stamp-fail.json");
+    await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
+    const res = runScript("verify-quotes.ts", artifactPath, "--stamp");
+    expect(res.exitCode).toBe(1);
+    const after = JSON.parse(await readFile(artifactPath, "utf8"));
+    expect(after.quality.quotes_verified).toBe(false);
+  });
+
+  test("--stamp with empty source_quotes exits 1 and never stamps", async () => {
+    const artifactPath = join(dir, "artifact-stamp-empty.json");
+    const artifact = articleArtifact({
+      source_quotes: [],
+      quality: { critic_pass: true, quotes_verified: false },
+    });
+    await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
+    const res = runScript("verify-quotes.ts", artifactPath, "--stamp");
+    expect(res.exitCode).toBe(1);
+    const after = JSON.parse(await readFile(artifactPath, "utf8"));
+    expect(after.quality.quotes_verified).toBe(false);
+  });
+
+  test("unknown flags exit 2 with usage", () => {
+    const res = runScript("verify-quotes.ts", "whatever.json", "--bogus");
+    expect(res.exitCode).toBe(2);
+    expect(res.stderr).toContain("usage:");
   });
 });
 
