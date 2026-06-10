@@ -60,8 +60,17 @@ const TRANSCRIPT_EXTENSIONS = new Set([".md", ".txt"]);
 
 // "**Samuel Gbafa:**" / "**Samuel Gbafa (01:29:10):**" — bold speaker marker.
 const BOLD_TURN_RE = /^\*\*([^*\n]+?)(?:\s*\((\d{1,2}:\d{2}(?::\d{2})?)\))?\s*:\s*\*\*\s*(.*)$/;
-// "Samuel Gbafa: hey" / "[00:12] Samuel: hey" — plain diarized marker.
-const PLAIN_TURN_RE = /^(?:\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*)?([A-Z][\w.'-]*(?:\s+[\w.'-]+){0,4}):\s+(.*)$/;
+// "Samuel Gbafa: hey" / "[00:12] Samuel: hey" / "Speaker 2: hey" — plain
+// diarized marker. The label must look like a NAME, not prose: at most 3
+// words, the first capitalized, the rest capitalized or numeric (diarizers
+// emit "Speaker 1"). Apostrophes (O'Brien), hyphens (Mary-Jane), and
+// periods (Dr.) are allowed inside words. This deliberately rejects prose
+// lines containing a colon — "Same root cause: deploys flush the cache."
+// must stay attached to the preceding turn, not become a phantom speaker.
+const NAME_WORD = String.raw`[A-Z][\w.'’-]*`;
+const PLAIN_TURN_RE = new RegExp(
+  String.raw`^(?:\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*)?(${NAME_WORD}(?:\s+(?:${NAME_WORD}|\d+)){0,2}):\s+(.*)$`,
+);
 // "**Date:** 2026-05-12" — header metadata line.
 const META_LINE_RE = /^\*\*([A-Za-z ]+):\*\*\s*(.*)$/;
 
@@ -86,6 +95,7 @@ export function parseTranscript(raw: string, path = ""): Transcript {
   const sectionText: Record<string, string[]> = {};
   const turnLines: { speaker?: string; timestamp?: string; lines: string[] }[] = [];
   let sawTranscriptHeading = false;
+  let sawBoldTurn = false;
 
   const inTurnRegion = () =>
     !sawTranscriptHeading || section === "transcript";
@@ -114,6 +124,7 @@ export function parseTranscript(raw: string, path = ""): Transcript {
     if (inTurnRegion()) {
       const bold = BOLD_TURN_RE.exec(line);
       if (bold?.[1] !== undefined) {
+        sawBoldTurn = true;
         turnLines.push({
           speaker: bold[1].trim(),
           timestamp: bold[2],
@@ -121,7 +132,11 @@ export function parseTranscript(raw: string, path = ""): Transcript {
         });
         continue;
       }
-      const plain = PLAIN_TURN_RE.exec(line);
+      // Format dominance: files that mark turns in bold (Fireflies /
+      // Gemini-sync) never mix in plain "Name: text" markers, so once a
+      // bold turn has been seen, a name-like colon line ("Plan B: ship
+      // Friday.") is prose inside the current turn, not a speaker change.
+      const plain = sawBoldTurn ? null : PLAIN_TURN_RE.exec(line);
       if (plain?.[2] !== undefined && plain[3] !== undefined) {
         turnLines.push({
           speaker: plain[2].trim(),

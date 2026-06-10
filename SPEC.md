@@ -190,6 +190,10 @@ Both resolve keys via `getSecret("GEMINI_API_KEY")` unless given one.
   than pads.
 - **2026-06-10** No hardcoded machine paths anywhere in skills/ or lib
   code; transcript paths are invocation-time arguments.
+- **2026-06-10** Phase 2 artifact skills landed (illustrate-card,
+  write-article, make-podcast); Gemini TTS shape grounded on
+  ai.google.dev speech-generation docs, live-unverified pending
+  `GEMINI_API_KEY`.
 
 ## Assumptions
 

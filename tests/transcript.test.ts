@@ -78,6 +78,69 @@ describe("parseTranscript — bare diarized + plain fallback", () => {
   });
 });
 
+describe("parseTranscript — prose-with-colon regression", () => {
+  test("prose line containing a colon stays attached to the preceding speaker", () => {
+    const raw = [
+      "Ada: The cache invalidation bug only shows up on the second deploy.",
+      "Same root cause: deploys flush the cache.",
+      "Grace: Because the first deploy warms the cache with stale keys.",
+    ].join("\n");
+    const t = parseTranscript(raw);
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns[0]?.speaker).toBe("Ada");
+    expect(t.turns[0]?.text).toContain("Same root cause: deploys flush the cache.");
+    expect(t.turns.map((turn) => turn.speaker)).not.toContain("Same root cause");
+  });
+
+  test("lowercase and over-long colon labels never start turns", () => {
+    const raw = [
+      "Ada: Here's the plan.",
+      "first thing tomorrow: revert the deploy.",
+      "The Next Step For Us All: rotate on-call.",
+    ].join("\n");
+    const t = parseTranscript(raw);
+    expect(t.turns).toHaveLength(1);
+    expect(t.turns[0]?.speaker).toBe("Ada");
+    expect(t.turns[0]?.text).toContain("rotate on-call.");
+  });
+
+  test("name-like colon lines inside a bold-format file are body text, not turns", () => {
+    const raw = [
+      "## Transcript",
+      "",
+      "**Ada Lovelace:**",
+      "Two options on the table.",
+      "Plan B: we ship Friday.",
+      "",
+      "**Grace Hopper:**",
+      "Friday works.",
+    ].join("\n");
+    const t = parseTranscript(raw);
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns[0]?.speaker).toBe("Ada Lovelace");
+    expect(t.turns[0]?.text).toContain("Plan B: we ship Friday.");
+  });
+
+  test("real diarization name shapes still parse as turns", () => {
+    const raw = [
+      "[00:12] Grace Hopper: Timestamped turn.",
+      "O'Brien: Apostrophe surname.",
+      "Mary-Jane Watson: Hyphenated first name.",
+      "Speaker 2: Numbered diarizer label.",
+      "Ada Augusta King: Three-word name.",
+    ].join("\n");
+    const t = parseTranscript(raw);
+    expect(t.turns.map((turn) => turn.speaker)).toEqual([
+      "Grace Hopper",
+      "O'Brien",
+      "Mary-Jane Watson",
+      "Speaker 2",
+      "Ada Augusta King",
+    ]);
+    expect(t.turns[0]?.timestamp).toBe("00:12");
+  });
+});
+
 describe("loadTranscripts", () => {
   test("walks directories recursively, picking only .md/.txt", async () => {
     const all = await loadTranscripts([FIXTURES]);
