@@ -2,7 +2,11 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FeedbackSummary } from "../../skills/_shared/lib/feedback.ts";
+import {
+  FEEDBACK_ACTIONS as CANONICAL_ACTIONS,
+  type FeedbackSummary,
+} from "../../skills/_shared/lib/feedback.ts";
+import { FEEDBACK_ACTIONS as MIRRORED_ACTIONS } from "../src/types.ts";
 import { createApp } from "../src/app.ts";
 import { makeFixture, type Fixture } from "./fixtures.ts";
 
@@ -30,6 +34,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await fx.cleanup();
   await rm(stateDir, { recursive: true, force: true });
+});
+
+// Drift guard: feed/src/types.ts mirrors the canonical action union from
+// skills/_shared/lib/feedback.ts (the browser bundle can't import node:fs).
+// Tests run under bun, so they can import both — fail loudly on divergence
+// instead of surfacing as buttons whose POSTs 400.
+test("FEEDBACK_ACTIONS mirror matches canonical", () => {
+  expect([...MIRRORED_ACTIONS]).toEqual([...CANONICAL_ACTIONS]);
 });
 
 describe("POST /api/feedback", () => {

@@ -103,6 +103,11 @@ export interface FeedbackSummary {
  * is a single appendFile call of one `\n`-terminated line — atomic enough
  * for a single-user local log (no interleaved partial lines from one
  * process; readEvents tolerates a trailing partial line regardless).
+ *
+ * Validation mirrors `parseEventLine` so the invariant holds: anything
+ * appended here is readable by `readEvents` — a JS caller (or a TS caller
+ * spreading partial data) can't persist an event that silently vanishes
+ * on read.
  */
 export async function appendEvent(
   filePath: string,
@@ -112,6 +117,18 @@ export async function appendEvent(
     throw new Error(
       `invalid action "${String(event.action)}" — must be one of ${FEEDBACK_ACTIONS.join(", ")}`,
     );
+  }
+  if (typeof event.artifact_id !== "string" || !event.artifact_id.trim()) {
+    throw new Error("invalid artifact_id — must be a non-empty string");
+  }
+  if (typeof event.artifact_type !== "string") {
+    throw new Error("invalid artifact_type — must be a string");
+  }
+  if (typeof event.ts !== "string" || !event.ts.trim()) {
+    throw new Error("invalid ts — must be a non-empty ISO 8601 string");
+  }
+  if (event.note !== undefined && typeof event.note !== "string") {
+    throw new Error("invalid note — must be a string when present");
   }
   await mkdir(dirname(filePath), { recursive: true });
   await appendFile(filePath, JSON.stringify(event) + "\n", "utf8");
@@ -136,7 +153,8 @@ function parseEventLine(line: string): FeedbackEvent | null {
     action: e.action,
     ts: e.ts,
   };
-  if (typeof e.note === "string" && e.note.trim()) event.note = e.note;
+  // Trim to match the API write path, which stores trimmed notes.
+  if (typeof e.note === "string" && e.note.trim()) event.note = e.note.trim();
   return event;
 }
 
@@ -214,7 +232,11 @@ export function summarizeEvents(
     }
     row.actions[event.action] += 1;
     row.total += 1;
-    if (event.ts > row.last_ts) row.last_ts = event.ts;
+    // Compare instants, not strings — events written by skills/by hand can
+    // carry mixed ISO forms ("…Z" vs "….000Z" vs offsets) that mis-order
+    // lexically. NaN comparisons are false, so unparseable ts keeps the
+    // first-seen value (same tolerance as the read side).
+    if (Date.parse(event.ts) > Date.parse(row.last_ts)) row.last_ts = event.ts;
     if (event.note) {
       row.notes.push({ action: event.action, note: event.note, ts: event.ts });
     }

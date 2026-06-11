@@ -305,7 +305,14 @@ export function Card({
 }
 
 /** Full-page view for an article (or any card opened directly). */
-export function FullCard({ card }: { card: FeedCard }) {
+export function FullCard({
+  card,
+  onHide,
+}: {
+  card: FeedCard;
+  /** "less" semantics: remove from feed. The article view hides + returns. */
+  onHide?: (id: string) => void;
+}) {
   return (
     <article className="chassis article">
       {card.hero_image_url && (
@@ -337,7 +344,7 @@ export function FullCard({ card }: { card: FeedCard }) {
             ))}
           </div>
         )}
-        <FeedbackBar card={card} />
+        <FeedbackBar card={card} onHide={onHide} />
         <Foot card={card} />
       </div>
     </article>

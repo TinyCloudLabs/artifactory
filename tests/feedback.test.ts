@@ -60,12 +60,52 @@ describe("appendEvent / readEvents", () => {
     });
   });
 
+  test("readEvents trims notes, matching the API write path", async () => {
+    await withTmp(async (dir) => {
+      const file = join(dir, "events.jsonl");
+      await appendEvent(file, ev({ note: "  padded note  " }));
+      await appendEvent(file, ev({ note: "   " })); // whitespace-only → dropped
+      const events = await readEvents(file);
+      expect(events[0]!.note).toBe("padded note");
+      expect(events[1]!.note).toBeUndefined();
+    });
+  });
+
   test("appendEvent rejects an out-of-enum action", async () => {
     await withTmp(async (dir) => {
       const file = join(dir, "events.jsonl");
       await expect(
         appendEvent(file, { ...ev(), action: "meh" as never }),
       ).rejects.toThrow(/invalid action/);
+    });
+  });
+
+  test("appendEvent mirrors read-side validation — nothing unreadable is persisted", async () => {
+    await withTmp(async (dir) => {
+      const file = join(dir, "events.jsonl");
+      const bad: Array<[Partial<Record<keyof FeedbackEvent, unknown>>, RegExp]> = [
+        [{ artifact_id: "" }, /artifact_id/],
+        [{ artifact_id: "   " }, /artifact_id/],
+        [{ artifact_id: undefined }, /artifact_id/],
+        [{ artifact_id: 42 }, /artifact_id/],
+        [{ artifact_type: undefined }, /artifact_type/],
+        [{ artifact_type: 7 }, /artifact_type/],
+        [{ ts: "" }, /ts/],
+        [{ ts: "  " }, /ts/],
+        [{ ts: undefined }, /ts/],
+        [{ note: 42 }, /note/],
+      ];
+      for (const [overrides, msg] of bad) {
+        await expect(
+          appendEvent(file, { ...ev(), ...overrides } as FeedbackEvent),
+        ).rejects.toThrow(msg);
+      }
+      // none of the rejected events touched the log (file never created)
+      expect(await readEvents(file)).toEqual([]);
+
+      // anything appendEvent accepts, readEvents returns
+      await appendEvent(file, ev({ artifact_type: "" })); // empty type is read-valid
+      expect((await readEvents(file)).length).toBe(1);
     });
   });
 
@@ -176,6 +216,16 @@ describe("summarizeEvents", () => {
     expect(pricing.artifacts).toBe(1);
 
     expect(s.by_type.find((r) => r.key === "article")!.total).toBe(1);
+  });
+
+  test("last_ts compares instants, not strings, across mixed ISO forms", () => {
+    const s = summarizeEvents([
+      // lexically "…30Z" > "…00.000Z" would be wrong here: the offset form
+      // below is the later instant.
+      ev({ ts: "2026-06-11T09:00:30Z" }),
+      ev({ ts: "2026-06-11T11:00:00.000+01:00" }), // = 10:00:00Z
+    ]);
+    expect(s.by_artifact[0]!.last_ts).toBe("2026-06-11T11:00:00.000+01:00");
   });
 
   test("empty input produces an empty, well-shaped summary", () => {

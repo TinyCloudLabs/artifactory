@@ -15,6 +15,10 @@ from the feedback event log (`feedback/events.jsonl`).
   when the evidence changes.
 - A human may promote a `[learned]` bullet by rewriting it as an untagged
   line; from then on it is human-authored and off-limits to agents.
+- **The `- [learned]` prefix at bullet start is reserved for agent-derived
+  lines** — humans must never author it (to promote a bullet, delete the
+  tag). A `[learned]` mention anywhere other than the start of a bullet
+  (like the ones in this preamble) is plain text, not a tagged bullet.
 
 ## Topics
 
