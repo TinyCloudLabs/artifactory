@@ -8,8 +8,8 @@
 // the feed boots with a live session.
 //
 // Host config copied from pulse-radio (src/lib/auth.ts): https://openkey.so —
-// also the SDK default. Styling is minimal-clean on purpose; the Folio
-// redesign will restyle this surface.
+// also the SDK default. Styled with Folio's existing vocabulary (masthead /
+// feed-status / quiet-link); a bespoke sign-in treatment can follow up.
 
 import { useEffect, useState, type ReactNode } from "react";
 
@@ -35,7 +35,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   if (state === "checking") {
-    return <div className="feed-status">-- CHECKING ACCESS --</div>;
+    return (
+      <div className="feed-status">
+        <p className="feed-status-sub">Checking access</p>
+      </div>
+    );
   }
   if (state === "signedout") {
     return <SignIn />;
@@ -74,22 +78,26 @@ export function SignIn() {
   };
 
   return (
-    <header className="masthead chassis">
-      <div className="screen" style={{ flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+    <>
+      <header className="masthead">
         <div>
-          <div className="masthead-title">DISTILLERY</div>
-          <div className="masthead-sub">PRIVATE FEED &middot; SIGN IN REQUIRED</div>
+          <h1 className="masthead-title">Distillery</h1>
+          <p className="masthead-sub">Private feed &middot; sign in required</p>
         </div>
+      </header>
+      <div className="feed-status">
+        <p className="feed-status-line">This feed is private.</p>
+        <p className="feed-status-sub">A passkey on an allowlisted OpenKey unlocks it</p>
         <button
           type="button"
-          className="po-btn accent"
+          className="quiet-link"
           disabled={busy}
           onClick={() => void onSignIn()}
         >
-          {busy ? "AUTHENTICATING…" : "▶ SIGN IN WITH OPENKEY"}
+          {busy ? "Authenticating…" : "Sign in with OpenKey"}
         </button>
-        {error && <div className="feed-error">! {error}</div>}
       </div>
-    </header>
+      {error && <div className="feed-error">! {error}</div>}
+    </>
   );
 }

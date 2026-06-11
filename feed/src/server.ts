@@ -1,7 +1,11 @@
 // Entrypoint: bun src/server.ts
 //   ARTIFACTS_DIR              artifacts root (default ../artifacts relative to feed/)
 //   FEEDBACK_FILE              feedback JSONL log (default ../feedback/events.jsonl relative to feed/)
+//   PREFERENCES_FILE           preferences markdown (default ../PREFERENCES.md relative to feed/)
 //   PORT                       listen port (default 4242)
+//   HOST                       bind address (default 127.0.0.1 — loopback only; the
+//                              cloudflared tunnel connects via localhost, so the default
+//                              holds for production. Set HOST=0.0.0.0 for direct LAN use.)
 //   OPENKEY_ALLOWED_ADDRESSES  comma-separated OpenKey addresses allowed to sign in
 //   AUTH_DISABLED              "1" bypasses the OpenKey gate entirely (local HTTP dev)
 //   FEED_SESSIONS_DB           override sessions.db path (default feed/sessions.db)
@@ -15,6 +19,10 @@ const artifactsDir = resolve(feedRoot, process.env.ARTIFACTS_DIR ?? "../artifact
 const feedbackFile = resolve(
   feedRoot,
   process.env.FEEDBACK_FILE ?? "../feedback/events.jsonl",
+);
+const preferencesFile = resolve(
+  feedRoot,
+  process.env.PREFERENCES_FILE ?? "../PREFERENCES.md",
 );
 const distDir = resolve(feedRoot, "web/dist");
 const port = parseInt(process.env.PORT ?? "4242", 10);
@@ -31,14 +39,20 @@ const app = createApp({
   artifactsDir,
   distDir,
   feedbackFile,
+  preferencesFile,
   auth: { disabled: authDisabled, allowedAddresses, sessionsDbPath },
 });
 
-Bun.serve({ port, fetch: app.fetch });
+// Loopback by default: the cloudflared tunnel connects via localhost. Set
+// HOST=0.0.0.0 for direct LAN use — the OpenKey gate covers /api/* and
+// /media/*, but only when AUTH_DISABLED is not set.
+const hostname = process.env.HOST ?? "127.0.0.1";
+const server = Bun.serve({ port, hostname, fetch: app.fetch });
 
-console.log(`distillery feed  http://localhost:${port}`);
+console.log(`distillery feed  http://${server.hostname}:${server.port}`);
 console.log(`artifacts        ${artifactsDir}`);
 console.log(`feedback         ${feedbackFile}`);
+console.log(`preferences      ${preferencesFile}`);
 if (authDisabled) {
   console.warn(
     [

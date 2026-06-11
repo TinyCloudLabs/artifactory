@@ -27,10 +27,12 @@ beforeAll(async () => {
   stateDir = await mkdtemp(join(tmpdir(), "distillery-auth-"));
   await writeFile(join(stateDir, "index.html"), "<!doctype html><title>feed</title>");
   sessionsDbPath = join(stateDir, "sessions.db");
+  await writeFile(join(stateDir, "PREFERENCES.md"), "# Preferences\n");
   app = createApp({
     artifactsDir: fx.dir,
     distDir: stateDir,
     feedbackFile: join(stateDir, "events.jsonl"),
+    preferencesFile: join(stateDir, "PREFERENCES.md"),
     auth: {
       sessionsDbPath,
       allowedAddresses: [ALLOWED],
@@ -83,6 +85,24 @@ describe("unauthenticated requests", () => {
   test("/media/* → 401", async () => {
     const res = await app.request("/media/podcast/newest-podcast/hero.png");
     expect(res.status).toBe(401);
+  });
+
+  test("/api/preferences GET → 401 (no ETag leaks)", async () => {
+    const res = await app.request("/api/preferences");
+    expect(res.status).toBe(401);
+    expect(res.headers.get("etag")).toBeNull();
+  });
+
+  test("/api/preferences PUT → 401 before any ETag logic", async () => {
+    // No If-Match on purpose: the handler would answer 428 — a 401 proves
+    // the gate runs before the optimistic-concurrency checks.
+    const res = await app.request("/api/preferences", {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: "injected standing instructions",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
   test("SPA shell stays reachable (sign-in page must load)", async () => {
