@@ -11,6 +11,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../src/app.ts";
+import { resolveAuth } from "../src/auth.ts";
 import { SESSION_COOKIE_NAME, SessionStore } from "../src/session.ts";
 import { makeFixture, type Fixture } from "./fixtures.ts";
 
@@ -105,6 +106,52 @@ describe("unauthenticated requests", () => {
   });
 });
 
+describe("percent-encoded path gate bypass (regression)", () => {
+  // Hono percent-decodes the path before route matching, so /%61pi/cards is
+  // served by the /api/cards handler. The gate used to do its own prefix
+  // check on the RAW pathname (no decode) and waved the encoded form
+  // through — a full auth bypass. The gate now rides Hono's own matcher
+  // (app.use("/api/*"), app.use("/media/*")) so there is exactly one path
+  // parser and the encoded forms are gated too.
+
+  test("/%61pi/cards (encoded /api) → 401, no card data", async () => {
+    const res = await app.request("/%61pi/cards");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  test("/%6dedia/<type>/<slug>/<file> (encoded /media) → 401, no bytes", async () => {
+    const res = await app.request("/%6dedia/podcast/newest-podcast/hero.png");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  test("/%2561pi/cards (double-encoded) never reaches the API", async () => {
+    // Hono decodes exactly once: %2561 → %61, which matches neither /api/*
+    // nor the API handler — it falls through to the open SPA shell. The
+    // assertion that matters: no card JSON leaks.
+    const res = await app.request("/%2561pi/cards");
+    const text = await res.text();
+    expect(text).not.toContain('"cards"');
+    expect(text).toContain("<title>feed</title>");
+  });
+
+  test("/api/cards?x=%2e (encoded query string) → 401", async () => {
+    const res = await app.request("/api/cards?x=%2e");
+    expect(res.status).toBe(401);
+  });
+
+  test("with a valid session, the encoded path hits the same handler as /api/cards", async () => {
+    // Gate and router share one parser: what the router serves, the gate
+    // gates — signed in, both spellings reach the handler.
+    const cookie = cookieFrom(await signIn(ALLOWED));
+    const encoded = await app.request("/%61pi/cards", { headers: { cookie } });
+    expect(encoded.status).toBe(200);
+    const body = (await encoded.json()) as { cards: unknown[] };
+    expect(Array.isArray(body.cards)).toBe(true);
+  });
+});
+
 describe("POST /auth/openkey", () => {
   test("allowlisted address → session cookie → /api + /media unlock", async () => {
     const res = await signIn(ALLOWED);
@@ -183,6 +230,34 @@ describe("session lifecycle", () => {
     const res = await app.request("/api/cards", { headers: { cookie } });
     expect(res.status).toBe(401);
     expect(store.get(session.session_id)).toBeNull();
+  });
+
+  test("re-sign-in invalidates the previous session cookie (single-user)", async () => {
+    const oldCookie = cookieFrom(await signIn(ALLOWED));
+    expect((await app.request("/api/cards", { headers: { cookie: oldCookie } })).status).toBe(200);
+
+    const newCookie = cookieFrom(await signIn(ALLOWED));
+    expect(newCookie).not.toBe(oldCookie);
+
+    // Old token is dead the moment the new session is minted…
+    expect((await app.request("/api/cards", { headers: { cookie: oldCookie } })).status).toBe(401);
+    // …and the new one works.
+    expect((await app.request("/api/cards", { headers: { cookie: newCookie } })).status).toBe(200);
+  });
+
+  test("expired rows are purged at startup (resolveAuth → startPurgeTimer)", async () => {
+    const dbPath = join(stateDir, "startup-purge.db");
+    const seed = new SessionStore(dbPath);
+    seed.create({ address: ALLOWED }, -1000); // already expired
+    const live = seed.create({ address: "0x2222222222222222222222222222222222222222" });
+    seed.close();
+
+    const auth = resolveAuth({ sessionsDbPath: dbPath, allowedAddresses: [ALLOWED] });
+    // startPurgeTimer ran at startup: nothing expired is left to purge…
+    expect(auth.store!.purgeExpired()).toBe(0);
+    // …and live rows survived.
+    expect(auth.store!.get(live.session_id)).not.toBeNull();
+    auth.store!.close();
   });
 
   test("signout kills the session", async () => {

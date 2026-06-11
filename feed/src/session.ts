@@ -21,6 +21,7 @@ import { randomBytes } from "node:crypto";
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const SESSION_COOKIE_NAME = "distillery_session";
+export const PURGE_INTERVAL_MS = 60 * 60 * 1000; // hourly
 
 /** Default: feed/sessions.db (this file lives in feed/src/). */
 export const DEFAULT_SESSIONS_DB_PATH = resolve(
@@ -51,6 +52,7 @@ export interface SessionRow {
 export class SessionStore {
   readonly path: string;
   private db: Database;
+  private purgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(path: string = DEFAULT_SESSIONS_DB_PATH) {
     this.path = path;
@@ -127,6 +129,18 @@ export class SessionStore {
     this.db.query(`DELETE FROM sessions WHERE session_id = ?`).run(session_id);
   }
 
+  /**
+   * Delete every session for an address (lowercased on insert, so compare
+   * lowercased). Called on sign-in so re-auth invalidates old cookies
+   * instead of accumulating live tokens (single-user model).
+   */
+  deleteForAddress(address: string): number {
+    const res = this.db
+      .query(`DELETE FROM sessions WHERE address = ?`)
+      .run(address.toLowerCase());
+    return Number(res.changes ?? 0);
+  }
+
   purgeExpired(): number {
     const res = this.db
       .query(`DELETE FROM sessions WHERE expires_at < ?`)
@@ -134,7 +148,23 @@ export class SessionStore {
     return Number(res.changes ?? 0);
   }
 
+  /**
+   * Purge expired rows now and then hourly. The timer is unref'd so it never
+   * keeps the process (or the test runner) alive. Idempotent; cleared by
+   * close().
+   */
+  startPurgeTimer(intervalMs: number = PURGE_INTERVAL_MS): void {
+    this.purgeExpired();
+    if (this.purgeTimer) return;
+    this.purgeTimer = setInterval(() => this.purgeExpired(), intervalMs);
+    this.purgeTimer.unref?.();
+  }
+
   close(): void {
+    if (this.purgeTimer) {
+      clearInterval(this.purgeTimer);
+      this.purgeTimer = null;
+    }
     this.db.close();
   }
 }

@@ -33,8 +33,17 @@ import {
   type SessionRow,
 } from "./session.ts";
 
-/** Path prefixes that require a session. Everything else is open. */
-export const GATED_PREFIXES = ["/api/", "/media/"] as const;
+/**
+ * Route patterns that require a session, registered via Hono's own matcher
+ * (`app.use(pattern, ...)`). Everything else is open.
+ *
+ * SECURITY: the gate MUST use Hono's matcher — never a hand-rolled prefix
+ * check on the raw URL. Hono percent-decodes the path before matching
+ * routes, so a raw-URL check sees `/%61pi/cards` while the router serves
+ * `/api/cards`: two parsers, one bypass. With the gate registered as route
+ * middleware there is a single parser and the encoded form is gated too.
+ */
+export const GATED_ROUTES = ["/api/*", "/media/*"] as const;
 
 export interface AuthOptions {
   /** Override the sessions.db path (tests point this at a tmpdir). */
@@ -75,11 +84,11 @@ export function resolveAuth(opts: AuthOptions = {}): ResolvedAuth {
     ).map((a) => a.toLowerCase()),
   );
   const store = disabled ? null : new SessionStore(opts.sessionsDbPath);
+  // Evict expired rows at startup and hourly thereafter (unref'd timer —
+  // never keeps the process or test runner alive). Lazy eviction on access
+  // alone lets abandoned sessions accumulate forever.
+  store?.startPurgeTimer();
   return { store, allowed, disabled };
-}
-
-function isGated(path: string): boolean {
-  return GATED_PREFIXES.some((p) => path.startsWith(p));
 }
 
 function sessionFromCookie(c: Context<AuthEnv>, auth: ResolvedAuth): SessionRow | null {
@@ -89,29 +98,36 @@ function sessionFromCookie(c: Context<AuthEnv>, auth: ResolvedAuth): SessionRow 
 }
 
 /**
- * Gate middleware. Registered as `app.use("*", ...)` so /auth/me can read
- * c.var.session, but only GATED_PREFIXES are actually blocked — the SPA
+ * Permissive session loader. Registered as `app.use("*", ...)` so every
+ * handler (notably /auth/me) can read c.var.session. Never blocks — the SPA
  * shell + static assets stay reachable so the sign-in page can render.
+ */
+export function sessionLoader(auth: ResolvedAuth): MiddlewareHandler<AuthEnv> {
+  return async (c, next) => {
+    c.set("session", auth.disabled ? null : sessionFromCookie(c, auth));
+    return next();
+  };
+}
+
+/**
+ * Blocking gate. Registered on GATED_ROUTES via Hono's matcher (see the
+ * GATED_ROUTES doc comment for why it must not parse the URL itself).
  * Redirect-to-signin is handled client-side off the 401 (hash-routed SPA).
  */
 export function authGate(auth: ResolvedAuth): MiddlewareHandler<AuthEnv> {
   return async (c, next) => {
-    if (auth.disabled) {
-      c.set("session", null);
-      return next();
-    }
-    const session = sessionFromCookie(c, auth);
-    c.set("session", session);
-    if (!session && isGated(new URL(c.req.url).pathname)) {
-      return c.json({ error: "unauthorized" }, 401);
-    }
+    if (auth.disabled) return next();
+    if (!c.var.session) return c.json({ error: "unauthorized" }, 401);
     return next();
   };
 }
 
 /** Mount the gate + /auth routes onto the app. Call BEFORE registering routes. */
 export function setupAuth(app: Hono<AuthEnv>, auth: ResolvedAuth): void {
-  app.use("*", authGate(auth));
+  app.use("*", sessionLoader(auth));
+  for (const pattern of GATED_ROUTES) {
+    app.use(pattern, authGate(auth));
+  }
 
   /**
    * POST /auth/openkey
@@ -144,6 +160,10 @@ export function setupAuth(app: Hono<AuthEnv>, auth: ResolvedAuth): void {
     if (typeof body.keyId === "string") identity.keyId = body.keyId;
     if (typeof body.keyType === "string") identity.keyType = body.keyType;
 
+    // Single-user model: a fresh sign-in invalidates every prior session for
+    // the address, so old cookies stop working instead of staying live for
+    // the rest of their TTL.
+    auth.store.deleteForAddress(address);
     const session = auth.store.create(identity);
     setCookie(c, SESSION_COOKIE_NAME, session.session_id, {
       httpOnly: true,
