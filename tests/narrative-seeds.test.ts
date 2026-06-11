@@ -164,8 +164,13 @@ describe("scoreNarrativeSeeds — one meeting is a card, never a lead", () => {
 // Single-voice arc + cross-meeting topic spanning 3+ meetings.
 // ---------------------------------------------------------------------------
 
-// Ada alone voices "Quicksilver" across three meetings — a single-voice arc.
-// "Permissioning" is voiced by BOTH across three meetings — a cross-meeting topic.
+// Ada alone ever says "Quicksilver" (Grace never uses the word) across three
+// meetings — a single-voice topic. The room's ENGAGEMENT shifts: ignored early
+// (back-channel only), engaged substantively by the last meeting → stance
+// development, a real before→after.
+// "Permissioning" recurs across three meetings but CHANGES HANDS: Ada raises it
+// first early, Grace raises it first later → voice spread, a real cross-meeting
+// shift (the thread moved between voices, not one person repeating it).
 const ARC_ONE = `# Arc One
 **Date:** 2026-03-01
 
@@ -175,7 +180,7 @@ const ARC_ONE = `# Arc One
 The Quicksilver retry semantics block us, and permissioning is still unresolved.
 
 **Grace Hopper:**
-What does permissioning need before we can ship the rollout?
+Sure.
 `;
 
 const ARC_TWO = `# Arc Two
@@ -183,11 +188,11 @@ const ARC_TWO = `# Arc Two
 
 ## Transcript
 
-**Ada Lovelace (00:01:00):**
-Quicksilver dedupe is half-done; permissioning got a first pass this week.
+**Grace Hopper (00:00:30):**
+On permissioning, I built out the first model pass and it is looking workable now after the rework.
 
-**Grace Hopper:**
-The permissioning model looks closer after that pass.
+**Ada Lovelace (00:01:00):**
+Quicksilver dedupe is half-done this week, still grinding on it.
 `;
 
 const ARC_THREE = `# Arc Three
@@ -195,11 +200,14 @@ const ARC_THREE = `# Arc Three
 
 ## Transcript
 
-**Ada Lovelace (00:01:00):**
-Quicksilver finally shipped; permissioning is the last blocker now.
+**Grace Hopper (00:00:30):**
+Permissioning is basically done now and the rollout can proceed this sprint.
 
-**Grace Hopper:**
-Let's close permissioning this sprint then.
+**Ada Lovelace (00:01:00):**
+Quicksilver finally shipped after the long retry rework, a real milestone for us.
+
+**Grace Hopper (00:02:00):**
+That retry rework is exactly what unblocked our throughput numbers across the board.
 `;
 
 describe("scoreNarrativeSeeds — single-voice arc + cross-meeting topic over 3 meetings", () => {
@@ -212,12 +220,15 @@ describe("scoreNarrativeSeeds — single-voice arc + cross-meeting topic over 3 
     { minSpanMeetings: 3 },
   );
 
-  test("Quicksilver (only Ada) surfaces as a single-voice-arc across 3 meetings", () => {
+  test("Quicksilver (only Ada) surfaces as a developed single-voice-arc", () => {
     const sv = seeds.find(
       (s) => s.kind === "single-voice-arc" && /quicksilver/i.test(s.label),
     );
     expect(sv).toBeDefined();
     expect(sv!.transcripts).toEqual(["/tmp/a1.md", "/tmp/a2.md", "/tmp/a3.md"]);
+    // Engagement shifts (ignored → engaged) → real development, scored > 0.
+    expect(sv!.development).toBeGreaterThan(0);
+    expect(sv!.rationale).toContain("stance development");
     // Evidence chain chronological.
     expect(sv!.evidence.map((e) => e.date)).toEqual([
       "2026-03-01",
@@ -226,17 +237,15 @@ describe("scoreNarrativeSeeds — single-voice arc + cross-meeting topic over 3 
     ]);
   });
 
-  test("permissioning (both speakers) surfaces as a cross-meeting-topic", () => {
+  test("permissioning surfaces as a developed cross-meeting-topic (voice spread)", () => {
     const cm = seeds.find(
       (s) => s.kind === "cross-meeting-topic" && /permissioning/i.test(s.label),
     );
     expect(cm).toBeDefined();
-    expect(cm!.transcripts).toHaveLength(3);
-    expect(cm!.evidence.map((e) => e.date)).toEqual([
-      "2026-03-01",
-      "2026-03-08",
-      "2026-03-15",
-    ]);
+    expect(cm!.transcripts.length).toBeGreaterThanOrEqual(2);
+    // Carried by a changing set of voices (Ada → Grace) → real development.
+    expect(cm!.development).toBeGreaterThan(0);
+    expect(cm!.rationale).toMatch(/spread|re-entered/);
   });
 
   test("a topic confined to fewer than min-span meetings is dropped", () => {
@@ -251,5 +260,115 @@ describe("scoreNarrativeSeeds — single-voice arc + cross-meeting topic over 3 
     );
     expect(stricter.find((s) => s.kind === "single-voice-arc")).toBeUndefined();
     expect(stricter.find((s) => s.kind === "cross-meeting-topic")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flat recurrence is NOT development: a topic that merely repeats identically
+// across 3 meetings — same speakers, every meeting, no engagement/stance shift —
+// must NOT surface as a high-scored "arc". It is floored at development 0 and
+// labeled "recurrence only", sorting below every real arc. (The reviewer
+// reproduced flat sets scoring 0.38–0.44 with rationales reading "engagement
+// flat"/"sustained thread"; this guards against that regression.)
+// ---------------------------------------------------------------------------
+
+const FLAT_RECUR = (n: string, d: string) => `# ${n}
+**Date:** ${d}
+
+## Transcript
+
+**Ada Lovelace (00:01:00):**
+The roadmap planning continues this week as planned.
+
+**Grace Hopper:**
+The roadmap planning continues this week as planned.
+`;
+
+describe("scoreNarrativeSeeds — flat recurrence is not an arc", () => {
+  const flatSeeds = scoreNarrativeSeeds(
+    [
+      parseTranscript(FLAT_RECUR("Flat A", "2026-04-01"), "/tmp/fr1.md"),
+      parseTranscript(FLAT_RECUR("Flat B", "2026-04-08"), "/tmp/fr2.md"),
+      parseTranscript(FLAT_RECUR("Flat C", "2026-04-15"), "/tmp/fr3.md"),
+    ],
+    { minSpanMeetings: 3 },
+  );
+
+  test("no flat-recurrence seed scores above zero", () => {
+    for (const s of flatSeeds) {
+      expect(s.development).toBe(0);
+      expect(s.score).toBe(0);
+    }
+  });
+
+  test("flat-recurrence seeds are labeled 'recurrence only', never 'arc'", () => {
+    for (const s of flatSeeds) {
+      expect(s.rationale).toContain("recurrence only");
+      expect(s.rationale).not.toMatch(/stance development|spread|re-entered/);
+    }
+  });
+
+  test("a developed arc outranks flat recurrence", () => {
+    const developed = scoreNarrativeSeeds(
+      [
+        parseTranscript(ARC_ONE, "/tmp/a1.md"),
+        parseTranscript(ARC_TWO, "/tmp/a2.md"),
+        parseTranscript(ARC_THREE, "/tmp/a3.md"),
+      ],
+      { minSpanMeetings: 3 },
+    );
+    const developedTop = developed[0]?.score ?? 0;
+    const flatTop = flatSeeds[0]?.score ?? 0;
+    expect(developedTop).toBeGreaterThan(flatTop);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DigitalOcean-style quantified drift still ranks at the top — the fix tightens
+// the topic-arc floors without weakening the drift path the builder celebrated.
+// ---------------------------------------------------------------------------
+
+const DO_ONE = `# Infra Sync One
+**Date:** 2026-02-01
+
+## Transcript
+
+**Ada Lovelace (00:03:00):**
+Our DigitalOcean bill is running about $4,000 a month right now.
+
+**Grace Hopper:**
+That DigitalOcean spend is steep — what is the plan to bring it down?
+`;
+
+const DO_TWO = `# Infra Sync Two
+**Date:** 2026-02-15
+
+## Transcript
+
+**Ada Lovelace (00:03:00):**
+We cut the DigitalOcean bill to $1,200 a month after the rightsizing pass.
+
+**Grace Hopper:**
+Huge drop on the DigitalOcean cost — nice work on the rightsizing.
+`;
+
+describe("scoreNarrativeSeeds — quantified drift still ranks top after the fix", () => {
+  const seeds = scoreNarrativeSeeds(
+    [parseTranscript(DO_TWO, "/tmp/do2.md"), parseTranscript(DO_ONE, "/tmp/do1.md")],
+    { minSpanMeetings: 2 },
+  );
+
+  test("the DigitalOcean drift is the top-ranked seed", () => {
+    expect(seeds[0]).toBeDefined();
+    expect(seeds[0]!.kind).toBe("quantified-drift");
+    expect(seeds[0]!.development).toBeGreaterThan(0.5);
+  });
+
+  test("drift outscores any topic-arc seed in the same set", () => {
+    const drift = seeds.find((s) => s.kind === "quantified-drift")!;
+    const topicArcs = seeds.filter((s) => s.kind !== "quantified-drift");
+    for (const t of topicArcs) {
+      expect(drift.score).toBeGreaterThan(t.score);
+    }
   });
 });

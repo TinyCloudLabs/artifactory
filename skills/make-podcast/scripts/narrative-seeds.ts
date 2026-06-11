@@ -17,12 +17,17 @@
 //                            meetings (a number/commitment that changed = an
 //                            inherent arc).
 //   2. single-voice-arc    — a single-voice topic one person carries across
-//                            3+ meetings (an idea pushed over time).
+//                            3+ meetings WITH an engagement shift (stance
+//                            development).
 //   3. cross-meeting-topic — an entity/term spanning 3+ meetings with 2+
-//                            speakers (a sustained through-line).
+//                            speakers WITH a shift (left/re-entered the agenda,
+//                            or changed hands across voices).
 //
-// Seeds are ranked by development × reach. A set with a drifting quantity
-// scores ABOVE a flat set by construction. Zero seeds is a valid result —
+// Development requires a real shift for EVERY kind — flat recurrence (a topic
+// that merely repeats with no detected movement) is floored at 0, labeled
+// "recurrence only", and sorts below every real arc, just as identical
+// recurring quantities score zero. Seeds are ranked by development × reach. A
+// set with a drifting quantity scores ABOVE a flat set. Zero seeds is valid —
 // it means no through-line shows temporal development, so there is no episode
 // lead (a flat recap of recent meetings is a card, not an episode).
 

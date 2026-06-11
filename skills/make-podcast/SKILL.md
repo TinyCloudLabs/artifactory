@@ -76,15 +76,25 @@ chronological evidence chain. Three seed kinds:
   "$100k to close" → "50 grand" → "eventually"). Identical values that
   merely recur score zero — that's a fact the room shares, not a story.
 - **single-voice-arc** — a single-voice topic one person carries across
-  3+ meetings (an idea pushed over time; a shift in whether the room
-  engaged with it = stance development).
+  3+ meetings, AND the room's engagement with it SHIFTS across the set
+  (ignored early then engaged, or vice versa = stance development).
 - **cross-meeting-topic** — an entity/term spanning 3+ meetings with 2+
-  speakers (a sustained through-line the room kept returning to).
+  speakers, AND showing a SHIFT — it left and re-entered the agenda, or
+  changed hands across voices (the thread spread).
 
-Seeds are ranked by `development × reach`; **a set with a drifting
-quantity scores above a flat "here are interesting things" set by
-construction.** Every seed spans 2+ meetings — a signal confined to one
-meeting never appears (it's a card, not a lead). **The scan is a
+**Recurrence is not development — for EVERY kind.** A topic that merely
+repeats across meetings with no detected shift (single voice never
+re-engaged, a thread the same person restates every standup) has its
+development floored at 0: it sorts below every real arc and is labeled
+"recurrence only, no detected development — surfaced as context, not an
+arc," mirroring how identical recurring quantities score zero. Recurrence
+may still be SURFACED as context, but it is never scored as an arc.
+
+Seeds are ranked by `development × reach`; **a set with a real shift
+(drift / engagement / voice-spread / agenda movement) scores above a flat
+"here are interesting things" set by construction.** Every seed spans 2+
+meetings — a signal confined to one meeting never appears (it's a card,
+not a lead). **The scan is a
 SURFACER, not a judge:** read each seed's evidence chain and decide
 whether the arc is real. **Zero seeds means no through-line shows temporal
 development — there is no episode lead** (do not synthesize a flat recap).
