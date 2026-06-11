@@ -5,6 +5,9 @@ node_modules/
 artifacts/
 out/
 
+# feedback event log (personal data, like artifacts/)
+feedback/
+
 # secrets
 .env
 .env.*
