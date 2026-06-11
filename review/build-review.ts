@@ -5,6 +5,8 @@
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import {
   ARTIFACT_TYPES,
   validateArtifact,
@@ -15,6 +17,7 @@ const ROOT = dirname(import.meta.dir); // repo root (review/..)
 const ARTIFACTS_DIR = join(ROOT, "artifacts");
 const OUT_PATH = join(import.meta.dir, "review.html");
 const IMAGE_EMBED_CAP = 3 * 1024 * 1024; // 3MB
+const AUDIO_EMBED_CAP = 15 * 1024 * 1024; // 15MB post-compression
 
 // ---------------------------------------------------------------- helpers
 
@@ -164,12 +167,44 @@ async function heroImg(item: Loaded, stats: BuildStats): Promise<string> {
   return `<img class="hero" alt="${esc(item.artifact.headline)}" src="data:${mime};base64,${b64}">`;
 }
 
+/** Embed artifact audio as a playable element. Compressed formats embed as-is;
+ * legacy WAV gets a one-off AAC transcode (afconvert) so the page stays small.
+ * Proper fix lives in the make-podcast skill (emit compressed audio directly). */
+async function audioEmbed(item: Loaded): Promise<string> {
+  const name = item.artifact.audio;
+  if (!name) return "";
+  const p = join(item.dir, name);
+  try {
+    await stat(p);
+  } catch {
+    return `<div class="media-note">audio listed but not found: ${esc(name)}</div>`;
+  }
+  const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+  let bytes: Buffer;
+  let mime: string;
+  if (ext === ".wav") {
+    try {
+      const tmp = join(tmpdir(), `distillery-${item.slug}.m4a`);
+      execFileSync("afconvert", ["-f", "m4af", "-d", "aac", p, tmp]);
+      bytes = Buffer.from(await readFile(tmp));
+      mime = "audio/mp4";
+    } catch {
+      bytes = Buffer.from(await readFile(p)); // no afconvert — embed raw WAV
+      mime = "audio/wav";
+    }
+  } else {
+    bytes = Buffer.from(await readFile(p));
+    mime = ext === ".m4a" ? "audio/mp4" : ext === ".mp3" ? "audio/mpeg" : "application/octet-stream";
+  }
+  if (bytes.length > AUDIO_EMBED_CAP) {
+    return `<div class="media-note">audio ${esc(name)} is ${(bytes.length / 1024 / 1024).toFixed(1)}MB — too large to embed</div>`;
+  }
+  return `<audio class="player" controls preload="metadata" src="data:${mime};base64,${bytes.toString("base64")}"></audio>`;
+}
+
 async function podcastExtras(item: Loaded): Promise<string> {
   if (item.artifact.type !== "podcast") return "";
-  let html = "";
-  if (item.artifact.audio) {
-    html += `<div class="media-note">audio (${esc(item.artifact.audio)}) delivered separately — not embedded</div>`;
-  }
+  let html = await audioEmbed(item);
   try {
     const script = await readFile(join(item.dir, "script.md"), "utf8");
     html += `<details class="script"><summary>script.md</summary><div class="body">${renderBody(script)}</div></details>`;
@@ -296,6 +331,7 @@ h2{font-size:22px;line-height:1.3;letter-spacing:-.01em;margin-bottom:14px}
 .body strong{color:var(--ink)}
 .media-note{color:var(--dim);font-size:14px;font-style:italic;border:1px dashed var(--line);
   border-radius:8px;padding:8px 12px;margin:0 0 14px}
+.player{display:block;width:100%;margin:0 0 14px}
 .invalid{color:#e07a7a;font-size:13px;border:1px dashed #5a2c2c;border-radius:8px;padding:6px 10px;margin-bottom:10px}
 .tags{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}
 .tag{font-size:12px;color:var(--dim);background:var(--bg);border:1px solid var(--line);

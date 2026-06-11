@@ -3,17 +3,25 @@
 // persist it to <out-dir>/podcast/<slug>/ together with its media:
 // the audio file and the episode script (always saved as script.md).
 //
+// WAV input is additionally compressed to AAC (episode.m4a) when ffmpeg or
+// afconvert is available; the artifact's `audio` field then points at the
+// .m4a (small, web-playable) while the WAV is kept alongside as the
+// lossless master. With neither tool installed the WAV is saved as-is
+// with a warning — compression is never a hard dependency.
+//
 // Usage:
 //   bun skills/make-podcast/scripts/save.ts <artifact.json> \
 //     --audio episode.wav --script script.md [--out-dir artifacts]
 
-import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import {
   newArtifactId,
   validateArtifact,
   writeArtifact,
 } from "../../_shared/lib/artifact.ts";
+import { compressWavToM4a } from "../../_shared/lib/compress.ts";
 
 function usage(): never {
   console.error(
@@ -63,13 +71,6 @@ if (raw.type !== "podcast") {
   process.exit(1);
 }
 
-const result = validateArtifact(raw);
-if (!result.ok) {
-  console.error("Artifact failed contract validation:");
-  for (const err of result.errors) console.error(`  - ${err}`);
-  process.exit(1);
-}
-
 const [audioBytes, scriptBytes] = await Promise.all([
   readFile(audioFile),
   readFile(scriptFile),
@@ -79,12 +80,41 @@ if (audioBytes.length === 0) {
   process.exit(1);
 }
 
-const written = await writeArtifact(result.artifact, {
-  outDir,
-  media: {
-    [audioName]: new Uint8Array(audioBytes),
-    "script.md": new Uint8Array(scriptBytes),
-  },
-});
+const media: Record<string, Uint8Array> = {
+  [audioName]: new Uint8Array(audioBytes),
+  "script.md": new Uint8Array(scriptBytes),
+};
+
+// Compress WAV → AAC (.m4a) so every consumer gets a small web-playable
+// file; the WAV stays alongside as the lossless master. Tool chain:
+// ffmpeg → afconvert → neither (keep WAV, warn). Never a hard failure.
+let compressedNote = "";
+if (/\.wav$/i.test(audioName)) {
+  const m4aName = audioName.replace(/\.wav$/i, ".m4a");
+  const tmpM4a = join(tmpdir(), `distillery-save-${crypto.randomUUID()}.m4a`);
+  const compressed = await compressWavToM4a(audioFile, tmpM4a);
+  if (compressed.ok) {
+    media[m4aName] = new Uint8Array(await readFile(tmpM4a));
+    await rm(tmpM4a, { force: true });
+    raw.audio = m4aName;
+    const ratio = (audioBytes.length / compressed.bytes).toFixed(1);
+    compressedNote = `, ${m4aName} (${compressed.bytes} bytes — ${ratio}x smaller via ${compressed.tool})`;
+  } else {
+    console.error(
+      `WARNING: could not compress ${audioName} to AAC — ${compressed.reason}.\n` +
+        `Saving the uncompressed WAV; install ffmpeg (or use macOS afconvert) for a web-friendly .m4a.`,
+    );
+  }
+}
+
+const result = validateArtifact(raw);
+if (!result.ok) {
+  console.error("Artifact failed contract validation:");
+  for (const err of result.errors) console.error(`  - ${err}`);
+  process.exit(1);
+}
+
+const written = await writeArtifact(result.artifact, { outDir, media });
 console.log(`Saved: ${written.jsonPath}`);
-console.log(`Media: ${audioName} (${audioBytes.length} bytes), script.md`);
+console.log(`Media: ${audioName} (${audioBytes.length} bytes)${compressedNote}, script.md`);
+console.log(`Artifact audio field: ${String(result.artifact.audio)}`);

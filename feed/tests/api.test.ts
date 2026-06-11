@@ -58,7 +58,7 @@ describe("GET /api/cards/:type/:slug", () => {
     expect(res.status).toBe(200);
     const card = (await res.json()) as FeedCard;
     expect(card.id).toBe("pod-1");
-    expect(card.audio_url).toBe("/media/podcast/newest-podcast/episode.wav");
+    expect(card.audio_url).toBe("/media/podcast/newest-podcast/episode.m4a");
   });
 
   test("404s for missing cards", async () => {
@@ -74,6 +74,22 @@ describe("GET /media/:type/:slug/:file", () => {
     expect(res.headers.get("content-type")).toContain("image/png");
     expect(res.headers.get("accept-ranges")).toBe("bytes");
     expect((await res.arrayBuffer()).byteLength).toBe(4);
+  });
+
+  test("serves .m4a as audio/mp4 (Bun's mime table says audio/x-m4a)", async () => {
+    const res = await app.request("/media/podcast/newest-podcast/episode.m4a");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/mp4");
+    expect((await res.arrayBuffer()).byteLength).toBe(14);
+  });
+
+  test(".m4a Range responses keep the audio/mp4 content type", async () => {
+    const res = await app.request("/media/podcast/newest-podcast/episode.m4a", {
+      headers: { range: "bytes=0-3" },
+    });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-type")).toBe("audio/mp4");
+    expect(res.headers.get("content-range")).toBe("bytes 0-3/14");
   });
 
   test("honors Range requests (required for audio seek on iOS)", async () => {

@@ -23,9 +23,26 @@ function safeJoin(base: string, ...parts: string[]): string | null {
   return null;
 }
 
-function fileResponse(file: ReturnType<typeof Bun.file>, rangeHeader: string | null): Response {
+// Overrides where Bun's mime table disagrees with what browsers want:
+// .m4a (AAC audio from make-podcast) must be audio/mp4 — Bun reports
+// audio/x-m4a, which some players (notably iOS Safari) handle poorly.
+const CONTENT_TYPE_OVERRIDES: Record<string, string> = {
+  ".m4a": "audio/mp4",
+};
+
+function contentTypeFor(path: string, file: ReturnType<typeof Bun.file>): string {
+  const dot = path.lastIndexOf(".");
+  const ext = dot === -1 ? "" : path.slice(dot).toLowerCase();
+  return CONTENT_TYPE_OVERRIDES[ext] ?? file.type ?? "application/octet-stream";
+}
+
+function fileResponse(
+  path: string,
+  file: ReturnType<typeof Bun.file>,
+  rangeHeader: string | null,
+): Response {
   const size = file.size;
-  const type = file.type || "application/octet-stream";
+  const type = contentTypeFor(path, file) || "application/octet-stream";
 
   // Range support — iOS Safari requires it to seek (and often to play) audio.
   if (rangeHeader) {
@@ -106,7 +123,7 @@ export function createApp(opts: AppOptions): Hono {
     if (!path) return c.text("forbidden", 403);
     const f = Bun.file(path);
     if (!(await f.exists())) return c.text("not found", 404);
-    return fileResponse(f, c.req.header("range") ?? null);
+    return fileResponse(path, f, c.req.header("range") ?? null);
   });
 
   // Static SPA with index.html fallback (hash routing means this is mostly "/").
@@ -116,10 +133,11 @@ export function createApp(opts: AppOptions): Hono {
     const path = safeJoin(distDir, "." + pathname);
     if (path && path !== distDir) {
       const f = Bun.file(path);
-      if (await f.exists()) return fileResponse(f, c.req.header("range") ?? null);
+      if (await f.exists()) return fileResponse(path, f, c.req.header("range") ?? null);
     }
-    const index = Bun.file(join(distDir, "index.html"));
-    if (await index.exists()) return fileResponse(index, null);
+    const indexPath = join(distDir, "index.html");
+    const index = Bun.file(indexPath);
+    if (await index.exists()) return fileResponse(indexPath, index, null);
     return c.text("feed not built — run: bun run build", 404);
   });
 

@@ -6,9 +6,10 @@ ONE compelling through-line. Works on a single transcript or a collection
 (file paths or directories — always passed in, never assumed).
 
 Same division of labor as every distillery skill: **scripts do
-deterministic plumbing** (parsing, TTS call, WAV assembly, validation,
-persistence); **you — the agent — do the judgment** (picking the episode
-angle, writing the script, critiquing it).
+deterministic plumbing** (parsing, TTS call, WAV assembly, AAC
+compression, validation, persistence); **you — the agent — do the
+judgment** (picking the episode angle, writing the script, critiquing
+it).
 
 ## Prerequisites
 
@@ -162,22 +163,37 @@ duration is plausibly 2–5 minutes, and pace is roughly 110–220 wpm. If
 anything looks off (truncated audio, absurd pace), re-synthesize before
 saving — never save an episode you wouldn't press play on.
 
-### 7. Save (script)
+### 7. Save (script — also compresses the audio)
 
 ```sh
 bun skills/make-podcast/scripts/save.ts <artifact.json> --audio episode.wav --script script.md [--out-dir artifacts]
 ```
 
 Validates against the contract and writes
-`<out-dir>/podcast/<slug>/artifact.json` with `episode.wav` and
-`script.md` alongside (`audio` is set to the audio file name
-automatically). Validation errors are printed; fix the JSON rather than
+`<out-dir>/podcast/<slug>/artifact.json` with the audio and `script.md`
+alongside. Validation errors are printed; fix the JSON rather than
 bypassing the script.
+
+WAV input is automatically compressed to AAC (`episode.m4a`, ~12x
+smaller, plays natively in browsers) so every consumer — review page,
+feed, sharing — gets a small web-playable file. Tool fallback chain, no
+hard dependency on either (`skills/_shared/lib/compress.ts`):
+
+1. `ffmpeg` (cross-platform)
+2. `afconvert` (macOS built-in; `afconvert -f m4af -d aac in.wav out.m4a`,
+   live-verified 2026-06-10)
+3. neither installed → the WAV is saved as-is with a clear warning.
+
+When compression succeeds, the artifact's `audio` field points at the
+`.m4a` and `episode.wav` is kept alongside as the lossless master. Don't
+set `audio` by hand — save.ts manages it.
 
 ## Output contract
 
 Every artifact lands at `artifacts/podcast/<slug>/` containing
-`artifact.json` + the audio file + `script.md`. See
-`skills/_shared/lib/artifact.ts` for the full type; the required
-`quality { critic_pass, quotes_verified, notes? }` block must reflect
-steps 4 above — keep the JSON strictly contract-valid.
+`artifact.json` + `episode.m4a` (compressed, web-playable — what `audio`
+points at) + `episode.wav` (lossless master) + `script.md`. If neither
+compressor was available, `episode.wav` stands alone and `audio` points
+at it instead. See `skills/_shared/lib/artifact.ts` for the full type;
+the required `quality { critic_pass, quotes_verified, notes? }` block
+must reflect steps 4 above — keep the JSON strictly contract-valid.

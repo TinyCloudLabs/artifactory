@@ -26,7 +26,7 @@ describe("scanArtifacts", () => {
   test("maps media URLs only for files that exist", async () => {
     const cards = await scanArtifacts(fx.dir);
     const pod = cards.find((c) => c.id === "pod-1")!;
-    expect(pod.audio_url).toBe("/media/podcast/newest-podcast/episode.wav");
+    expect(pod.audio_url).toBe("/media/podcast/newest-podcast/episode.m4a");
     expect(pod.hero_image_url).toBe("/media/podcast/newest-podcast/hero.png");
 
     // hero_image referenced but missing on disk → no URL emitted

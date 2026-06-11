@@ -38,7 +38,9 @@ export async function makeFixture(): Promise<Fixture> {
     }
   };
 
-  // Newest: podcast with audio + hero
+  // Newest: podcast with compressed audio (what make-podcast emits: the
+  // artifact points at episode.m4a, with episode.wav alongside as the
+  // lossless master) + hero
   await write(
     "podcast",
     "newest-podcast",
@@ -47,12 +49,13 @@ export async function makeFixture(): Promise<Fixture> {
       type: "podcast",
       headline: "Newest podcast",
       body: "Show notes with **bold**.",
-      audio: "episode.wav",
+      audio: "episode.m4a",
       hero_image: "hero.png",
       generated_at: "2026-06-09T12:00:00Z",
       tags: ["audio", "weekly"],
     }),
     {
+      "episode.m4a": new Uint8Array([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6]),
       "episode.wav": new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
       "hero.png": new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
     },
