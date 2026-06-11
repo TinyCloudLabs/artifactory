@@ -9,6 +9,11 @@ out/
 # repo root so a future source dir named feedback/ isn't silently ignored
 /feedback/
 
+# corpus index + surfaced-topics ledger + run log (derived AND contains
+# meeting content: entities, quote context, speaker names) — same treatment
+# as artifacts/ and feedback/. Anchored to the repo root.
+/index/
+
 # secrets
 .env
 .env.*
@@ -18,7 +23,8 @@ out/
 # verification screenshots (regenerated per run)
 /feed/screenshots/
 
-# os / editor
+# os / editor / harness scratch
 .DS_Store
 drafts/
 artifacts-v2/
+.claude/

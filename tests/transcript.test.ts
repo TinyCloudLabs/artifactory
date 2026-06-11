@@ -11,6 +11,7 @@ import {
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 const CORPUS = join(FIXTURES, "corpus");
+const SOUNDCORE = join(FIXTURES, "soundcore");
 
 describe("parseTranscript — fireflies/gemini-sync style", () => {
   async function parsed() {
@@ -142,10 +143,193 @@ describe("parseTranscript — prose-with-colon regression", () => {
   });
 });
 
+describe("parseTranscript — Soundcore adapter (spec §4)", () => {
+  async function read(name: string) {
+    const path = join(SOUNDCORE, name);
+    return { path, raw: await readFile(path, "utf8") };
+  }
+
+  test("block-form turns parse, scoped to the post-## Transcript region", async () => {
+    const { path, raw } = await read("soundcore-with-turns.md");
+    const t = parseTranscript(raw, path);
+    expect(t.title).toBe("Synthetic Soundcore Planning Meeting");
+    expect(t.date).toBe("2026-06-08");
+    expect(t.duration).toBe("23 min");
+    // Exactly the four real turns under ## Transcript — nothing from the WH
+    // summary above it.
+    expect(t.turns).toHaveLength(4);
+    expect(t.turns.map((turn) => turn.speaker)).toEqual([
+      "Ada",
+      "Grace",
+      "speaker1",
+      "speaker2",
+    ]);
+    // Block-form: label alone, text on the next line.
+    expect(t.turns[0]?.text).toContain("charge by the widget");
+    expect(t.turns[1]?.text).toContain("Usage-based pricing aligns revenue");
+    // A "Plan B:" colon line inside a turn stays body, not a phantom speaker.
+    expect(t.turns[2]?.text).toContain("Plan B: we ship the pricing change Friday.");
+  });
+
+  test("WH-summary prose never becomes a speaker turn", async () => {
+    const { path, raw } = await read("soundcore-with-turns.md");
+    const t = parseTranscript(raw, path);
+    const speakers = t.turns.map((turn) => turn.speaker);
+    for (const phantom of [
+      "What",
+      "Who",
+      "Related Personnel",
+      "Decision status",
+      "Priority order",
+      "Open question",
+      "Decision / alignment",
+      "Time",
+    ]) {
+      expect(speakers).not.toContain(phantom);
+    }
+    // The WH prose is routed into summary, not lost.
+    expect(t.summary).toContain("Widget Pricing Direction");
+  });
+
+  test("metadata header is never read as a speaker turn", async () => {
+    const { path, raw } = await read("soundcore-with-turns.md");
+    const t = parseTranscript(raw, path);
+    const speakers = t.turns.map((turn) => turn.speaker);
+    expect(speakers).not.toContain("Date");
+    expect(speakers).not.toContain("Duration");
+    // No turn text carries the header metadata.
+    expect(t.turns.every((turn) => !turn.text.includes("**Date:**"))).toBe(true);
+  });
+
+  test("empty 'no segments' file yields ZERO turns + empty=true (bug 1)", async () => {
+    const { path, raw } = await read("soundcore-empty.md");
+    const t = parseTranscript(raw, path);
+    expect(t.empty).toBe(true);
+    expect(t.turns).toHaveLength(0);
+    // Title/date still lifted for the index.
+    expect(t.title).toBe("2026-06-07 15:05:32");
+    expect(t.date).toBe("2026-06-07");
+    // No garbage turn swallowing the metadata + placeholder.
+    expect(t.turns.length).toBe(0);
+    // An empty transcript never verifies a quote against its metadata-only raw.
+    expect(verifyQuote(t, "No transcript segments available")).toBe(false);
+    expect(verifyQuote(t, "Date")).toBe(false);
+  });
+
+  test("WH-prose-before-transcript trap: deep-section bold lines stay out of turns (bug 2)", async () => {
+    const { path, raw } = await read("soundcore-wh-trap.md");
+    const t = parseTranscript(raw, path);
+    // Only the two real turns under ## Transcript.
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns.map((turn) => turn.speaker)).toEqual(["Hunter", "speaker1"]);
+    const speakers = t.turns.map((turn) => turn.speaker);
+    // These bold lines sit in a deep ### subsection — the generic gate
+    // ("metadata only before first turn") would NOT protect them.
+    for (const phantom of [
+      "What",
+      "Who",
+      "Proposed next steps",
+      "Status",
+      "Open parameters",
+      "Decision / alignment",
+    ]) {
+      expect(speakers).not.toContain(phantom);
+    }
+  });
+
+  test("loadTranscripts surfaces empty Soundcore files with empty=true", async () => {
+    const all = await loadTranscripts([SOUNDCORE]);
+    expect(all).toHaveLength(3);
+    const empties = all.filter((t) => t.empty);
+    expect(empties).toHaveLength(1);
+    expect(empties[0]?.turns).toHaveLength(0);
+    // The two real files carry turns and are not flagged empty.
+    expect(all.filter((t) => !t.empty).every((t) => t.turns.length > 0)).toBe(true);
+  });
+});
+
+describe("parseTranscript — Soundcore PR#5 review regressions", () => {
+  // A minimal Soundcore-shaped file: WH-summary signature above ## Transcript so
+  // isSoundcore() routes it to parseSoundcore.
+  const wh = "## Summary\n\n**What**: pricing\n\n## Summary\n\n**What**: pricing again\n";
+
+  test("greedy inline-label guard: mid-turn **Note:** stays in body (one turn)", () => {
+    // Block-form **speaker1:** label opens a turn; the FOLLOWING body line
+    // starts with bold emphasis **Note:** — it must NOT become a phantom
+    // speaker. Reviewer's verified case (transcript.ts:298).
+    const raw =
+      `# Greedy Trap\n**Date:** 2026-06-09\n\n${wh}\n## Transcript\n\n` +
+      `**speaker1:**\n` +
+      `We should ship this.\n` +
+      `**Note:** the rest of speaker1's thought goes here.\n`;
+    const t = parseTranscript(raw);
+    // ONE turn, the real speaker, with the Note text retained in the body.
+    expect(t.turns).toHaveLength(1);
+    expect(t.turns[0]?.speaker).toBe("speaker1");
+    expect(t.turns.map((x) => x.speaker)).not.toContain("Note");
+    expect(t.turns[0]?.text).toContain("We should ship this.");
+    expect(t.turns[0]?.text).toContain("**Note:** the rest of speaker1's thought");
+  });
+
+  test("a genuinely speaker-shaped inline label still opens a turn mid-region", () => {
+    // Sanity: a distinct speaker label (speaker2 / a multi-token name) is NOT
+    // emphasis and should still split turns inline.
+    const raw =
+      `# Inline Speakers\n**Date:** 2026-06-09\n\n${wh}\n## Transcript\n\n` +
+      `**speaker1:** first thing\n` +
+      `**speaker2:** second thing\n`;
+    const t = parseTranscript(raw);
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns.map((x) => x.speaker)).toEqual(["speaker1", "speaker2"]);
+  });
+
+  test("empty-sentinel does NOT wipe a file that has real turns + the sentinel", () => {
+    // A real **Sam:** turn followed by the sentinel string later in the body
+    // must parse to turns=1, empty=false (transcript.ts:133). The sentinel only
+    // flags empty when it is the SOLE content under ## Transcript.
+    const raw =
+      `# Sentinel Mixed\n**Date:** 2026-06-09\n\n${wh}\n## Transcript\n\n` +
+      `**Sam:**\n` +
+      `Here is a real spoken turn.\n` +
+      `We once saw _(No transcript segments available.)_ in another export.\n`;
+    const t = parseTranscript(raw);
+    expect(t.empty).toBeFalsy();
+    expect(t.turns).toHaveLength(1);
+    expect(t.turns[0]?.speaker).toBe("Sam");
+    expect(t.turns[0]?.text).toContain("Here is a real spoken turn.");
+  });
+
+  test("empty-sentinel still flags empty when it is the sole content", () => {
+    const raw = `# Empty\n**Date:** 2026-06-09\n\n## Transcript\n\n_(No transcript segments available.)_\n`;
+    const t = parseTranscript(raw);
+    expect(t.empty).toBe(true);
+    expect(t.turns).toHaveLength(0);
+  });
+
+  test("double ## Transcript heading: turns under the FIRST region are kept", () => {
+    // Two ## Transcript headings — splitting on the FINAL one would drop the
+    // first region's turns. Splitting on the FIRST keeps both (transcript.ts:267).
+    const raw =
+      `# Double Heading\n**Date:** 2026-06-09\n\n${wh}\n` +
+      `## Transcript\n\n` +
+      `**speaker1:**\n` +
+      `First region turn.\n\n` +
+      `## Transcript\n\n` +
+      `**speaker2:**\n` +
+      `Second region turn.\n`;
+    const t = parseTranscript(raw);
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns.map((x) => x.speaker)).toEqual(["speaker1", "speaker2"]);
+    expect(t.turns[0]?.text).toContain("First region turn.");
+    expect(t.turns[1]?.text).toContain("Second region turn.");
+  });
+});
+
 describe("loadTranscripts", () => {
   test("walks directories recursively, picking only .md/.txt", async () => {
     const all = await loadTranscripts([FIXTURES]);
-    expect(all.length).toBe(4); // 3 corpus .md + plain.txt
+    // 3 corpus .md + plain.txt + 3 soundcore/*.md
+    expect(all.length).toBe(7);
   });
 
   test("accepts a mix of files and dirs", async () => {

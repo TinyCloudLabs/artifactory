@@ -206,6 +206,27 @@ Both resolve keys via `getSecret("GEMINI_API_KEY")` unless given one.
 4. **Listen input adapter**: Transcript[] from TinyCloud instead of disk.
 5. **Feed UI consumer**: pulse-radio-style card feed over artifacts/.
 
+## Corpus navigation + autonomous feed generation
+
+The generation skills above are one-shot: hand them transcript paths, get
+artifacts. Turning that into an **autonomous heartbeat** — a local cron that
+walks the whole corpus, generates, and auto-publishes to the feed — is
+specified separately in [docs/CORPUS-NAVIGATION-SPEC.md](docs/CORPUS-NAVIGATION-SPEC.md).
+
+In brief: two new deterministic skills (`index-corpus` builds an incremental
+`index/corpus-index.json` over `$TRANSCRIPT_DIRS`; `query-corpus` retrieves by
+window/speaker/entity/term/source with an already-surfaced join), a saved
+**feed-run recipe** (index → distill-preferences → query [recency + one
+rotating deep-dive] → generate → critic → auto-publish, with a per-run artifact
+cap), a separate one-time **backfill** mode over the full ~394-transcript
+history, a **Soundcore parser adapter** (Soundcore `.md` uses block-form
+`**speaker:**`-on-its-own-line turns behind a WH-question summary, and emits
+empty "no segments" files that the current parser leaks — both fixed), and
+**launchd** plumbing for the scheduled run + server/tunnel keep-alive. Trigger
+is local launchd → headless `claude -p` (subscription-covered reasoning;
+only Gemini media meters, ≈$4/month). Same judgment-vs-plumbing principle:
+the new skills surface, the agent judges.
+
 ## Decisions log
 
 - **2026-06-10** Skill format: `SKILL.md` + CLI bun scripts per skill

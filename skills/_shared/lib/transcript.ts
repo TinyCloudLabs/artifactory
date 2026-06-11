@@ -21,6 +21,17 @@
 //      same speaker-turn body.
 //   C. Bare diarized markdown (VoxTerm style): speaker turns with no header.
 //   D. Plain text fallback: whole body becomes one unattributed turn.
+//   E. Soundcore markdown (its own dialect — see parseSoundcore):
+//        # Title
+//        **Date:** … / **Duration:** …
+//        ## Summary  (a WH-question prose block: **What**: / **Who**: …,
+//                     organized under ## <Topic> / ### <Subtopic> headings,
+//                     "## Summary" often appears twice)
+//        ## Transcript                  ← the REAL diarized turns start here
+//        **speaker1:**                   ← block-form: label ALONE on its line…
+//        <turn text on the FOLLOWING line(s)>   ← …text on the next line(s)
+//      Empty Soundcore recordings carry a "_(No transcript segments
+//      available.)_" placeholder and must yield ZERO turns + empty=true.
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
@@ -44,6 +55,14 @@ export interface Transcript {
   summary?: string;
   actionItems?: string;
   turns: TranscriptTurn[];
+  /**
+   * True when the file carries no actual diarized content — e.g. a Soundcore
+   * recording whose body is just the "_(No transcript segments available.)_"
+   * placeholder. Empty transcripts emit `turns: []` (never a garbage
+   * metadata-as-text turn). Downstream (index-corpus, query-corpus,
+   * generation) skips these. Absent/false on every transcript that has turns.
+   */
+  empty?: boolean;
   /** Full original file content, for exact-quote verification. */
   raw: string;
 }
@@ -74,7 +93,94 @@ const PLAIN_TURN_RE = new RegExp(
 // "**Date:** 2026-05-12" — header metadata line.
 const META_LINE_RE = /^\*\*([A-Za-z ]+):\*\*\s*(.*)$/;
 
+// Soundcore "no content" placeholder — the empty-recording sentinel.
+const SOUNDCORE_EMPTY_RE = /_\(No transcript segments available\.\)_/;
+// "## Transcript" heading (the turn region opens here in Fireflies/Soundcore).
+const TRANSCRIPT_HEADING_RE = /^##\s+Transcript\s*$/m;
+// Soundcore WH-summary signature: bold WH-question labels with the colon
+// OUTSIDE the bold ("**What**: …"), or "**Related Personnel**: …". These are
+// the prose lines §4 warns must never become phantom speaker turns. Note this
+// is a DIFFERENT shape from META_LINE_RE ("**Key:**", colon inside).
+const SOUNDCORE_WH_RE =
+  /^\*\*(What|Who|When|Where|Why|How|Time|Location|Related Personnel)\*\*\s*:/m;
+// "**speaker1:**" alone on its own line — Soundcore's block-form turn marker.
+const SOUNDCORE_TURN_LABEL_RE = /^\*\*([^*\n]+?)\s*:\s*\*\*\s*$/;
+// A bold inline label ("**Note:** …") only opens a NEW turn mid-region (i.e.
+// when a turn is already open) if its label is distinctly speaker-shaped:
+//   - a Soundcore generic diarizer label ("speaker1", "speaker12"), OR
+//   - a multi-token name ("Tina (Flashbots)", "Samuel Gbafa") — first word
+//     capitalized, then more name words / numbers / a parenthetical.
+// A bare single capitalized word ("Note", "Action", "Summary") is bold
+// EMPHASIS, not a speaker — it stays in the open turn's body. (When NO turn is
+// open yet, the first inline label always opens the turn regardless of shape.)
+const SPEAKER_LIKE_LABEL_RE = new RegExp(
+  String.raw`^(?:speaker\d+|${NAME_WORD}(?:\s+(?:${NAME_WORD}|\d+|\([^)]*\)))+|${NAME_WORD}\s*\([^)]*\))$`,
+  "i",
+);
+function looksLikeSpeakerLabel(label: string): boolean {
+  return SPEAKER_LIKE_LABEL_RE.test(label.trim());
+}
+
+/**
+ * Soundcore detection: the raw text has a "## Transcript" heading AND the body
+ * before it carries the WH-summary signature (the WH-question bold lines, or a
+ * duplicated "## Summary"). Cheap regex sniff — when unsure we fall through to
+ * generic parsing, so a false negative just means the generic path handles it
+ * (which it already does for this corpus, by accident of the gate). A false
+ * positive is harmless: parseSoundcore is a stricter, turn-region-scoped
+ * version of the same logic.
+ */
+function isSoundcore(raw: string): boolean {
+  const headingMatch = TRANSCRIPT_HEADING_RE.exec(raw);
+  if (!headingMatch) return false;
+  const beforeTranscript = raw.slice(0, headingMatch.index);
+  if (SOUNDCORE_WH_RE.test(beforeTranscript)) return true;
+  // Duplicated "## Summary" before the transcript is the other tell.
+  const summaryHeadings = beforeTranscript.match(/^##\s+Summary\s*$/gm);
+  return (summaryHeadings?.length ?? 0) >= 2;
+}
+
+/**
+ * True when the Soundcore "no segments" placeholder is the SOLE content under
+ * the (FIRST) `## Transcript` heading — i.e. the recording is genuinely empty.
+ * Returns false when real turn content sits alongside the sentinel (a quote, a
+ * concatenation), so a real transcript is never wiped to zero turns by a raw
+ * substring match. When there is no `## Transcript` heading at all, returns
+ * false (we let the normal parsers run; they self-flag empty on zero turns).
+ */
+function soundcorePlaceholderIsSoleContent(raw: string): boolean {
+  const heading = TRANSCRIPT_HEADING_RE.exec(raw);
+  if (!heading) return false;
+  const region = raw.slice(heading.index + heading[0].length);
+  // Strip every occurrence of the sentinel; if nothing non-whitespace remains,
+  // the placeholder is the only thing under ## Transcript.
+  const stripped = region.replace(new RegExp(SOUNDCORE_EMPTY_RE.source, "g"), "").trim();
+  return stripped === "";
+}
+
 export function parseTranscript(raw: string, path = ""): Transcript {
+  // Empty detection (all formats, cheap + high-value): a body whose only
+  // diarized content is the Soundcore "no segments" placeholder yields ZERO
+  // turns + empty=true, never the metadata-as-text garbage turn the plain-text
+  // fallback would otherwise produce. (§4 bug 1.)
+  //
+  // Guard against a raw-substring false positive: a real transcript that merely
+  // CONTAINS the sentinel string (concatenation, a turn quoting the placeholder,
+  // a multi-segment export) must NOT be wiped to zero turns. We only flag empty
+  // when the sentinel is the SOLE content under ## Transcript — see
+  // soundcorePlaceholderIsSoleContent. (If no ## Transcript region, fall through
+  // to normal parsing; the downstream parsers self-flag empty when zero real
+  // turns survive.)
+  if (SOUNDCORE_EMPTY_RE.test(raw) && soundcorePlaceholderIsSoleContent(raw)) {
+    const t: Transcript = { path, turns: [], raw, empty: true };
+    annotateHeaderMeta(t, raw);
+    return t;
+  }
+
+  // Soundcore dialect: route the WH-summary prose out of turns and scope the
+  // block-form **speaker:** turns to the post-"## Transcript" region. (§4.)
+  if (isSoundcore(raw)) return parseSoundcore(raw, path);
+
   const t: Transcript = { path, turns: [], raw };
   let body = raw;
 
@@ -171,6 +277,146 @@ export function parseTranscript(raw: string, path = ""): Transcript {
   }
 
   return t;
+}
+
+/**
+ * Soundcore adapter (§4). Soundcore `.md` is block-form: a WH-question summary
+ * (**What**: / **Who**: prose under ## <Topic> / ### <Subtopic> headings) sits
+ * ABOVE the real diarized turns, which only begin at "## Transcript" — often
+ * far down the file. Turns are "**speaker:**" alone on a line, with the text on
+ * the FOLLOWING line(s), blank-line separated.
+ *
+ * Two hardenings over the generic path:
+ *   1. Everything before the FIRST "## Transcript" heading is non-turn material
+ *      (the WH prose routes into `summary`, never into turns). This makes the
+ *      "**What**:" bold lines unreachable as phantom speakers regardless of
+ *      where they sit. Splitting on the FIRST heading (not the last) means a
+ *      file with a duplicated "## Transcript" heading keeps the turns under the
+ *      earlier region instead of silently dropping them.
+ *   2. The block-form turn region is parsed explicitly: a "**speaker:**"-alone
+ *      line opens a turn; subsequent non-label lines are its body.
+ * Generic speaker labels (speaker1, speaker2) are kept as-is; human-named
+ * labels (Sam, Hunter, "Tina (Flashbots)") are kept verbatim.
+ */
+function parseSoundcore(raw: string, path: string): Transcript {
+  const t: Transcript = { path, turns: [], raw };
+  annotateHeaderMeta(t, raw);
+
+  // Split on the FIRST "## Transcript" heading: everything above is summary
+  // prose, everything below (including any later duplicate "## Transcript"
+  // heading) is the turn region. Splitting on the first heading keeps turns
+  // under an earlier region instead of dropping them when the heading repeats.
+  const lines = raw.split("\n");
+  let firstTranscriptIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^##\s+Transcript\s*$/.test(lines[i]!)) {
+      firstTranscriptIdx = i;
+      break;
+    }
+  }
+
+  if (firstTranscriptIdx === -1) {
+    // No transcript heading found (shouldn't happen — isSoundcore gates on it).
+    // Fall back to generic parsing to avoid losing content.
+    return parseTranscriptGeneric(raw, path);
+  }
+
+  // Summary = the WH prose between the header and the transcript region.
+  // Capture it verbatim (minus the title/metadata header lines) so downstream
+  // still has the pre-written summary if it wants it.
+  const summaryLines = lines.slice(0, firstTranscriptIdx);
+  const summary = summaryLines
+    .filter((l) => !/^#\s/.test(l) && !META_LINE_RE.test(l))
+    .join("\n")
+    .trim();
+  if (summary) t.summary = summary;
+
+  // Turn region: block-form **speaker:** lines + following body lines. A later
+  // duplicate "## Transcript" heading inside this region is skipped (not a turn).
+  const turnLines: { speaker: string; lines: string[] }[] = [];
+  for (let i = firstTranscriptIdx + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    // A later duplicate "## Transcript" heading inside this region is structure,
+    // not a turn — skip it (its turns already merge into this same region).
+    if (/^##\s+Transcript\s*$/.test(line)) continue;
+    const label = SOUNDCORE_TURN_LABEL_RE.exec(line);
+    if (label?.[1] !== undefined) {
+      turnLines.push({ speaker: label[1].trim(), lines: [] });
+      continue;
+    }
+    // An inline "**speaker:** text" form (label + text on one line) is also
+    // valid Soundcore turn shape — handle it via the generic BOLD_TURN_RE. But
+    // guard against greediness: a body line that merely STARTS with bold
+    // emphasis ("**Note:** the rest of the thought") must NOT steal the open
+    // turn. Open a new turn only when there's no open turn yet, OR the label is
+    // distinctly speaker-shaped (looksLikeSpeakerLabel) — mirroring the generic
+    // parser's format-dominance guard. Otherwise the line is body.
+    const inline = BOLD_TURN_RE.exec(line);
+    if (inline?.[1] !== undefined && line.trimStart().startsWith("**")) {
+      const speakerName = inline[1].trim();
+      if (turnLines.length === 0 || looksLikeSpeakerLabel(speakerName)) {
+        turnLines.push({
+          speaker: speakerName,
+          lines: inline[3] ? [inline[3]] : [],
+        });
+        continue;
+      }
+      // Mid-turn bold emphasis → falls through to body append below.
+    }
+    if (turnLines.length > 0) {
+      turnLines[turnLines.length - 1]!.lines.push(line);
+    }
+    // Lines before the first speaker label in the turn region are dropped
+    // (stray blank lines / placeholder artifacts), matching the generic path's
+    // "no current turn → not body" behavior.
+  }
+
+  for (const tl of turnLines) {
+    const text = tl.lines.join("\n").trim();
+    if (!text) continue;
+    t.turns.push({ speaker: tl.speaker, text });
+  }
+
+  // Defensive empty-flag: a Soundcore file with a transcript heading but no
+  // real turns is effectively empty (the §4 empty-check already catches the
+  // placeholder sentinel, but this covers a heading with nothing under it).
+  if (t.turns.length === 0) t.empty = true;
+
+  return t;
+}
+
+/**
+ * Re-run the generic parser but discard any turns/summary — used only to lift
+ * the title/date/duration/participants header off a Soundcore file (and as a
+ * safety fallback). Kept separate so parseSoundcore never recurses into the
+ * Soundcore branch.
+ */
+function parseTranscriptGeneric(raw: string, path: string): Transcript {
+  // Strip the empty-sentinel + Soundcore signature so parseTranscript takes
+  // the generic branch. Only the metadata header is reused by the caller.
+  const t: Transcript = { path, turns: [], raw };
+  annotateHeaderMeta(t, raw);
+  return t;
+}
+
+/**
+ * Lift the leading "# Title" + "**Date:** / **Duration:** / **Participants:**"
+ * header off a raw body into a Transcript, without parsing any turns. Used by
+ * the empty path and the Soundcore path so an empty/Soundcore file still
+ * carries its title/date for the index. Only scans the preamble before the
+ * first "##" heading.
+ */
+function annotateHeaderMeta(t: Transcript, raw: string): void {
+  for (const line of raw.split("\n")) {
+    if (/^##\s/.test(line)) break; // header ends at the first section heading
+    const h1 = /^#\s+(.+)$/.exec(line);
+    if (h1?.[1] !== undefined && t.title === undefined) {
+      t.title = h1[1].trim();
+      continue;
+    }
+    const meta = META_LINE_RE.exec(line);
+    if (meta?.[1] !== undefined) applyMeta(t, meta[1], meta[2] ?? "");
+  }
 }
 
 function applyMeta(t: Transcript, key: string, value: string): boolean {
@@ -319,6 +565,9 @@ export function verifyQuote(transcript: Transcript, quote: string): boolean {
   const normalize = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   const needle = normalize(quote);
   if (!needle) return false;
+  // An empty transcript has no spoken content — never verify a quote against
+  // its metadata-only raw body.
+  if (transcript.empty) return false;
   const hasSegments = transcript.turns.some((turn) => turn.speaker !== undefined);
   const haystack = hasSegments
     ? transcript.turns.map((turn) => turn.text).join("\n")
