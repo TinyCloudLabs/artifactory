@@ -10,12 +10,18 @@ This skill is **both a runnable orchestrator and a runbook**:
 
 - `scripts/feed-run.ts` is a bun orchestrator that shells the Layer-1 skill
   scripts in order and PREPARES a **run-brief**. It is what the future launchd
-  cron (spec §7) and the Generate button (spec §8) invoke. **It makes NO model
-  calls** — judgment-vs-plumbing is preserved exactly: the orchestrator is
-  plumbing; generation is your judgment.
-- This SKILL.md is the runbook **you** (the agent) follow to do the part the
-  orchestrator can't: read the selected transcripts, generate artifacts, run
-  the critics, publish survivors, and write the ledger back.
+  cron (spec §7) and the Generate button (spec §8) invoke. **The orchestrator's
+  index / query / brief plumbing makes NO model calls** — judgment-vs-plumbing
+  is preserved exactly. WITHOUT `--dry-run`/`--no-generate`, the orchestrator
+  then invokes a generation AGENT **headlessly** (`scripts/run-generation.ts`
+  shells `claude -p`, the reference_claude_cli_headless recipe) to consume the
+  brief and produce artifacts — that's the ORCHESTRATION layer, explicitly
+  allowed to invoke the agent CLI. The headless agent runs the same judgment
+  this SKILL.md describes.
+- This SKILL.md is the runbook the generation agent follows: read the selected
+  transcripts, generate artifacts, run the critics, publish survivors, and write
+  the ledger back. The headless runner passes it to `claude -p` as a system
+  prompt; a human agent can also follow it directly.
 
 Any agent that can run bun can run the recipe (Claude Code, Hermes, Codex). The
 recipe is just a prompt + scripts — nothing couples it to one agent.
@@ -40,7 +46,9 @@ bun skills/feed-run/scripts/feed-run.ts \
   [--mode daily|backfill]      # daily heartbeat (default) | one-time excavation (stub)
   [--since 14d|2026-06-01]     # recency lower bound (relative or absolute);
                                #   default = last run from ledger, else 7 days
-  [--dry-run]                  # stop after the brief (no generation) — the safe default for a first look
+  [--dry-run]                  # stop after the brief (no generation, no state mutation) — the safe default for a first look
+  [--no-generate]              # produce the brief + persist the cursor, but skip headless generation (the Generate button's dry preview)
+  [--model opus]               # generation model for the headless agent (else $MEET_GEN_MODEL, else opus)
   [--skip-index]               # reuse the existing index (no re-index, no $TRANSCRIPT_DIRS needed)
   [--index-path index/corpus-index.json] [--ledger index/surfaced.json]
   [--artifacts-dir artifacts] [--preferences PREFERENCES.md]
@@ -54,8 +62,20 @@ bun skills/feed-run/scripts/feed-run.ts \
 | 3a. QUERY recency | `query-corpus --since <since> --unsurfaced-only` | orchestrator |
 | 3b. QUERY deep-dive | one high-novelty, never-surfaced older thread past the cursor (ranked by the novelty proxy); advance **and persist** the cursor | orchestrator |
 | 4. BRIEF | render `run-brief.md` (titles + paths + preferences + baseline + cap) | orchestrator |
-| 5. GENERATE + CRITIC | run the generation skills against the brief, each with its own novelty-scan + adversarial critic | **you** |
-| 6. SAVE / PUBLISH | `save.ts` writes survivors to `artifacts/`; append surfaced ENTRIES to `surfaced.json` (the cursor is already persisted by step 3b) | **you** |
+| 5. GENERATE + CRITIC | run the generation skills against the brief, each with its own novelty-scan + adversarial critic | **headless agent** (orchestrator spawns it via `run-generation.ts` → `claude -p`; `--dry-run`/`--no-generate` skip this) |
+| 6. SAVE / PUBLISH | `save.ts` writes survivors to `artifacts/`; append surfaced ENTRIES to `surfaced.json` (the cursor is already persisted by step 3b) | **headless agent** |
+
+**The headless generation runner** (`scripts/run-generation.ts`): given the
+brief path, it builds the `claude -p` invocation (system prompt = the agent's
+marching orders: read the brief, run the artifact skills with the adversarial
+novelty critic, respect `MAX_ARTIFACTS_PER_RUN`, save to `artifacts/`, append
+the ledger), captures the agent's stdout/result to
+`index/runs/<ts>/generation-log.txt`, then learns what shipped by diffing
+`artifacts/` before vs after the run. It returns a structured summary
+`{ created:[{type,slug,novelty}], killed:[], duration, exit_code }` and never
+hard-fails on a zero-artifact (or non-zero-exit) run — zero artifacts is valid.
+Model defaults to `opus` (Hunter's best-model default), overridable via
+`$MEET_GEN_MODEL` or `--model`.
 
 The orchestrator writes a per-run dir `index/runs/<ts>/` containing
 `run-brief.md` + `run-log.json`, and appends a one-liner to
