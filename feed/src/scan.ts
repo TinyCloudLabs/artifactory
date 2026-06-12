@@ -105,6 +105,12 @@ async function readArtifactDir(
 export async function scanArtifacts(artifactsDir: string): Promise<FeedCard[]> {
   const cards: FeedCard[] = [];
   for (const type of await listDirs(artifactsDir)) {
+    // Skip dot-directories at the type level — these are harness bookkeeping,
+    // not artifact types. `.quarantine/` holds killed drafts (recoverable but
+    // not surfaced); a quarantined artifact.json keeps its real `type` field,
+    // so excluding the dir here is what actually removes a killed draft from
+    // every scan (feed AND drafts tray).
+    if (type.startsWith(".")) continue;
     for (const slug of await listDirs(join(artifactsDir, type))) {
       const card = await readArtifactDir(artifactsDir, type, slug);
       if (card) cards.push(card);

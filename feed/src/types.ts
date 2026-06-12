@@ -46,6 +46,14 @@ export interface Artifact {
   generated_at: string; // ISO 8601
   generation_model?: string;
   quality?: ArtifactQuality;
+  /**
+   * Routing-seam metadata the skills stamp (see
+   * skills/_shared/lib/artifact.ts). Optional + open here: the feed only reads
+   * them; the harness server routes on them. Outward types are born "pending".
+   */
+  approval_status?: "pending" | "approved";
+  audience?: "public" | "investors" | "internal";
+  platform?: string;
 }
 
 /** What the API serves: artifact + addressing + resolved media URLs. */
