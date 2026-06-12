@@ -241,6 +241,15 @@ Does it earn its runtime, or does it pad? Is the takeaway concrete?
 critic.** Set `quality.critic_pass: true` only on the survivor, with
 `quality.notes` recording what was cut/changed and why.
 
+**Identity grounding (mandatory).** Speculate freely about ideas and
+connections, but never assert an *inference about a person* (role, title,
+employer, affiliation, location, relationships) as spoken fact — it's worse
+in audio, where a confident voice sells a false claim. State who someone is
+only when the transcript supports it; otherwise refer to them by what they
+verifiably said or did, or mark the guess ("probably…", "sounds like…").
+Wrong: "Cush, a Shape Rotator cohort founder"; right: "Cush, a founder the
+team talked to" (add the affiliation only if the source says so).
+
 Then verify the quote anchors (script — mandatory):
 
 ```sh

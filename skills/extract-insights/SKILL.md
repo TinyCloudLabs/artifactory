@@ -83,6 +83,16 @@ verdict in `quality.notes` with the novelty convention, e.g.
 `[novelty] lead=cross-transcript: ...; adversarial critic: ...` (`lead=`
 one of `quantified-drift` | `single-voice` | `cross-transcript`).
 
+**Identity grounding (mandatory).** Speculate freely about ideas, connections,
+and meaning — that is the value. But never assert an *inference about a person*
+(their role, title, employer, affiliation, location, or relationships) as fact.
+State a person's identity only when the transcript supports it; otherwise refer
+to them by what they verifiably said or did, or mark the guess explicitly
+("likely…", "reads like…"). Inferring someone's affiliation from context and
+writing it in the flat voice of fact is the one failure to avoid — e.g. wrong:
+"Cush, a Shape Rotator cohort founder"; right: "Cush, a founder on a call with
+the team" (add "Shape Rotator" only if the transcript says so).
+
 ### 4. Verify quotes (script — mandatory before saving)
 
 ```sh

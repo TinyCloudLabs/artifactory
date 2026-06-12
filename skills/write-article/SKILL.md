@@ -177,6 +177,13 @@ criteria, each pass/fail:
 3. **No generic filler** — does any paragraph survive only because it's
    inoffensive? Does the draft violate the writing-quality rules above?
    Rewrite or cut.
+4. **Identity grounding** — speculate freely about ideas and connections,
+   but never assert an *inference about a person* (role, title, employer,
+   affiliation, location, relationships) as fact. State who someone is only
+   when the transcript supports it; otherwise describe them by what they
+   verifiably said or did, or mark the guess ("likely…", "reads like…").
+   Wrong: "Cush, a Shape Rotator cohort founder"; right: "Cush, a founder on
+   a call with the team" (add the affiliation only if the source says so).
 
 If the draft fails criterion 1 after one honest rewrite, discard the whole
 article — back to step 2 or output nothing. Record the verdict in
