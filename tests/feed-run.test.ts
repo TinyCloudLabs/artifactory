@@ -393,6 +393,25 @@ describe("feed-run CLI (e2e, synthetic corpus)", () => {
     expect(brief).toContain("# Feed-run brief");
   });
 
+  test("--run-id is honored (the Generate button picks the id; orchestrator writes that dir)", async () => {
+    const runId = "2026-06-11T07:00:00.000Z";
+    const { status } = runCli(ctx, ["--dry-run", "--since", "2026-06-07", "--run-id", runId]);
+    expect(status).toBe(0);
+
+    // The run-log carries the caller's id (not a fresh timestamp).
+    const logs = await readRunLog(ctx);
+    expect(logs.length).toBe(1);
+    expect(logs[0]!.run_id).toBe(runId);
+
+    // And the per-run dir is named off that id (colons → dashes) — exactly what
+    // the Generate button's status endpoint reads (index/runs/<run-id>/).
+    const brief = await readFile(
+      join(ctx.runsDir, runId.replace(/[:]/g, "-"), "run-brief.md"),
+      "utf8",
+    );
+    expect(brief).toContain("# Feed-run brief");
+  });
+
   test("distill failure degrades — run continues with existing PREFERENCES.md", async () => {
     // Point the distill step at a stub script that exits non-zero.
     const failStub = join(ctx.dir, "fail-distill.ts");
@@ -457,10 +476,12 @@ describe("feed-run CLI (e2e, synthetic corpus)", () => {
   // ---- PR#5 review regressions ----
 
   test("real (non-dry) run persists the advanced deep-dive cursor (orchestrator-owned)", async () => {
-    // No --dry-run: the orchestrator must persist the cursor ITSELF, so a later
-    // run resumes after it even though the agent (which would append surfaced
-    // entries) never ran here.
-    const { status } = runCli(ctx, ["--since", "2026-06-07"]);
+    // --no-generate: brief produced, headless generation skipped (so no real
+    // `claude -p` spawn in the test), but the orchestrator STILL persists the
+    // cursor ITSELF — a later run resumes after it even though no agent ran. The
+    // generation-runner wiring is covered separately in run-generation.test.ts
+    // with a fake claude on PATH; here we isolate the orchestrator-owned cursor.
+    const { status } = runCli(ctx, ["--no-generate", "--since", "2026-06-07"]);
     expect(status).toBe(0);
     const log = (await readRunLog(ctx))[0]!;
     const picked = log.deepdive_path;
@@ -480,10 +501,11 @@ describe("feed-run CLI (e2e, synthetic corpus)", () => {
   });
 
   test("zero-deep-dive-artifact run still advances the cursor (no re-pick forever)", async () => {
-    // A real run that ships NOTHING (the orchestrator never generates) must
-    // still move the cursor off the picked thread, so the next real run picks a
-    // DIFFERENT older thread instead of re-picking the same one forever.
-    const r1 = runCli(ctx, ["--since", "2026-06-07"]);
+    // A run that ships NOTHING (here: --no-generate, so no `claude -p` spawn in
+    // the test) must still move the cursor off the picked thread, so the next
+    // run picks a DIFFERENT older thread instead of re-picking the same one
+    // forever. The orchestrator owns the cursor independent of generation.
+    const r1 = runCli(ctx, ["--no-generate", "--since", "2026-06-07"]);
     expect(r1.status).toBe(0);
     const firstPick = (await readRunLog(ctx))[0]!.deepdive_path;
     expect(firstPick).toBeDefined();
@@ -491,8 +513,8 @@ describe("feed-run CLI (e2e, synthetic corpus)", () => {
     expect(ledger1!.deepdive_cursor.last_path).toBe(firstPick);
     expect(ledger1!.surfaced).toEqual([]); // nothing shipped
 
-    // Second real run reuses the persisted cursor and advances PAST firstPick.
-    const r2 = runCli(ctx, ["--since", "2026-06-07"]);
+    // Second run reuses the persisted cursor and advances PAST firstPick.
+    const r2 = runCli(ctx, ["--no-generate", "--since", "2026-06-07"]);
     expect(r2.status).toBe(0);
     const logs = await readRunLog(ctx);
     const secondPick = logs[logs.length - 1]!.deepdive_path;

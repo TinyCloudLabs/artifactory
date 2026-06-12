@@ -21,6 +21,9 @@
 //     [--since 14d|2026-06-01]     # recency lower bound (relative or absolute); \
 //                                  #   default = last run from ledger, else 7 days \
 //     [--dry-run]                  # stop after producing the brief (no generation) \
+//     [--no-generate]              # produce the brief but skip headless generation \
+//                                  #   (the Generate button's dry preview) \
+//     [--model opus]               # generation model (else $MEET_GEN_MODEL, else opus) \
 //     [--skip-index]               # reuse the existing index (don't re-index); \
 //                                  #   lets --dry-run / the Generate button run \
 //                                  #   without $TRANSCRIPT_DIRS set \
@@ -52,6 +55,8 @@ import {
   type SurfacedLedger,
 } from "../../query-corpus/scripts/surfaced-ledger.ts";
 import { priorArtifactIndex } from "../../_shared/lib/novelty.ts";
+import { runGeneration } from "./run-generation.ts";
+import { resolveModel, summarizeGeneration } from "./run-generation-lib.ts";
 import {
   capForMode,
   olderThan,
@@ -74,9 +79,10 @@ import {
 function usage(): never {
   console.error(
     "usage: bun skills/feed-run/scripts/feed-run.ts " +
-      "[--mode daily|backfill] [--since 14d|YYYY-MM-DD] [--dry-run] [--skip-index] " +
+      "[--mode daily|backfill] [--since 14d|YYYY-MM-DD] [--dry-run] [--no-generate] " +
+      "[--model M] [--skip-index] " +
       "[--index-path PATH] [--ledger PATH] [--artifacts-dir DIR] " +
-      "[--preferences PATH] [--runs-dir DIR] [--run-log PATH] [--recency-limit N]",
+      "[--preferences PATH] [--runs-dir DIR] [--run-log PATH] [--recency-limit N] [--run-id ID]",
   );
   process.exit(2);
 }
@@ -84,6 +90,8 @@ function usage(): never {
 let mode: RunMode = "daily";
 let sinceArg: string | undefined;
 let dryRun = false;
+let noGenerate = false;
+let modelArg: string | undefined;
 let skipIndex = false;
 let indexPath = "index/corpus-index.json";
 let ledgerPath = "index/surfaced.json";
@@ -92,6 +100,7 @@ let preferencesPath = "PREFERENCES.md";
 let runsDir = "index/runs";
 let runLogPath = "index/run-log.jsonl";
 let recencyLimit: number | undefined;
+let runIdArg: string | undefined;
 
 const args = process.argv.slice(2);
 function takeValue(i: number): string {
@@ -113,6 +122,12 @@ for (let i = 0; i < args.length; i++) {
       break;
     case "--dry-run":
       dryRun = true;
+      break;
+    case "--no-generate":
+      noGenerate = true;
+      break;
+    case "--model":
+      modelArg = takeValue(++i);
       break;
     case "--skip-index":
       skipIndex = true;
@@ -144,6 +159,12 @@ for (let i = 0; i < args.length; i++) {
       recencyLimit = n;
       break;
     }
+    case "--run-id":
+      // Caller-supplied run id (the Generate button picks it so its status
+      // endpoint can find index/runs/<run-id>/ before the run finishes). When
+      // unset, defaults to the start timestamp below.
+      runIdArg = takeValue(++i);
+      break;
     case "--help":
     case "-h":
       usage();
@@ -157,7 +178,7 @@ for (let i = 0; i < args.length; i++) {
 // ---------------------------------------------------------------------------
 
 const now = new Date();
-const runId = now.toISOString();
+const runId = runIdArg ?? now.toISOString();
 const cap = capForMode(mode);
 if (mode === "backfill") {
   // TODO(PR6): full backfill = no recency window, novelty-ranked batches with a
@@ -370,12 +391,15 @@ const brief = renderBrief({
 });
 log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 : 0} deep-dive, cap ${cap})`);
 
-// 5/6. GENERATE + SAVE — AGENT judgment. The orchestrator stops here on
-//      --dry-run (the safe default), having produced the brief. A non-dry run
-//      hands the brief to the generation skills (see SKILL.md); this script
-//      does NOT call an LLM, so it logs the handoff and stops too — the agent
-//      driving the recipe performs generation, then APPENDS the surfaced
-//      ENTRIES (per SKILL.md). We never auto-spend here.
+// 5/6. GENERATE + SAVE.
+//
+//      The orchestrator stops at the brief on --dry-run (the safe default) and
+//      on --no-generate (the Generate button's dry preview). WITHOUT either
+//      flag, the orchestrator now ACTUALLY runs generation by invoking a
+//      generation AGENT HEADLESSLY (`claude -p`, via run-generation.ts) to
+//      consume the brief and produce artifacts. This is the orchestration layer
+//      — explicitly allowed to invoke the agent CLI; the index/query/feed-run
+//      logic above stays LLM-free.
 //
 //      CURSOR PERSISTENCE (PR#5 review): the orchestrator holds the
 //      authoritative advanced cursor (`advance.ledger`) and persists it ITSELF
@@ -384,7 +408,21 @@ log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 :
 //      nothing → no surfaced entry → without this the same thread is re-picked
 //      forever). The agent later appends only surfaced ENTRIES; it must NOT
 //      reconstruct the cursor. EXCEPTION: --dry-run never mutates state, so it
-//      REPORTS the would-be advance but does not write.
+//      REPORTS the would-be advance but does not write. Cursor persistence
+//      happens BEFORE generation so a crashed/zero-artifact run still rotates.
+const runDir = join(runsDir, runId.replace(/[:]/g, "-"));
+const briefPath = join(runDir, "run-brief.md");
+let artifactsPublished: string[] = [];
+
+// Persist the advanced cursor authoritatively whenever we are NOT a dry-run
+// (both real generation AND --no-generate own the cursor; only --dry-run
+// abstains from mutating state).
+async function persistCursor(): Promise<void> {
+  if (advance.next) {
+    await writeLedger(ledgerPath, ledger);
+  }
+}
+
 if (dryRun) {
   log("generate", "skipped", "--dry-run: stopped after brief (no generation)");
   log(
@@ -394,23 +432,55 @@ if (dryRun) {
       ? `--dry-run: nothing published; WOULD advance deep-dive cursor to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} (not persisted)`
       : "--dry-run: nothing published",
   );
+} else if (noGenerate) {
+  await persistCursor();
+  log("generate", "skipped", "--no-generate: brief produced; headless generation skipped (dry preview)");
+  log(
+    "save",
+    advance.next ? "ok" : "skipped",
+    advance.next
+      ? `deep-dive cursor advanced to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} and persisted; no artifacts (--no-generate)`
+      : "no deep-dive this run (cursor unchanged); no artifacts (--no-generate)",
+  );
 } else {
+  // Persist the cursor first (orchestrator-owned, independent of what ships),
+  // and write the brief to its run dir so the headless agent can read it.
+  await persistCursor();
+  await mkdir(runDir, { recursive: true });
+  await writeFile(briefPath, brief);
+
+  const model = resolveModel(modelArg, process.env);
   log(
     "generate",
-    "skipped",
-    "generation is agent judgment — run the generation skills against the brief (SKILL.md); orchestrator never calls an LLM",
+    "ok",
+    `invoking headless generation agent (claude -p, model ${model}) against the brief`,
   );
-  if (advance.next) {
-    // Persist the advanced cursor authoritatively (cursor only; the agent
-    // appends surfaced entries onto whatever ledger exists at write time).
-    await writeLedger(ledgerPath, ledger);
+  try {
+    const summary = await runGeneration({
+      briefPath,
+      artifactsDir,
+      cap,
+      model: modelArg,
+      repoRoot: process.cwd(),
+      runId,
+      logPath: join(runDir, "generation-log.txt"),
+    });
+    artifactsPublished = summary.created.map((c) => `${c.type}/${c.slug}`);
+    log(
+      "generate",
+      summary.exit_code === 0 ? "ok" : "degraded",
+      summarizeGeneration(summary),
+    );
     log(
       "save",
       "ok",
-      `deep-dive cursor advanced to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} and persisted; publish + surfaced-entry append happen after agent generation (SKILL.md)`,
+      `${artifactsPublished.length} artifact(s) published${advance.next ? `; deep-dive cursor advanced to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} and persisted` : ""}; agent appended surfaced entries (SKILL.md)`,
     );
-  } else {
-    log("save", "skipped", "no deep-dive this run (cursor unchanged); publish + surfaced-entry append happen after agent generation (SKILL.md)");
+  } catch (err) {
+    // A generation failure drops THIS run's artifacts, not the run (zero
+    // artifacts is a valid run). The cursor is already persisted above.
+    log("generate", "failed", `headless generation errored: ${String(err).slice(0, 200)}`);
+    log("save", "skipped", "no artifacts (generation failed); cursor already persisted");
   }
 }
 
@@ -421,6 +491,7 @@ const finalLog = await finish(
     recency_paths: recency.map((m) => m.path),
     deepdive_path: deepDive?.path,
     deepdive_wrapped: advance.wrapped,
+    artifacts_published: artifactsPublished,
   },
   brief,
 );
