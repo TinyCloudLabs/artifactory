@@ -63,6 +63,7 @@ import {
   orderedDeepDivePaths,
   parseRelativeSince,
   rankDeepDiveCandidates,
+  rankRecencyByPreference,
   renderBrief,
   resolveSince,
   summarizeRun,
@@ -71,6 +72,10 @@ import {
   type StepLog,
   type StepStatus,
 } from "./feed-run-lib.ts";
+import {
+  parsePreferenceSignal,
+  hasSignal,
+} from "../../query-corpus/scripts/preference-signal.ts";
 
 // ---------------------------------------------------------------------------
 // argv
@@ -197,11 +202,12 @@ const log = (step: StepLog["step"], status: StepStatus, detail: string): void =>
   console.error(`[feed-run] ${step}: ${status}${detail ? ` — ${detail}` : ""}`);
 };
 
-/** Shell a deterministic skill script. Returns ok + captured stderr (counts). */
-function runScript(argv: string[]): { ok: boolean; stderr: string } {
+/** Shell a deterministic skill script. Returns ok + captured stdout/stderr. */
+function runScript(argv: string[]): { ok: boolean; stdout: string; stderr: string } {
   const res = spawnSync("bun", argv, { encoding: "utf8" });
+  const stdout = (res.stdout ?? "").trim();
   const stderr = (res.stderr ?? "").trim();
-  return { ok: res.status === 0, stderr };
+  return { ok: res.status === 0, stdout, stderr };
 }
 
 async function finish(
@@ -220,6 +226,9 @@ async function finish(
     deepdive_path: extras.deepdive_path,
     deepdive_wrapped: extras.deepdive_wrapped ?? false,
     artifacts_published: extras.artifacts_published ?? [],
+    distill_skipped: extras.distill_skipped,
+    distill_pending_events: extras.distill_pending_events,
+    guard: extras.guard,
     outcome,
     finished_at: new Date().toISOString(),
   };
@@ -300,12 +309,21 @@ if (sinceArg) {
 //    path is overridable via $FEED_RUN_DISTILL_CMD purely as a test seam (a
 //    deliberately-failing stub exercises the degradation branch); production
 //    always uses the real summarize-events.ts default.
+//
+//    THE LOOP-CLOSING WIRE (FIX A): the script does the DETERMINISTIC
+//    aggregation; the generation agent does the JUDGMENT that turns it into
+//    [learned] PREFERENCES.md lines. We CAPTURE the aggregation here and embed
+//    it in the brief so the agent has the evidence in-context, and the brief +
+//    both SKILL.md mandate distill-preferences as the agent's FIRST task
+//    (update [learned] lines → re-read fresh PREFERENCES.md → THEN generate).
+//    The orchestrator stays LLM-free; the agent owns the write.
 let distillDegraded = false;
+let feedbackSummary: string | undefined;
 {
   const distillScript =
     process.env.FEED_RUN_DISTILL_CMD ??
     "skills/distill-preferences/scripts/summarize-events.ts";
-  const { ok, stderr } = runScript([
+  const { ok, stdout, stderr } = runScript([
     distillScript,
     "--format",
     "md",
@@ -316,10 +334,11 @@ let distillDegraded = false;
     distillDegraded = true;
     log("distill", "degraded", `summarize-events failed; using existing ${preferencesPath}. ${lastLine(stderr)}`);
   } else {
-    // The aggregation succeeded; the PREFERENCES.md UPDATE itself is agent
-    // judgment (distill-preferences SKILL.md) and is not performed here. We
-    // simply carry the current PREFERENCES.md into the brief as last-known-good.
-    log("distill", "ok", "feedback aggregated; PREFERENCES.md update is agent judgment (brief carries current panel)");
+    // The aggregation succeeded; CARRY ITS OUTPUT into the brief. The
+    // PREFERENCES.md UPDATE itself is agent judgment (distill-preferences
+    // SKILL.md) performed as the agent's FIRST task before generating.
+    feedbackSummary = stdout || undefined;
+    log("distill", "ok", "feedback aggregated → embedded in brief; agent applies distill-preferences as task #1 (updates [learned] lines, then re-reads + generates)");
   }
 }
 let preferences = "(no PREFERENCES.md found)";
@@ -341,7 +360,7 @@ const recencyResult: QueryResult = queryCorpus(index, baseline, ledger, {
   unsurfacedOnly: true,
   limit: recencyLimit,
 });
-const recency: QueryMatch[] = recencyResult.matches;
+let recency: QueryMatch[] = recencyResult.matches;
 log(
   "query-recency",
   recency.length > 0 ? "ok" : "skipped",
@@ -349,6 +368,43 @@ log(
     ? `${recency.length} new transcript(s) since ${since}`
     : `recency window empty since ${since} — deep-dive-only run`,
 );
+
+// SELECTION BACKPRESSURE (spec phase 2A): re-rank the RECENCY pool by the
+// [learned] preference signal so transcripts matching Hunter's loves rise and
+// his dislikes sink. DETERMINISTIC + model-free (parsePreferenceSignal +
+// scorePreferenceMatch are pure index-only keyword tallies). The deep-dive
+// cursor below is DELIBERATELY left preference-agnostic — that's the
+// exploration reserve (see feed-run-lib.ts rankRecencyByPreference doc). We log
+// the weighting transparently: every candidate that moved carries its keyword
+// hits. (Preferences read here are the PRE-distill panel; the agent's distill
+// updates [learned] lines for the NEXT run's selection — selection backpressure
+// is one run behind generation backpressure, by construction.)
+// NB: this is TRANSPARENCY logging on the same `query-recency` step (stderr
+// only) — it deliberately does NOT push another StepLog, so the pipeline step
+// sequence stays singular (index → distill → query-recency → query-deepdive →
+// …). The weighting reorders `recency` in place for the brief.
+const prefSignal = parsePreferenceSignal(preferences);
+if (recency.length > 0 && hasSignal(prefSignal)) {
+  const recordByPath = new Map(index.transcripts.map((r) => [r.path, r]));
+  const rankedRecency = rankRecencyByPreference(
+    recency,
+    prefSignal,
+    (p) => recordByPath.get(p),
+  );
+  recency = rankedRecency.map((r) => r.match);
+  const moved = rankedRecency.filter((r) => r.preferenceScore !== 0);
+  console.error(
+    `[feed-run] query-recency: preference-weighted — ${prefSignal.loved.size} loved + ` +
+      `${prefSignal.disliked.size} disliked keyword(s); ` +
+      `${moved.length}/${rankedRecency.length} candidate(s) moved by preference`,
+  );
+  // Per-candidate transparency (why each ranked where) — to stderr.
+  for (const r of rankedRecency) {
+    console.error(`[feed-run]   recency rank: ${r.match.title ?? r.match.path} — ${r.rationale}`);
+  }
+} else if (recency.length > 0) {
+  console.error("[feed-run] query-recency: preference signal empty — recency order unchanged (newest-first)");
+}
 
 // 3b. QUERY — deep-dive: ONE high-novelty, never-surfaced older thread past the
 //     cursor; advance the cursor. No eligible candidate → recency-only run.
@@ -387,6 +443,7 @@ const brief = renderBrief({
   deepDiveWrapped: advance.wrapped,
   preferences,
   distillDegraded,
+  feedbackSummary,
   baselineSummary,
 });
 log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 : 0} deep-dive, cap ${cap})`);
@@ -413,6 +470,12 @@ log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 :
 const runDir = join(runsDir, runId.replace(/[:]/g, "-"));
 const briefPath = join(runDir, "run-brief.md");
 let artifactsPublished: string[] = [];
+// PR #8 review enforcement (findings A + B): the human-line guard outcome and
+// the distill-skipped flag for the run-log. Undefined unless a real agent
+// distill ran (set in the real-generation branch below).
+let guardOutcome: "ok" | "violation" | undefined;
+let distillSkipped: boolean | undefined;
+let distillPendingEvents: number | undefined;
 
 // Persist the advanced cursor authoritatively whenever we are NOT a dry-run
 // (both real generation AND --no-generate own the cursor; only --dry-run
@@ -449,6 +512,36 @@ if (dryRun) {
   await mkdir(runDir, { recursive: true });
   await writeFile(briefPath, brief);
 
+  // FINDING A — DETERMINISTIC HUMAN-LINE GUARD. Snapshot PREFERENCES.md BEFORE
+  // the agent touches it (the agent's distill task #1 happens inside the
+  // generation call). After the agent writes we ASSERT no human (non-[learned])
+  // line changed and RESTORE the file if one did. Snapshot lives in the run dir
+  // so it never collides with a concurrent run.
+  //
+  // NOTE (PR #8): this branch only runs when feed-run.ts is invoked in DIRECT
+  // real-generation mode (no --dry-run / no --no-generate). PRODUCTION does not
+  // take this path — the launchd plist + Generate button spawn ops/launchd/
+  // feedrun.sh, whose `claude -p` agent runs feed-run.ts --no-generate and then
+  // self-distills + self-generates. The PRODUCTION guard therefore lives in
+  // feedrun.sh, which brackets that `claude -p` call with the same snapshot →
+  // check → verify-distill sequence. This in-orchestrator copy is DEFENSE IN
+  // DEPTH for the direct-CLI path (and is exercised by the wrapper-flow test in
+  // tests/feedrun-wrapper-guard.test.ts, which drives the production sequence).
+  const guardSnapshot = join(runDir, "preferences-guard-snapshot.md");
+  const snap = runScript([
+    "skills/distill-preferences/scripts/guard-preferences.ts",
+    "snapshot",
+    "--preferences",
+    preferencesPath,
+    "--snapshot",
+    guardSnapshot,
+  ]);
+  if (!snap.ok) {
+    // Snapshot is cheap and should not fail; if it does, log and proceed
+    // unguarded rather than abort the whole run (the run still produces value).
+    log("guard", "degraded", `pre-distill snapshot failed: ${lastLine(snap.stderr)}`);
+  }
+
   const model = resolveModel(modelArg, process.env);
   log(
     "generate",
@@ -465,6 +558,72 @@ if (dryRun) {
       runId,
       logPath: join(runDir, "generation-log.txt"),
     });
+
+    // FINDING A — CHECK. The agent has written; assert the human lines survived.
+    // A violation RESTORES PREFERENCES.md from the snapshot (the CLI does it)
+    // and we record guard=violation in the run-log.
+    if (snap.ok) {
+      const check = runScript([
+        "skills/distill-preferences/scripts/guard-preferences.ts",
+        "check",
+        "--preferences",
+        preferencesPath,
+        "--snapshot",
+        guardSnapshot,
+      ]);
+      if (check.ok) {
+        guardOutcome = "ok";
+        log("guard", "ok", "human (non-[learned]) lines intact after distill");
+      } else {
+        guardOutcome = "violation";
+        log(
+          "guard",
+          "failed",
+          `human line changed by distill — PREFERENCES.md RESTORED from snapshot. ${lastLine(check.stderr)}`,
+        );
+      }
+    }
+
+    // FINDING B — POST-RUN DISTILL VERIFICATION. Confirm the distill actually
+    // happened: if there are new feedback events since the last distill, the
+    // [learned] section must have changed OR the agent must have logged an
+    // explicit "no change warranted". Otherwise flag distill_skipped=true.
+    const verify = runScript([
+      "skills/distill-preferences/scripts/verify-distill.ts",
+      "--run-id",
+      runId,
+      "--events",
+      "feedback/events.jsonl",
+      "--preferences",
+      preferencesPath,
+      "--cursor",
+      "index/distill-cursor.json",
+      "--artifacts-dir",
+      artifactsDir,
+      "--distill-log",
+      join(runDir, "generation-log.txt"),
+    ]);
+    if (verify.ok) {
+      try {
+        const v = JSON.parse(verify.stdout.trim().split("\n").pop() ?? "{}") as {
+          distill_skipped?: boolean;
+          pending_events?: number;
+          detail?: string;
+        };
+        distillSkipped = v.distill_skipped === true;
+        distillPendingEvents = v.pending_events;
+        log(
+          "verify-distill",
+          distillSkipped ? "degraded" : "ok",
+          v.detail ?? (distillSkipped ? "distill skipped with pending events" : "distill verified"),
+        );
+      } catch {
+        log("verify-distill", "degraded", `could not parse verification output: ${lastLine(verify.stdout)}`);
+      }
+    } else {
+      log("verify-distill", "degraded", `verification failed: ${lastLine(verify.stderr)}`);
+    }
+
     artifactsPublished = summary.created.map((c) => `${c.type}/${c.slug}`);
     log(
       "generate",
@@ -492,6 +651,9 @@ const finalLog = await finish(
     deepdive_path: deepDive?.path,
     deepdive_wrapped: advance.wrapped,
     artifacts_published: artifactsPublished,
+    distill_skipped: distillSkipped,
+    distill_pending_events: distillPendingEvents,
+    guard: guardOutcome,
   },
   brief,
 );
