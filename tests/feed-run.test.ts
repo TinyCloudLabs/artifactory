@@ -532,7 +532,9 @@ describe("feed-run CLI (e2e, synthetic corpus)", () => {
     expect(finalLog.steps?.map((s) => s.step)).toEqual([
       "index", "distill", "query-recency", "query-deepdive", "brief", "generate", "save",
     ]);
-  });
+    // e2e: spawns the real CLI with a deliberately slow distill step — the
+    // default 5s budget flakes when the full suite runs files in parallel.
+  }, 30_000);
 
   test("--run-id is honored (the Generate button picks the id; orchestrator writes that dir)", async () => {
     const runId = "2026-06-11T07:00:00.000Z";
