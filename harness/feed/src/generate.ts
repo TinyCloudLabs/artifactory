@@ -553,14 +553,23 @@ export function buildStages(
   return { stages, current };
 }
 
-/** Count artifact.json files under artifactsDir whose mtime is at/after `sinceMs`. */
-export async function countArtifactsSince(artifactsDir: string, sinceMs: number): Promise<number> {
+/**
+ * Count artifact.json files under artifactsDir whose mtime is at/after `sinceMs`,
+ * and report the NEWEST such mtime (0 if none). The newest mtime is folded into
+ * the staleness `freshest` floor so a healthy long generate that is still landing
+ * artifacts is never false-stalled (review finding #3b). Returns both in one walk.
+ */
+export async function countArtifactsSince(
+  artifactsDir: string,
+  sinceMs: number,
+): Promise<{ count: number; newestMtimeMs: number }> {
   let count = 0;
+  let newestMtimeMs = 0;
   let types: { name: string; isDirectory(): boolean }[];
   try {
     types = await readdir(artifactsDir, { withFileTypes: true });
   } catch {
-    return 0; // no artifacts dir yet
+    return { count: 0, newestMtimeMs: 0 }; // no artifacts dir yet
   }
   for (const t of types) {
     if (!t.isDirectory()) continue;
@@ -577,13 +586,16 @@ export async function countArtifactsSince(artifactsDir: string, sinceMs: number)
         const st = await stat(af);
         // mtime tolerance: a 1s clock-skew grace so an artifact written in the
         // same second as started_at still counts (mtime resolution + write lag).
-        if (st.mtimeMs >= sinceMs - 1000) count += 1;
+        if (st.mtimeMs >= sinceMs - 1000) {
+          count += 1;
+          if (st.mtimeMs > newestMtimeMs) newestMtimeMs = st.mtimeMs;
+        }
       } catch {
         // no artifact.json in this slug dir — skip
       }
     }
   }
-  return count;
+  return { count, newestMtimeMs };
 }
 
 /**
@@ -678,8 +690,14 @@ export async function readRunProgress(
     latestActivity = null; // graceful degrade — no activity line, never broken
   }
 
-  // Artifact fill signal (count fresh artifact.json since started_at).
-  const artifactsProduced = startedMs > 0 ? await countArtifactsSince(artifactsDir, startedMs) : 0;
+  // Artifact fill signal (count fresh artifact.json since started_at). The newest
+  // artifact mtime feeds the staleness floor below so a run still landing
+  // artifacts is never false-stalled.
+  const artifactScan =
+    startedMs > 0
+      ? await countArtifactsSince(artifactsDir, startedMs)
+      : { count: 0, newestMtimeMs: 0 };
+  const artifactsProduced = artifactScan.count;
 
   // ---- terminal / status resolution -------------------------------------
   const stampStatus = (stamp?.status ?? "").toLowerCase();
@@ -700,12 +718,21 @@ export async function readRunProgress(
   else status = "running";
 
   // Staleness: only meaningful while still "running". The freshest signal mtime
-  // (run-log, progress.jsonl, status stamp) plus the start time bound how long
-  // we've gone without movement. If artifacts are still appearing the count read
-  // is implicitly fresh, so we also consider a recent artifact as liveness by
-  // re-reading nothing extra — startedMs is the floor.
+  // bounds how long we've gone without movement. We now fold in (a) the newest
+  // artifact mtime — a run still landing artifacts IS alive (review finding #3b:
+  // the old code claimed fresh artifacts counted as liveness but never folded
+  // their mtime in), and (b) the incremental run-log mtime, which now genuinely
+  // advances per pipeline step (fix #1) — so a healthy run is no longer
+  // false-stalled the moment it crosses the 8-min floor between deterministic
+  // steps. startedMs remains the floor.
   if (status === "running") {
-    const freshest = Math.max(runLogMtimeMs, progressMtimeMs, stampMtimeMs, startedMs);
+    const freshest = Math.max(
+      runLogMtimeMs,
+      progressMtimeMs,
+      stampMtimeMs,
+      artifactScan.newestMtimeMs,
+      startedMs,
+    );
     if (freshest > 0 && nowMs - freshest > STALE_AFTER_MS) {
       status = "stalled";
     }

@@ -139,19 +139,22 @@ describe("countArtifactsSince", () => {
     await writeArtifact("insight-card", "old", STARTED_MS - 60_000); // before
     await writeArtifact("insight-card", "fresh-a", STARTED_MS + 10_000); // after
     await writeArtifact("article", "fresh-b", STARTED_MS + 20_000); // after
-    const n = await countArtifactsSince(artifactsDir, STARTED_MS);
-    expect(n).toBe(2);
+    const r = await countArtifactsSince(artifactsDir, STARTED_MS);
+    expect(r.count).toBe(2);
+    // newest mtime is the later of the two fresh artifacts (folded into staleness).
+    expect(r.newestMtimeMs).toBe(STARTED_MS + 20_000);
   });
 
   test("missing artifacts dir → 0 (never throws)", async () => {
-    const n = await countArtifactsSince(join(repoRoot, "nope"), STARTED_MS);
-    expect(n).toBe(0);
+    const r = await countArtifactsSince(join(repoRoot, "nope"), STARTED_MS);
+    expect(r.count).toBe(0);
+    expect(r.newestMtimeMs).toBe(0);
   });
 
   test("ignores dirs without an artifact.json", async () => {
     await mkdir(join(artifactsDir, "insight-card", "empty"), { recursive: true });
-    const n = await countArtifactsSince(artifactsDir, STARTED_MS);
-    expect(n).toBe(0);
+    const r = await countArtifactsSince(artifactsDir, STARTED_MS);
+    expect(r.count).toBe(0);
   });
 });
 
@@ -289,6 +292,26 @@ describe("readRunProgress — STALLED detection", () => {
     await utimes(join(runDir, "status.json"), fresh, fresh);
     const p = await readRunProgress(runId, { repoRoot, runsDir, artifactsDir }, now);
     expect(p.status).toBe("running");
+  });
+
+  test("a FRESH ARTIFACT keeps a long generate running even when run-log/status are stale (review #3b)", async () => {
+    // The failure the review flagged: a healthy multi-artifact generate that
+    // hasn't bumped run-log/status for > STALE_AFTER_MS, but IS still landing
+    // artifacts, was false-stalled because artifact mtimes were never folded into
+    // `freshest`. Now they are.
+    const runId = STARTED;
+    const runDir = await stampStatus(runId);
+    await writeRunLog(runDir, { cap: 3, steps: [{ step: "generate", status: "active" }] });
+    const now = () => STARTED_MS + STALE_AFTER_MS + 60_000;
+    // Backdate run-log + status so they alone would trip the stall threshold.
+    const stale = (STARTED_MS - 60_000) / 1000;
+    await utimes(join(runDir, "run-log.json"), stale, stale);
+    await utimes(join(runDir, "status.json"), stale, stale);
+    // But a fresh artifact landed seconds ago → the run is demonstrably alive.
+    await writeArtifact("insight-card", "just-shipped", now() - 5_000);
+    const p = await readRunProgress(runId, { repoRoot, runsDir, artifactsDir }, now);
+    expect(p.status).toBe("running"); // NOT stalled — the artifact is liveness
+    expect(p.artifacts_produced).toBe(1);
   });
 });
 

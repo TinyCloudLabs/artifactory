@@ -39,7 +39,7 @@
 // PREFERENCES.md (logged); empty recency → deep-dive-only; no eligible deep-dive
 // → recency-only. All step outcomes append to a structured run log.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { readIndex } from "../../index-corpus/scripts/corpus-index.ts";
@@ -67,6 +67,7 @@ import {
   renderBrief,
   resolveSince,
   summarizeRun,
+  type PipelineStep,
   type RunLog,
   type RunMode,
   type StepLog,
@@ -202,11 +203,102 @@ if (mode === "backfill") {
   );
 }
 
+// The sanitized run-dir name (colons → dashes) — MUST match how generate.ts
+// (runDirName) + the route name index/runs/<sanitized>/, so the status endpoint
+// reads the same run-log this orchestrator writes incrementally.
+const runDirName = runId.replace(/[:]/g, "-");
+const progressRunDir = join(runsDir, runDirName);
+const progressLogPath = join(progressRunDir, "run-log.json");
+
+// INCREMENTAL RUN-LOG (PR #14 fix #1). The status endpoint reads run-log.json's
+// steps[] to drive the live stage track. If we only wrote it in finish() (once,
+// at the end) the bar would sit inert all run then snap to done. So we persist a
+// PARTIAL run-log after EACH step completes — atomic (tmp + rename) and cheap —
+// and keep the authoritative full write in finish(). The partial carries the
+// in-flight steps[] (+ run_id/mode/dry_run/cap) with NO terminal `outcome`, so
+// the endpoint reads it as still-running (isDone keys off outcome:"completed").
+let runDirReady = false;
+// Serialize progress writes (and the final finish() write) onto one chain so a
+// fire-and-forget partial can never rename-clobber a later, more-complete write.
+let progressChain: Promise<void> = Promise.resolve();
+function persistProgress(): Promise<void> {
+  // Snapshot the steps SYNCHRONOUSLY so the serialized body reflects the state
+  // at call time (steps[] keeps growing after this returns).
+  const body =
+    JSON.stringify(
+      { run_id: runId, mode, dry_run: dryRun, cap, steps: steps.slice() },
+      null,
+      2,
+    ) + "\n";
+  progressChain = progressChain.then(async () => {
+    try {
+      if (!runDirReady) {
+        await mkdir(progressRunDir, { recursive: true });
+        runDirReady = true;
+      }
+      const tmp = `${progressLogPath}.tmp`;
+      await writeFile(tmp, body);
+      await rename(tmp, progressLogPath);
+    } catch {
+      // Best-effort progress view — a write failure must NEVER fail the run. The
+      // authoritative run-log is still written by finish().
+    }
+  });
+  return progressChain;
+}
+
+// Persist a partial run-log where `step` is marked `active` (in-flight) ON TOP of
+// the committed steps[]. Used for the long GENERATE step: the agent works for
+// minutes, so we flip generate→active the moment it starts (UI shows "Generating…"
+// + artifact count fills within it) WITHOUT pushing a non-terminal status into the
+// typed steps[] — the real terminal generate outcome is log()'d when runGeneration
+// returns. The endpoint's buildStages reads `active` directly; the value never
+// reaches the authoritative finish() run-log.
+function markActive(step: PipelineStep, detail: string): Promise<void> {
+  console.error(`[feed-run] ${step}: active${detail ? ` — ${detail}` : ""}`);
+  const body =
+    JSON.stringify(
+      {
+        run_id: runId,
+        mode,
+        dry_run: dryRun,
+        cap,
+        steps: [...steps, { step, status: "active", detail }],
+      },
+      null,
+      2,
+    ) + "\n";
+  progressChain = progressChain.then(async () => {
+    try {
+      if (!runDirReady) {
+        await mkdir(progressRunDir, { recursive: true });
+        runDirReady = true;
+      }
+      const tmp = `${progressLogPath}.tmp`;
+      await writeFile(tmp, body);
+      await rename(tmp, progressLogPath);
+    } catch {
+      /* best-effort */
+    }
+  });
+  return progressChain;
+}
+
 const steps: StepLog[] = [];
 const log = (step: StepLog["step"], status: StepStatus, detail: string): void => {
   steps.push({ step, status, detail });
   console.error(`[feed-run] ${step}: ${status}${detail ? ` — ${detail}` : ""}`);
+  // Persist the partial run-log after each step so a poller sees stages advance
+  // in real time (fire-and-forget; ordering is preserved because each call
+  // serializes a snapshot of the same growing steps[] array).
+  void persistProgress();
 };
+
+// t=0 WRITE: materialize the run dir + an (empty-steps) run-log within the first
+// second of the run, BEFORE any pipeline step, so a poller never sees an empty
+// "is it alive?" gap — the stage track renders index→…→save all-pending/active
+// immediately, and a dead run is distinguishable from a healthy one faster.
+void persistProgress();
 
 /** Shell a deterministic skill script. Returns ok + captured stdout/stderr. */
 function runScript(argv: string[]): { ok: boolean; stdout: string; stderr: string } {
@@ -239,10 +331,16 @@ async function finish(
     outcome,
     finished_at: new Date().toISOString(),
   };
-  // Write the structured run log (per-run dir) + append the one-liner (§7).
-  const runDir = join(runsDir, runId.replace(/[:]/g, "-"));
+  // Write the AUTHORITATIVE structured run log (per-run dir) + append the
+  // one-liner (§7). Drain any in-flight incremental progress writes FIRST and
+  // chain this onto the same serial queue so a late partial can never
+  // rename-clobber this final, terminal-outcome write.
+  const runDir = progressRunDir;
+  await progressChain;
   await mkdir(runDir, { recursive: true });
-  await writeFile(join(runDir, "run-log.json"), JSON.stringify(full, null, 2) + "\n");
+  const finalTmp = `${progressLogPath}.tmp`;
+  await writeFile(finalTmp, JSON.stringify(full, null, 2) + "\n");
+  await rename(finalTmp, progressLogPath);
   if (brief !== undefined) {
     await writeFile(join(runDir, "run-brief.md"), brief);
   }
@@ -494,7 +592,7 @@ log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 :
 //      reconstruct the cursor. EXCEPTION: --dry-run never mutates state, so it
 //      REPORTS the would-be advance but does not write. Cursor persistence
 //      happens BEFORE generation so a crashed/zero-artifact run still rotates.
-const runDir = join(runsDir, runId.replace(/[:]/g, "-"));
+const runDir = progressRunDir; // index/runs/<sanitized-run-id>
 const briefPath = join(runDir, "run-brief.md");
 let artifactsPublished: string[] = [];
 let draftsProduced: string[] = [];
@@ -571,9 +669,12 @@ if (dryRun) {
   }
 
   const model = resolveModel(modelArg, process.env);
-  log(
+  // Flip generate→ACTIVE the instant the long agent call starts (it runs for
+  // minutes). The UI shows "Generating…" + the artifact count fills within this
+  // window. The real terminal generate status is log()'d below once the agent
+  // returns; markActive does NOT push a non-terminal status into steps[].
+  await markActive(
     "generate",
-    "ok",
     `invoking headless generation agent (claude -p, model ${model}) against the brief`,
   );
   try {
