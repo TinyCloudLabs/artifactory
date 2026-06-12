@@ -71,18 +71,72 @@ if [[ "$DRY_RUN" != "1" ]]; then
 fi
 
 # --- concurrency lock (spec §10 R1) -------------------------------------------
-LOCK="$REPO/index/.run.lock"
+# ATOMIC acquire (review High #2): the old `[[ -f $LOCK ]]` … `printf > $LOCK`
+# was check-then-write — two wrappers (button + cron, or two clicks) could both
+# pass the `-f` test before either wrote, and both run → double Gemini spend.
+# `mkdir` is atomic (a single syscall that fails if the dir exists), so exactly
+# one wrapper wins the create. The pid file inside the lockdir carries the owner
+# for stale detection. The cleanup trap is armed ONLY after WE win the acquire,
+# so a LOSING wrapper can never `rm` the winner's lock.
+LOCK="$REPO/index/.run.lock"          # the route's TS lock uses this exact path (a file)
+LOCK_DIR="$REPO/index/.run.lock.d"    # the wrapper's atomic lockdir
 mkdir -p "$REPO/index"
-if [[ -f "$LOCK" ]]; then
-  LOCK_PID="$(head -n1 "$LOCK" 2>/dev/null || true)"
-  if [[ -n "$LOCK_PID" ]] && kill -0 "$LOCK_PID" 2>/dev/null; then
-    echo "[feedrun] a run is already in progress (pid $LOCK_PID, lock $LOCK) — aborting." >&2
-    exit 75  # EX_TEMPFAIL → the Generate route maps this to HTTP 409
+
+# Stamp OUR ownership into the freshly-won lockdir. Called the instant after a
+# winning `mkdir`, so the pid file exists before any competitor inspects it (no
+# empty-pid window that a racer could mis-read as stale).
+stamp_lock() {
+  printf '%s\n%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_DIR/pid"
+  printf '%s\n%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK"
+}
+
+acquire_lock() {
+  # Try the atomic create. On success WE own the lock — stamp it immediately.
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    stamp_lock
+    return 0
   fi
-  echo "[feedrun] stale lock for dead pid $LOCK_PID — reclaiming." >&2
+  # Lock exists. Is the holder alive? A live holder (or a winner mid-stamp whose
+  # pid file we can't read yet) means we LOSE — never reclaim a lock we cannot
+  # prove is stale. Only a readable, dead pid is reclaimable.
+  local owner
+  owner="$(head -n1 "$LOCK_DIR/pid" 2>/dev/null || true)"
+  if [[ -z "$owner" ]]; then
+    return 1  # can't prove staleness → treat as held (avoid stealing a live lock)
+  fi
+  if kill -0 "$owner" 2>/dev/null; then
+    return 1  # live holder — we lose
+  fi
+  echo "[feedrun] stale lock for dead pid $owner — reclaiming." >&2
+  rm -rf "$LOCK_DIR"
+  # Retry the atomic create exactly once; a concurrent reclaimer may beat us.
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    stamp_lock
+    return 0
+  fi
+  return 1
+}
+
+if ! acquire_lock; then
+  LOCK_PID="$(head -n1 "$LOCK_DIR/pid" 2>/dev/null || true)"
+  echo "[feedrun] a run is already in progress (pid ${LOCK_PID:-?}, lock $LOCK_DIR) — aborting." >&2
+  exit 75  # EX_TEMPFAIL → the Generate route maps this to HTTP 409
 fi
-printf '%s\n%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK"
-trap 'rm -f "$LOCK"' EXIT INT TERM
+# We own the lock (stamped in acquire_lock). Arm cleanup ONLY now — a loser
+# never reaches this line, so it can never delete the winner's lock. The legacy
+# single-file lock ($LOCK) is kept in sync so the route's readLock still sees a
+# live holder during the run.
+trap 'rm -rf "$LOCK_DIR"; rm -f "$LOCK"' EXIT INT TERM
+
+# TEST SEAM: with FEEDRUN_LOCK_HOLD=<seconds> the wrapper acquires the lock, holds
+# it for that long, then exits WITHOUT running generation (no claude/bun spend).
+# Lets the lock-atomicity regression test drive the REAL acquire path. Never set
+# in prod (cron/button leave it unset).
+if [[ -n "${FEEDRUN_LOCK_HOLD:-}" ]]; then
+  echo "[feedrun] TEST: lock held by pid $$ for ${FEEDRUN_LOCK_HOLD}s, then exit." >&2
+  sleep "$FEEDRUN_LOCK_HOLD"
+  exit 0
+fi
 
 # --- the run ------------------------------------------------------------------
 MODE="${FEEDRUN_MODE:-daily}"

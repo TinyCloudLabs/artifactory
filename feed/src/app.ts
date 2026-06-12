@@ -15,6 +15,7 @@ import {
 import { scanArtifacts } from "./scan.ts";
 import { resolveAuth, setupAuth, type AuthEnv, type AuthOptions } from "./auth.ts";
 import {
+  isValidRunId,
   parseGenerateBody,
   readRunStatus,
   startGeneration,
@@ -295,7 +296,12 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     if (!generateConfig) {
       return c.json({ error: "generation not configured on this server" }, 501);
     }
-    const status = await readRunStatus(c.req.param("run_id"), generateConfig);
+    const runId = c.req.param("run_id");
+    // SECURITY (path traversal): reject an out-of-format run_id with 400 BEFORE
+    // any path join. The strict allowlist (ISO-timestamp charset, no `..`, no
+    // slash) makes `GET /api/generate/..%2f..%2fsecret` a 400, not a path read.
+    if (!isValidRunId(runId)) return c.json({ error: "invalid run_id" }, 400);
+    const status = await readRunStatus(runId, generateConfig);
     if (status.status === "unknown") return c.json({ error: "run not found" }, 404);
     return c.json(status);
   });

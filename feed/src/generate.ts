@@ -18,12 +18,63 @@
 
 import { spawn as nodeSpawn } from "node:child_process";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync as writeFileSyncNode,
+  unlinkSync as unlinkSyncNode,
+  mkdirSync,
+} from "node:fs";
+import { join, resolve, relative, sep, dirname } from "node:path";
+
+/**
+ * The exact charset a run id may contain. Run ids are emitted by the runner as
+ * ISO-8601 timestamps (`newRunId` → `Date.toISOString()`, e.g.
+ * `2026-06-11T14:00:00.000Z`). On disk the colons are swapped for dashes
+ * (`runDirName`), so the on-disk form is `2026-06-11T14-00-00.000Z`. Both forms
+ * live entirely within `[0-9A-Za-z._-]` plus `:` — NEVER a slash, dot-dot, or
+ * percent-encoding. Anything outside this charset is rejected with 400 BEFORE we
+ * touch the filesystem, which structurally closes the `..%2f..%2fsecret`
+ * traversal class (decoded `../` contains a `/`, which is not in the charset).
+ */
+const RUN_ID_RE = /^[0-9A-Za-z:._-]+$/;
+
+/**
+ * Is `runId` a syntactically valid run id (the strict allowlist)? Rejects empty
+ * strings, anything with a slash / backslash / dot-dot / null byte / percent /
+ * whitespace. This is the first gate the GET route applies — a 400 here means we
+ * never path-join attacker-controlled input. Belt-and-suspenders with the
+ * post-resolve containment assert below.
+ */
+export function isValidRunId(runId: string): boolean {
+  if (typeof runId !== "string" || runId.length === 0 || runId.length > 64) return false;
+  if (runId.includes("..")) return false; // no traversal segment, even within the charset
+  return RUN_ID_RE.test(runId);
+}
 
 /** A run id → its sanitized directory name (colons are illegal-ish on disk). */
 export function runDirName(runId: string): string {
   return runId.replace(/[:]/g, "-");
+}
+
+/**
+ * Resolve a run dir under `runsDir` and ASSERT it stays inside `runsDir`.
+ * Returns the absolute run dir, or `null` if the resolved path escapes (a
+ * defence-in-depth backstop behind `isValidRunId`). The guard is a
+ * `path.relative` starts-with check: if the relative path from runsDir to the
+ * target begins with `..` (or is absolute), the target is outside.
+ */
+export function safeRunDir(runsDir: string, runId: string): string | null {
+  if (!isValidRunId(runId)) return null;
+  const base = resolve(runsDir);
+  const target = resolve(base, runDirName(runId));
+  const rel = relative(base, target);
+  if (rel === "" || rel === "." || (!rel.startsWith(".." + sep) && rel !== ".." && !rel.startsWith("/"))) {
+    // `rel === ""` would mean target === base (the runs dir itself), reject that too.
+    if (rel === "" || rel === ".") return null;
+    return target;
+  }
+  return null;
 }
 
 /** Generate a fresh, sortable, filesystem-safe run id (ISO timestamp). */
@@ -143,6 +194,52 @@ export function readLock(lockPath: string): { held: boolean; pid?: number } {
 }
 
 /**
+ * ATOMICALLY acquire the run lock (closing the route's TOCTOU window — review
+ * High #2). A plain check-then-write (`readLock` then `writeFile`) lets two
+ * concurrent POSTs both pass the read and both spawn → double Gemini spend. This
+ * does the create with `flag: "wx"` (O_CREAT|O_EXCL) — the OS guarantees exactly
+ * one writer wins on `EEXIST`. If the existing lock is STALE (dead pid), it is
+ * reclaimed: unlink + retry once (matches the wrapper's stale-lock policy).
+ *
+ * Returns `{ ok: true }` for the winner, or `{ ok: false, pid }` (the live
+ * holder) for the loser → the route maps that to 409. Synchronous create on top
+ * of `writeFileSync` so there is no `await` gap between the EEXIST probe and the
+ * reclaim.
+ */
+export function acquireLock(lockPath: string, pid = process.pid): { ok: true } | { ok: false; pid?: number } {
+  const payload = `${pid}\n${new Date().toISOString()}\n`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSyncNode(lockPath, payload, { flag: "wx" }); // O_EXCL: atomic create-or-fail
+      return { ok: true };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Lock exists — is the holder alive? A live holder loses us the race (409).
+      const held = readLock(lockPath);
+      if (held.held) return { ok: false, pid: held.pid };
+      // Stale lock (dead pid / unreadable). Reclaim it and retry the atomic create.
+      try {
+        unlinkSyncNode(lockPath);
+      } catch {
+        // someone else reclaimed it first — loop will EEXIST again or succeed
+      }
+    }
+  }
+  // Two reclaim attempts both lost to a concurrent winner — treat as held.
+  const held = readLock(lockPath);
+  return { ok: false, pid: held.pid };
+}
+
+/** Release a lock acquired by `acquireLock`. Best-effort; never throws. */
+export function releaseLock(lockPath: string): void {
+  try {
+    unlinkSyncNode(lockPath);
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
  * Start a generation run (POST /api/generate). Checks the lock (409 if held),
  * writes a `running` status record into the run dir, then spawns the wrapper
  * DETACHED (the route returns immediately; the run outlives the request). The
@@ -167,8 +264,19 @@ export async function startGeneration(
   const baseEnv = cfg.env ?? process.env;
   const now = cfg.now ?? (() => new Date());
 
-  const lock = readLock(lockPath);
-  if (lock.held) return { ok: false, reason: "locked", pid: lock.pid };
+  // ATOMICALLY claim the lock up front (review High #2): a plain readLock
+  // pre-check is check-then-write — two concurrent POSTs both pass it and both
+  // spawn (double spend). acquireLock uses O_EXCL so exactly one POST wins; the
+  // loser gets 409 here, before any spawn. The wrapper then OVERWRITES this lock
+  // with its own run pid on start (handoff) and removes it on exit. We must
+  // ensure the lock dir exists for the atomic create.
+  try {
+    mkdirSync(dirname(lockPath), { recursive: true });
+  } catch {
+    /* dir already exists */
+  }
+  const acquired = acquireLock(lockPath);
+  if (!acquired.ok) return { ok: false, reason: "locked", pid: acquired.pid };
 
   const mode = req.mode ?? "daily";
   const dryRun = req.dry_run ?? false;
@@ -196,15 +304,26 @@ export async function startGeneration(
     FEEDRUN_RUN_ID: runId,
     FEEDRUN_DRY_RUN: dryRun ? "1" : "0",
   };
-  const child = spawn("/bin/bash", [wrapperPath], {
-    cwd: repoRoot,
-    detached: true,
-    stdio: "ignore",
-    env: childEnv,
-  });
+  let child: ChildHandle;
+  try {
+    child = spawn("/bin/bash", [wrapperPath], {
+      cwd: repoRoot,
+      detached: true,
+      stdio: "ignore",
+      env: childEnv,
+    });
+  } catch (err) {
+    // The spawn itself threw (e.g. ENOENT on the wrapper). Release the lock we
+    // atomically claimed so a failed spawn doesn't wedge every future run.
+    releaseLock(lockPath);
+    throw err;
+  }
   // Don't let the child keep the server's event loop tied to it.
   child.on("error", () => {
-    /* spawn failure surfaces via the status never flipping to done; logged by launchd in prod */
+    // Async spawn failure (ENOENT after the call returned). Release the lock so
+    // the server pid we stamped doesn't block future runs forever. The wrapper,
+    // had it started, would have overwritten + own the lock; it didn't.
+    releaseLock(lockPath);
   });
   child.unref();
 
@@ -223,7 +342,20 @@ export async function readRunStatus(
 ): Promise<RunStatus> {
   const repoRoot = resolve(cfg.repoRoot);
   const runsDir = cfg.runsDir ?? join(repoRoot, "index", "runs");
-  const runDir = join(runsDir, runDirName(runId));
+  // SECURITY: validate + contain BEFORE any path join. An id that fails the
+  // strict allowlist or resolves outside runsDir yields no run dir at all — the
+  // route surfaces this as a 400 (it pre-checks isValidRunId) and we never read
+  // an attacker-chosen path. safeRunDir is the defence-in-depth backstop.
+  const runDir = safeRunDir(runsDir, runId);
+  if (runDir === null) {
+    return {
+      run_id: runId,
+      status: "unknown",
+      dry_run: false,
+      mode: "daily",
+      started_at: "",
+    };
+  }
 
   // The route's own stamp (always written on start).
   let stamp: RunStatus | undefined;
