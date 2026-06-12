@@ -37,10 +37,12 @@ import {
   dedupBySignal,
   diffCreated,
   enforceCap,
+  partitionByRouting,
   readNovelty,
   resolveModel,
   scanArtifacts,
   summarizeGeneration,
+  type ArtifactRef,
   type CreatedArtifact,
   type GenerationSummary,
   type GenInvocationInput,
@@ -165,25 +167,40 @@ export async function runGeneration(opts: RunGenerationOptions): Promise<Generat
   }
   createdRefs = dedup.kept;
 
-  // 2. CAP ENFORCEMENT: if the agent ignored MAX_ARTIFACTS_PER_RUN, keep the
-  //    first `cap` by creation order and quarantine the excess.
-  const capped = await enforceCap(createdRefs, cap, briefDir);
+  // 2. PUBLISHED vs DRAFT routing (Phase 1b — the metadata seam). Outward drafts
+  //    (social-post / investor-update-snippet, born approval_status:"pending")
+  //    are NOT published and do NOT count against the cap — they route to the
+  //    approvals tray. Only internal-audience artifacts (insight-card / article /
+  //    podcast / person-brief) are published, so ONLY THEY are cap-enforced.
+  const { published, drafts } = await partitionByRouting(createdRefs);
+
+  // 3. CAP ENFORCEMENT over the PUBLISHED set only: if the agent ignored
+  //    MAX_ARTIFACTS_PER_RUN, keep the first `cap` by creation order and
+  //    quarantine the excess. Drafts are never cap-quarantined.
+  const capped = await enforceCap(published, cap, briefDir);
   for (const ref of capped.quarantined) {
     quarantined.push({ ref: `${ref.type}/${ref.slug}`, reason: "over-cap" });
   }
-  createdRefs = capped.kept;
 
-  // Enrich the SURVIVORS with novelty for the summary.
-  const created: CreatedArtifact[] = [];
-  for (const ref of createdRefs) {
-    created.push({
-      type: ref.type,
-      slug: ref.slug,
-      novelty: await readNovelty(ref.dir),
-    });
-  }
+  // Enrich the published SURVIVORS + the drafts with novelty for the summary.
+  const enrich = async (refs: ArtifactRef[]): Promise<CreatedArtifact[]> => {
+    const out: CreatedArtifact[] = [];
+    for (const ref of refs) {
+      out.push({ type: ref.type, slug: ref.slug, novelty: await readNovelty(ref.dir) });
+    }
+    return out;
+  };
+  const created = await enrich(capped.kept);
+  const draftSummaries = await enrich(drafts);
 
-  return buildSummary({ created, stdout: result.stdout, duration, exitCode, quarantined });
+  return buildSummary({
+    created,
+    drafts: draftSummaries,
+    stdout: result.stdout,
+    duration,
+    exitCode,
+    quarantined,
+  });
 }
 
 // ---------------------------------------------------------------------------

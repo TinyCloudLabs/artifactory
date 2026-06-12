@@ -58,6 +58,7 @@ bun skills/feed-run/scripts/feed-run.ts \
 | step | what runs | who |
 |---|---|---|
 | 1. INDEX | `index-corpus --prune` (fresh, incremental index) | orchestrator |
+| 1b. SALIENT PEOPLE | `salient-people.ts` over the index — recurring un-briefed speakers (>= N transcripts, minus those who already have a current `artifacts/person-brief/<slug>/`); the **top candidates embed in the brief** | orchestrator (DETERMINISTIC surfacing — NO model calls) |
 | 2. DISTILL (aggregate) | `distill-preferences` aggregation (`summarize-events.ts`), BEFORE generation ([D4]); its output is **embedded in the brief** | orchestrator (aggregation only — NO model calls) |
 | 3a. QUERY recency | `query-corpus --since <since> --unsurfaced-only`, then **preference-WEIGHTED re-rank** (selection backpressure — `rankRecencyByPreference` over the `[learned]` signal) | orchestrator (deterministic, no model calls) |
 | 3b. QUERY deep-dive | one high-novelty, never-surfaced older thread past the cursor (ranked by the novelty proxy); advance **and persist** the cursor. **Preference-AGNOSTIC by design** — the exploration reserve | orchestrator |
@@ -196,6 +197,10 @@ the run-log records.
    `novelty-scan` + the **mandatory adversarial-novelty critic** baked into
    those skills. Honor the cap in the brief (`MAX_ARTIFACTS_PER_RUN`, default 3;
    backfill 25): publish the **best ≤ cap**. **Zero artifacts is a valid run.**
+   You MAY ALSO run the **outward + on-salience miners** (see "The miners this
+   run drives" below): `banger-extractor` + `investor-snippet` produce
+   pending **DRAFTS** (not published, not cap-counted); `person-brief` on a
+   salient un-briefed person publishes internally (cap-counted).
    **Let PREFERENCES.md STEER this (generation backpressure — MANDATORY, not
    optional).** Bias topic/format/depth toward `[learned]` loves; treat a
    `[learned]` `promote` signal as a COMMISSION to expand that thread into a
@@ -236,6 +241,63 @@ the run-log records.
    // owns it; reconstructing from deepDivePath risks clobbering it with undefined).
    await writeLedger("index/surfaced.json", ledger);
    ```
+
+## The miners this run drives (Phase 1b — outward drafts + person-brief on salience)
+
+Beyond the three internal feed miners (`extract-insights`, `write-article`,
+`make-podcast`), the recipe now invokes two more classes of miner. The seam is
+the artifact metadata: **the skills STAMP `audience`/`approval_status`; the
+harness ROUTES on it.**
+
+### Outward miners — `banger-extractor` + `investor-snippet` (DRAFTS, not published)
+
+Over the run's selected transcripts the agent **may also** produce:
+
+- a **`banger-extractor`** → one `social-post` (the single most non-obvious
+  earned secret, scrubbed of customer/person/deal/number), and/or
+- an **`investor-snippet`** → one `investor-update-snippet` (a single credible
+  signal framed for an investor DM, no hype),
+
+**only when the material genuinely warrants it. ZERO is the common, valid
+result** — these are RARER and a HIGHER bar than insight cards. They are born
+`approval_status: "pending"` (the skills stamp this; their `save.ts` *refuses*
+to persist anything pre-approved). **The harness does NOT publish them.** They
+are **DRAFTS** that route to the approvals tray (Phase 1a) for a human to
+approve — they surface there, not in the feed. Never assert a draft is "ready to
+post".
+
+### `person-brief` on salience (INTERNAL — publishes)
+
+The orchestrator runs a **deterministic salient-people detector**
+(`scripts/salient-people.ts`) over the fresh index: it surfaces speakers who
+appear across **>= N transcripts** (default 3) **minus** anyone who already has a
+current `artifacts/person-brief/<slug>/`. The detector decides **WHO recurs**;
+it makes **no model calls** and renders **no judgment** about whether a brief is
+worth writing — that judgment stays with the agent. The brief embeds the **top
+candidates**; the agent generates a grounded `person-brief` for the one(s) it
+judges worth a dossier (the identity-grounding rule is load-bearing — every
+claim cited, every inference marked, no role fabricated). A person-brief is
+`audience: "internal"` and **DOES publish** to the feed.
+
+### Cap handling — the cap counts PUBLISHED artifacts; drafts are separate
+
+`MAX_ARTIFACTS_PER_RUN` (default 3; backfill 25) is a guardrail on **published**
+artifacts — the internal-audience artifacts that go live in the feed
+(`insight-card`, `article`, `podcast`, and `person-brief`). The deterministic
+backstops in `run-generation.ts` enforce this by **partitioning** each run's
+newly-created artifacts on their stamped `audience`:
+
+- **PUBLISHED** (internal / audience-less) → run through in-run dedup **then**
+  cap enforcement (excess quarantined to `index/runs/<id>/over-cap/`), then
+  recorded in the run-log's `artifacts_published`.
+- **DRAFTS** (outward — `audience: "public"` / `"investors"`) → **never** count
+  against the cap and are **never** cap-quarantined; recorded separately in the
+  run-log's `drafts_produced`.
+
+The in-run dedup (one underlying signal → one artifact across formats) still
+binds over the published set. The run-log thus records **drafts produced vs
+published artifacts** distinctly, and the one-line summary appends `drafts=<n>`
+when any draft was produced.
 
 ## Deep-dive cursor (spec §5)
 
@@ -295,8 +357,10 @@ with `mode: "backfill"` — is **deferred to PR6** (noted as a TODO in the code)
 |---|---|---|---|
 | RECENCY_SINCE | `--since` | last run from ledger, else 7 days | recency lower bound (relative `14d`/`3w` or absolute date) |
 | DEEPDIVE_PER_RUN | (fixed) | 1 | older threads excavated per run ([D2]) |
-| MAX_ARTIFACTS_PER_RUN | mode | 3 (daily) / 25 (backfill) | cost guardrail; surfaced in the brief |
+| MAX_ARTIFACTS_PER_RUN | mode | 3 (daily) / 25 (backfill) | cost guardrail on **PUBLISHED** artifacts (internal: cards/articles/podcasts/person-briefs). Outward DRAFTS (banger/investor-snippet) do NOT count. Surfaced in the brief |
 | MAX_ILLUSTRATE | derived | = artifacts published | one hero image per artifact |
+| SALIENCE_MIN_TRANSCRIPTS | (fixed) | 3 | a person must speak across >= this many transcripts to be a person-brief candidate |
+| SALIENT_TOP | (fixed) | 5 | top-N salient un-briefed people surfaced into the brief |
 | (reuse index) | `--skip-index` | off | reuse the existing index instead of re-indexing; lets `--dry-run` / the Generate button run without `$TRANSCRIPT_DIRS` |
 
 ## Consumers
