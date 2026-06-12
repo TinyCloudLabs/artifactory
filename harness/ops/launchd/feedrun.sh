@@ -217,7 +217,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
   # the corpus (and without needing TRANSCRIPT_DIRS).
   bun harness/feed-run/scripts/feed-run.ts \
     --mode "$MODE" --no-generate --skip-index \
-    "${RUN_ID_ARG[@]}" \
+    ${RUN_ID_ARG[@]+"${RUN_ID_ARG[@]}"} \
     ${FEEDRUN_SINCE:+--since "$FEEDRUN_SINCE"}
 else
   # Full headless run. The system prompt fully overrides the default (clean
