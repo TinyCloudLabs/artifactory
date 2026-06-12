@@ -118,11 +118,27 @@ export interface VerifyInput {
   /**
    * Did the agent explicitly log a "no change warranted" decision this run?
    * (e.g. a distill-log line the recipe scans for). An explicit no-op with
-   * pending events is a VALID distill — the agent looked and judged the events
-   * below the ≥2-signal bar. Only a SILENT skip is flagged.
+   * pending events is a VALID distill — but ONLY when the deterministic
+   * aggregate corroborates it (see `aggregateBelowThreshold`). The agent grades
+   * its own homework with this phrase, so the phrase alone can NOT clear a
+   * skip; it must agree with the math.
    */
   explicitNoChangeLogged: boolean;
+  /**
+   * DETERMINISTIC corroboration of a no-change claim (finding B / MEDIUM fix).
+   * True iff the strongest grouping among the PENDING (un-distilled) events
+   * carries FEWER than the ≥2-signal generalization bar — i.e. no preference
+   * could legitimately have been written, so "no change warranted" is the
+   * correct verdict, not a lazy/hallucinated skip. Computed by the CLI from the
+   * same `summarize-events` aggregate the agent reads (not from the agent's
+   * free text). When the aggregate DOES clear the bar, a free-text "no change"
+   * claim is NOT trusted — a real [learned] delta is required.
+   */
+  aggregateBelowThreshold: boolean;
 }
+
+/** The ≥2-consistent-signals generalization bar (distill-preferences SKILL §3). */
+export const SIGNAL_THRESHOLD = 2;
 
 export interface VerifyResult {
   /**
@@ -151,7 +167,13 @@ export interface VerifyResult {
  * decision table. Pure: the CLI feeds it the inputs and persists `nextCursor`.
  */
 export function verifyDistill(input: VerifyInput, runId: string): VerifyResult {
-  const { eventTimestamps, cursor, learnedFingerprintAfter, explicitNoChangeLogged } = input;
+  const {
+    eventTimestamps,
+    cursor,
+    learnedFingerprintAfter,
+    explicitNoChangeLogged,
+    aggregateBelowThreshold,
+  } = input;
   const pendingEvents = newEventsSince(eventTimestamps, cursor.last_event_ts);
   const learnedChanged = learnedFingerprintAfter !== (cursor.learned_fingerprint ?? "");
   const newest = newestEventTs(eventTimestamps);
@@ -168,22 +190,53 @@ export function verifyDistill(input: VerifyInput, runId: string): VerifyResult {
     };
   }
 
-  // Pending events AND the agent acted (changed [learned]) OR explicitly logged
-  // a no-change decision → VERIFIED distill. Advance the cursor.
-  if (learnedChanged || explicitNoChangeLogged) {
+  // A real [learned] delta is always a verified distill — the agent acted.
+  if (learnedChanged) {
     return {
       distillSkipped: false,
       pendingEvents,
-      learnedChanged,
-      detail: learnedChanged
-        ? `distill verified: ${pendingEvents} pending event(s) → [learned] lines changed`
-        : `distill verified: ${pendingEvents} pending event(s) → agent logged "no change warranted"`,
+      learnedChanged: true,
+      detail: `distill verified: ${pendingEvents} pending event(s) → [learned] lines changed`,
       nextCursor: advance(cursor, newest, learnedFingerprintAfter, runId),
     };
   }
 
-  // Pending events AND neither signal → SILENT skip. Flag it; cursor UNCHANGED
-  // so the pending events stay pending for a real distill next run.
+  // No [learned] change. A "no change warranted" CLAIM is only honored when the
+  // DETERMINISTIC aggregate agrees the pending events can't clear the ≥2-signal
+  // bar (MEDIUM fix): the agent can't grade its own homework with a free-text
+  // phrase. Phrase + math-agree → VALID no-op, advance the cursor.
+  if (explicitNoChangeLogged && aggregateBelowThreshold) {
+    return {
+      distillSkipped: false,
+      pendingEvents,
+      learnedChanged: false,
+      detail:
+        `distill verified: ${pendingEvents} pending event(s) → agent logged "no change ` +
+        `warranted" AND the aggregate confirms no grouping reaches the ≥${SIGNAL_THRESHOLD}-signal bar`,
+      nextCursor: advance(cursor, newest, learnedFingerprintAfter, runId),
+    };
+  }
+
+  // A claimed no-op that the math CONTRADICTS — the aggregate shows a grouping
+  // that clears the ≥2-signal bar, yet [learned] is unchanged. This is exactly
+  // the foolable case: the agent wrote the magic phrase but a real preference
+  // was distillable and went unwritten. Flag it; do NOT burn the backlog.
+  if (explicitNoChangeLogged && !aggregateBelowThreshold) {
+    return {
+      distillSkipped: true,
+      pendingEvents,
+      learnedChanged: false,
+      detail:
+        `distill SKIPPED: ${pendingEvents} pending event(s) and a "no change warranted" ` +
+        `claim, but the aggregate shows a grouping at/above the ≥${SIGNAL_THRESHOLD}-signal ` +
+        `bar with NO [learned] change — claimed no-op CONTRADICTED by the math, not trusted`,
+      nextCursor: cursor,
+    };
+  }
+
+  // Pending events AND neither a [learned] change NOR an explicit claim → a
+  // SILENT skip. Flag it; cursor UNCHANGED so the pending events stay pending
+  // for a real distill next run.
   return {
     distillSkipped: true,
     pendingEvents,
@@ -193,6 +246,25 @@ export function verifyDistill(input: VerifyInput, runId: string): VerifyResult {
       `change and no explicit "no change warranted" log — feed did not learn this run`,
     nextCursor: cursor,
   };
+}
+
+/**
+ * DETERMINISTIC ≥2-signal-bar check over the PENDING events (finding B / MEDIUM
+ * fix). Given the per-grouping generalizable-signal counts (e.g. from
+ * `summarize-events` by_artifact / by_tag / by_type), return true iff EVERY
+ * grouping carries fewer than the ≥2 bar — i.e. no preference could legitimately
+ * have been distilled, so a "no change warranted" claim is corroborated. An
+ * empty list (no pending generalizable signal at all) is below the bar.
+ *
+ * "Generalizable signal" excludes nothing here — the caller decides which
+ * action counts feed in (we treat `save`-only utility separately upstream). This
+ * function is the pure max-vs-threshold comparison; it does NOT read the agent's
+ * prose.
+ */
+export function aggregateBelowThreshold(groupSignalCounts: number[]): boolean {
+  let max = 0;
+  for (const n of groupSignalCounts) if (n > max) max = n;
+  return max < SIGNAL_THRESHOLD;
 }
 
 /** Build the advanced cursor (consume up to `newest`, record the fingerprint). */

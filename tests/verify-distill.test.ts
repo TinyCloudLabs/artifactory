@@ -9,10 +9,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  aggregateBelowThreshold,
   emptyCursor,
   learnedFingerprint,
   newEventsSince,
   newestEventTs,
+  SIGNAL_THRESHOLD,
   verifyDistill,
   type DistillCursor,
 } from "../skills/distill-preferences/scripts/distill-verify-lib.ts";
@@ -60,6 +62,17 @@ describe("newEventsSince / newestEventTs", () => {
   });
 });
 
+describe("aggregateBelowThreshold", () => {
+  test("empty / all-below-bar groupings → below threshold (no-change corroborated)", () => {
+    expect(aggregateBelowThreshold([])).toBe(true);
+    expect(aggregateBelowThreshold([0, 1, 1])).toBe(true);
+  });
+  test("any grouping at/above the ≥2 bar → NOT below (a preference was distillable)", () => {
+    expect(aggregateBelowThreshold([1, SIGNAL_THRESHOLD])).toBe(false);
+    expect(aggregateBelowThreshold([5])).toBe(false);
+  });
+});
+
 describe("verifyDistill (decision table)", () => {
   const events = ["2026-06-11T23:00:00Z", "2026-06-12T01:00:00Z"];
 
@@ -70,7 +83,13 @@ describe("verifyDistill (decision table)", () => {
       learned_fingerprint: "old",
     };
     const r = verifyDistill(
-      { eventTimestamps: events, cursor, learnedFingerprintAfter: "new", explicitNoChangeLogged: false },
+      {
+        eventTimestamps: events,
+        cursor,
+        learnedFingerprintAfter: "new",
+        explicitNoChangeLogged: false,
+        aggregateBelowThreshold: false,
+      },
       "run-1",
     );
     expect(r.distillSkipped).toBe(false);
@@ -87,7 +106,13 @@ describe("verifyDistill (decision table)", () => {
       learned_fingerprint: "same",
     };
     const r = verifyDistill(
-      { eventTimestamps: events, cursor, learnedFingerprintAfter: "same", explicitNoChangeLogged: false },
+      {
+        eventTimestamps: events,
+        cursor,
+        learnedFingerprintAfter: "same",
+        explicitNoChangeLogged: false,
+        aggregateBelowThreshold: true,
+      },
       "run-2",
     );
     expect(r.distillSkipped).toBe(true);
@@ -95,18 +120,48 @@ describe("verifyDistill (decision table)", () => {
     expect(r.nextCursor).toEqual(cursor); // not advanced — events stay pending
   });
 
-  test("pending events + explicit 'no change warranted' → VERIFIED (valid no-op), cursor advances", () => {
+  test("explicit 'no change' + aggregate CORROBORATES (below bar) → VERIFIED, cursor advances", () => {
     const cursor: DistillCursor = {
       version: 1,
       last_event_ts: "2026-06-11T23:00:00Z",
       learned_fingerprint: "same",
     };
     const r = verifyDistill(
-      { eventTimestamps: events, cursor, learnedFingerprintAfter: "same", explicitNoChangeLogged: true },
+      {
+        eventTimestamps: events,
+        cursor,
+        learnedFingerprintAfter: "same",
+        explicitNoChangeLogged: true,
+        aggregateBelowThreshold: true,
+      },
       "run-3",
     );
     expect(r.distillSkipped).toBe(false);
     expect(r.nextCursor.last_event_ts).toBe("2026-06-12T01:00:00Z");
+  });
+
+  test("MEDIUM FIX: explicit 'no change' but aggregate CONTRADICTS (≥2 bar cleared, no [learned] delta) → SKIP flagged, cursor UNCHANGED", () => {
+    // The foolable case the review reproduced: agent writes "below threshold"
+    // while a grouping actually clears the ≥2-signal bar and nothing was
+    // distilled. The free-text phrase no longer passes — the math wins.
+    const cursor: DistillCursor = {
+      version: 1,
+      last_event_ts: "2026-06-11T23:00:00Z",
+      learned_fingerprint: "same",
+    };
+    const r = verifyDistill(
+      {
+        eventTimestamps: events,
+        cursor,
+        learnedFingerprintAfter: "same",
+        explicitNoChangeLogged: true,
+        aggregateBelowThreshold: false, // a grouping DID clear the bar
+      },
+      "run-3b",
+    );
+    expect(r.distillSkipped).toBe(true);
+    expect(r.detail).toContain("CONTRADICTED");
+    expect(r.nextCursor).toEqual(cursor); // backlog NOT burned
   });
 
   test("NO pending events → pass (nothing to act on), cursor refreshed not flagged", () => {
@@ -116,7 +171,13 @@ describe("verifyDistill (decision table)", () => {
       learned_fingerprint: "x",
     };
     const r = verifyDistill(
-      { eventTimestamps: events, cursor, learnedFingerprintAfter: "x", explicitNoChangeLogged: false },
+      {
+        eventTimestamps: events,
+        cursor,
+        learnedFingerprintAfter: "x",
+        explicitNoChangeLogged: false,
+        aggregateBelowThreshold: true,
+      },
       "run-4",
     );
     expect(r.distillSkipped).toBe(false);
@@ -253,6 +314,41 @@ describe("verify-distill CLI", () => {
     ]);
     const out = JSON.parse(r.stdout.trim()) as { distill_skipped: boolean };
     expect(out.distill_skipped).toBe(false);
+  });
+
+  test("MEDIUM FIX (e2e): claimed 'below threshold' but ≥2 pending signals on one artifact → distill_skipped=true, cursor NOT advanced", async () => {
+    // Reproduce the review's no-op attack end-to-end: a fresh cursor (everything
+    // pending), 2 `more` events on the SAME artifact (clears the ≥2-signal bar),
+    // NO [learned] change, and a log claiming "below threshold". The aggregate
+    // contradicts the claim → the skip is flagged and the backlog is preserved.
+    const twoMore = [
+      { artifact_id: "z", artifact_type: "insight-card", action: "more", ts: "2026-06-11T23:00:00Z" },
+      { artifact_id: "z", artifact_type: "insight-card", action: "more", ts: "2026-06-12T01:00:00Z" },
+    ];
+    await writeFile(eventsPath, twoMore.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+    // Agent did NOT change [learned] — empty prefs, fingerprint matches cursor.
+    await writeFile(prefsPath, "## Topics\n- human line\n", "utf8");
+    const seeded: DistillCursor = {
+      version: 1,
+      learned_fingerprint: learnedFingerprint("## Topics\n- human line\n"),
+    };
+    await writeFile(cursorPath, JSON.stringify(seeded), "utf8");
+    const logPath = join(dir, "generation-log.txt");
+    await writeFile(logPath, "distill: no change warranted, below threshold\n", "utf8");
+
+    const r = await runCli([
+      "--run-id", "run-attack",
+      "--events", eventsPath,
+      "--preferences", prefsPath,
+      "--cursor", cursorPath,
+      "--distill-log", logPath,
+    ]);
+    const out = JSON.parse(r.stdout.trim()) as { distill_skipped: boolean; pending_events: number };
+    expect(out.distill_skipped).toBe(true); // phrase no longer fools verify
+    expect(out.pending_events).toBe(2);
+    // cursor NOT advanced — the 2 pending events stay pending for a real distill
+    const cursor = JSON.parse(await readFile(cursorPath, "utf8")) as DistillCursor;
+    expect(cursor.last_event_ts).toBeUndefined();
   });
 
   test("--no-write computes the flag but does not persist the cursor", async () => {

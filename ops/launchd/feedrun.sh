@@ -227,10 +227,103 @@ else
   if [[ -f "$SCRIPT_DIR/feedrun.system.md" ]]; then
     SYSTEM_PROMPT="$(cat "$SCRIPT_DIR/feedrun.system.md")"
   fi
+
+  # ============================================================================
+  # PRODUCTION PREFERENCE GUARD (PR #8 BLOCKER fix).
+  #
+  # This `claude -p` invocation IS the production path: both entry points (the
+  # launchd plist and the Generate button via feed/src/generate.ts) spawn THIS
+  # wrapper, and the agent self-distills + self-generates here — it runs
+  # `feed-run.ts --no-generate` internally, which SKIPS feed-run.ts's guarded
+  # real-generation branch. So the deterministic guards MUST bracket the agent
+  # HERE, in the wrapper, or they never run in production. (feed-run.ts keeps its
+  # own copy of the guard for the direct real-mode CLI path — defense in depth.)
+  #
+  #   1. SNAPSHOT PREFERENCES.md immediately BEFORE `claude -p`.
+  #   2. Run the agent (which distills + generates).
+  #   3. guard-preferences.ts check → if ANY human (non-[learned]) line changed,
+  #      RESTORE from the snapshot + log the CARDINAL RULE VIOLATION loudly.
+  #   4. verify-distill.ts → if feedback events were pending but the agent made
+  #      no [learned] change (and no corroborated "no change warranted"), flag
+  #      distill_skipped in the run-log.
+  #
+  # Outcomes are appended to index/run-log.jsonl as a wrapper-guard line so the
+  # protection is auditable per run, regardless of what the agent logged.
+  # ============================================================================
+  GUARD_SNAPSHOT="$REPO/index/.preferences-wrapper-snapshot.md"
+  PREFERENCES_FILE="$REPO/PREFERENCES.md"
+  WRAPPER_RUN_ID="${FEEDRUN_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+
+  # 1. SNAPSHOT (pre-write last-known-good).
+  if ! bun skills/distill-preferences/scripts/guard-preferences.ts snapshot \
+        --preferences "$PREFERENCES_FILE" --snapshot "$GUARD_SNAPSHOT"; then
+    echo "[feedrun] WARN: pre-distill snapshot failed — proceeding UNGUARDED for this run." >&2
+  fi
+
+  # 2. Run the agent. Capture its stdout/stderr to a per-run log so verify-distill
+  #    can scan it for an explicit "no change warranted" claim (corroborated
+  #    against the deterministic aggregate, never trusted on its own).
+  RUN_DIR="$REPO/index/runs/$WRAPPER_RUN_ID"
+  mkdir -p "$RUN_DIR"
+  AGENT_LOG="$RUN_DIR/wrapper-agent-log.txt"
+  AGENT_EXIT=0
   claude -p \
     "Run the distillery feed-run recipe (${MODE} mode). ${SINCE_NOTE}Read skills/feed-run/SKILL.md and execute its ordered pipeline end to end." \
     --system-prompt "$SYSTEM_PROMPT" \
-    --model "$MODEL"
+    --model "$MODEL" 2>&1 | tee "$AGENT_LOG" || AGENT_EXIT=${PIPESTATUS[0]}
+
+  # 3. HUMAN-LINE GUARD CHECK. The CLI restores PREFERENCES.md from the snapshot
+  #    and exits 1 if a human line moved; exit 0 = clean [learned]-only change.
+  GUARD_OUTCOME="ok"
+  if bun skills/distill-preferences/scripts/guard-preferences.ts check \
+        --preferences "$PREFERENCES_FILE" --snapshot "$GUARD_SNAPSHOT"; then
+    echo "[feedrun] guard: human (non-[learned]) lines intact after the agent's distill." >&2
+  else
+    GUARD_OUTCOME="violation"
+    echo "" >&2
+    echo "[feedrun] ========================================================================" >&2
+    echo "[feedrun] CARDINAL RULE VIOLATION — the agent's distill touched a HUMAN line." >&2
+    echo "[feedrun] PREFERENCES.md has been RESTORED from the pre-run snapshot." >&2
+    echo "[feedrun] This was caught by the WRAPPER guard, not the agent's prose." >&2
+    echo "[feedrun] ========================================================================" >&2
+    echo "" >&2
+  fi
+
+  # 4. VERIFY-DISTILL. Asserts the loop actually closed: pending feedback events
+  #    since the last distill must yield either a [learned] delta or a
+  #    deterministically-corroborated "no change warranted". Otherwise
+  #    distill_skipped=true. Reads the agent log for the (corroborated) no-change
+  #    claim. Captures the one-line JSON result for the run-log.
+  DISTILL_SKIPPED="false"
+  VERIFY_JSON="$(bun skills/distill-preferences/scripts/verify-distill.ts \
+    --run-id "$WRAPPER_RUN_ID" \
+    --events "$REPO/feedback/events.jsonl" \
+    --preferences "$PREFERENCES_FILE" \
+    --cursor "$REPO/index/distill-cursor.json" \
+    --artifacts-dir "$REPO/artifacts" \
+    --distill-log "$AGENT_LOG" 2>/dev/null || true)"
+  if [[ "$VERIFY_JSON" == *'"distill_skipped":true'* ]]; then
+    DISTILL_SKIPPED="true"
+    echo "[feedrun] verify-distill: distill_skipped=true — pending feedback events were NOT distilled this run." >&2
+  fi
+
+  # Append an auditable wrapper-guard line to the run-log (alongside the agent's
+  # own brief run-log line). This is the production proof the guard ran.
+  printf '{"run_id":"%s","wrapper_guard":"%s","guard":"%s","distill_skipped":%s,"agent_exit":%s,"ts":"%s"}\n' \
+    "$WRAPPER_RUN_ID" "ran" "$GUARD_OUTCOME" "$DISTILL_SKIPPED" "$AGENT_EXIT" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$REPO/index/run-log.jsonl"
+
+  # Clean up the snapshot (the check already removed it on a clean pass; force in
+  # case of a degraded snapshot or an early agent failure).
+  rm -f "$GUARD_SNAPSHOT"
+
+  # Propagate a genuine agent failure as the wrapper's exit (after the guard has
+  # run + restored). A guard VIOLATION does not by itself fail the run — the file
+  # is already restored and the violation is logged loudly + recorded.
+  if [[ "$AGENT_EXIT" != "0" ]]; then
+    echo "[feedrun] agent (claude -p) exited $AGENT_EXIT — guard + verify still ran above." >&2
+    exit "$AGENT_EXIT"
+  fi
 fi
 
 echo "[feedrun] $(date -u +%Y-%m-%dT%H:%M:%SZ) done." >&2

@@ -517,6 +517,16 @@ if (dryRun) {
   // generation call). After the agent writes we ASSERT no human (non-[learned])
   // line changed and RESTORE the file if one did. Snapshot lives in the run dir
   // so it never collides with a concurrent run.
+  //
+  // NOTE (PR #8): this branch only runs when feed-run.ts is invoked in DIRECT
+  // real-generation mode (no --dry-run / no --no-generate). PRODUCTION does not
+  // take this path — the launchd plist + Generate button spawn ops/launchd/
+  // feedrun.sh, whose `claude -p` agent runs feed-run.ts --no-generate and then
+  // self-distills + self-generates. The PRODUCTION guard therefore lives in
+  // feedrun.sh, which brackets that `claude -p` call with the same snapshot →
+  // check → verify-distill sequence. This in-orchestrator copy is DEFENSE IN
+  // DEPTH for the direct-CLI path (and is exercised by the wrapper-flow test in
+  // tests/feedrun-wrapper-guard.test.ts, which drives the production sequence).
   const guardSnapshot = join(runDir, "preferences-guard-snapshot.md");
   const snap = runScript([
     "skills/distill-preferences/scripts/guard-preferences.ts",
@@ -588,6 +598,8 @@ if (dryRun) {
       preferencesPath,
       "--cursor",
       "index/distill-cursor.json",
+      "--artifacts-dir",
+      artifactsDir,
       "--distill-log",
       join(runDir, "generation-log.txt"),
     ]);

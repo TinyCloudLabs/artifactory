@@ -32,7 +32,7 @@ from the feedback event log (`feedback/events.jsonl`).
 
 <!-- example (not a real preference): -->
 <!-- - [learned] More capability-model deep dives (2× more + 1 promote on openkey-tagged cards, Jun 2026) -->
-- [learned] More foundational/strategic theses on TinyCloud's positioning and why its data/credential layer matters — founding-era wedge, property-rights/credentials frame (4 more + 3 promote across the founding-wedge + eigenlayer cards, Jun 2026)
+- [learned] More foundational/strategic theses on TinyCloud's positioning and why its data/credential layer matters — founding-era wedge, property-rights/credentials frame (5 more + 3 promote across the founding-wedge + eigenlayer cards, Jun 2026)
 
 ## Novelty bar
 

@@ -109,11 +109,25 @@ post-run verification (`verify-distill.ts`) scans for that marker; without it,
 a run with pending feedback events but no `[learned]` change is flagged
 `distill_skipped=true` (the loop assumes you forgot, not that you judged).
 
+**The phrase is NOT a magic bypass.** `verify-distill.ts` honors a "no change
+warranted" claim ONLY when it re-runs the deterministic `summarize-events`
+aggregate over the still-pending events and confirms NO grouping (artifact, tag,
+or type) reaches the ≥2-signal bar. If a grouping DOES clear the bar and you
+made no `[learned]` change, the claim is treated as a CONTRADICTED no-op and the
+run is flagged `distill_skipped=true` anyway — the backlog is preserved, not
+consumed. So write the phrase only when the math actually agrees; if a real
+preference is distillable, write the `[learned]` bullet.
+
 ## Enforcement (deterministic — not just convention)
 
 Two guards make the cardinal rules unbreakable in the feed-run loop; both run
-after your distill, make no model calls, and you do not invoke them yourself —
-the orchestrator does:
+after your distill, make no model calls, and you do not invoke them yourself.
+**In production they run in the wrapper** (`ops/launchd/feedrun.sh`), which
+brackets the headless `claude -p` agent call with `snapshot → check →
+verify-distill` — so the protection holds no matter how/when you write
+`PREFERENCES.md` (the launchd plist and the Generate button both spawn that
+wrapper). `feed-run.ts` keeps the same guard around its direct real-generation
+path as defense in depth.
 
 - **Human-line guard** (`guard-preferences.ts`): if you edit, remove, add, or
   reorder ANY non-`[learned]` line in `PREFERENCES.md`, the write is REJECTED
@@ -122,4 +136,5 @@ the orchestrator does:
   `- [learned]` is, per the reserved-prefix convention, agent-owned — but
   humans never author that prefix, so this is your line to manage.)
 - **Distill verification** (`verify-distill.ts`): see step 4 — make a real
-  `[learned]` change or log "no change warranted".
+  `[learned]` change, or log "no change warranted" ONLY when the aggregate
+  agrees no grouping clears the ≥2-signal bar.
