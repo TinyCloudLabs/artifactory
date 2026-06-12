@@ -11,6 +11,10 @@ export function typeLabel(type: string): string {
     "insight-card": "Insight",
     article: "Article",
     podcast: "Podcast",
+    "social-post": "Social post",
+    "investor-update-snippet": "Investor snippet",
+    "quote-card": "Quote card",
+    "person-brief": "Person brief",
   };
   const k = known[type];
   if (k) return k;

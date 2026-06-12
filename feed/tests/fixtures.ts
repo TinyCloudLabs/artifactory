@@ -96,6 +96,75 @@ export async function makeFixture(): Promise<Fixture> {
     }),
   );
 
+  // ROUTING SEAM fixtures (Phase 1a) ----------------------------------------
+  // An OUTWARD draft still PENDING approval. Must be EXCLUDED from /api/cards
+  // and surface only in /api/drafts.
+  await write(
+    "social-post",
+    "pending-banger",
+    artifact({
+      id: "draft-pending-1",
+      type: "social-post",
+      headline: "Pending social post",
+      body: "An earned secret, abstracted into one postable line.",
+      approval_status: "pending",
+      audience: "public",
+      platform: "x",
+      generated_at: "2026-06-08T12:00:00Z",
+    }),
+  );
+
+  // An OUTWARD artifact already APPROVED. Must be INCLUDED in /api/cards (it
+  // publishes) and ABSENT from /api/drafts.
+  await write(
+    "investor-update-snippet",
+    "approved-snippet",
+    artifact({
+      id: "approved-snippet-1",
+      type: "investor-update-snippet",
+      headline: "Approved investor snippet",
+      body: "One credible signal, framed for an investor DM.",
+      approval_status: "approved",
+      audience: "investors",
+      generated_at: "2026-06-04T12:00:00Z",
+    }),
+  );
+
+  // CARDINAL CHECK: an OUTWARD type with NO approval_status field at all. The
+  // contract defaults absent-outward to "pending", and so must routing — this
+  // MUST be excluded from /api/cards and surface in /api/drafts. A regression
+  // that published it would be the worst-case leak (unapproved comms going live).
+  await write(
+    "social-post",
+    "missing-status-banger",
+    artifact({
+      id: "draft-missing-status-1",
+      type: "social-post",
+      headline: "Outward draft with no approval_status field",
+      body: "No approval_status key at all — must NOT publish.",
+      audience: "public",
+      generated_at: "2026-06-07T12:00:00Z",
+      // NOTE: deliberately NO approval_status key.
+    }),
+  );
+
+  // CARDINAL CHECK: an OUTWARD type with a BLANK/garbage approval_status. Only
+  // the exact string "approved" may publish an outward artifact — a blank, a
+  // typo, or any other value MUST route as pending (not published).
+  await write(
+    "quote-card",
+    "blank-status-quote",
+    artifact({
+      id: "draft-blank-status-1",
+      type: "quote-card",
+      headline: "Outward draft with a blank approval_status",
+      body: "approval_status is an empty string — must NOT publish.",
+      approval_status: "",
+      audience: "public",
+      generated_at: "2026-06-06T12:00:00Z",
+    }),
+  );
+
   // Broken JSON — skipped
   await write("insight-card", "broken-json", "{ not json !!!");
 

@@ -18,6 +18,7 @@
 import type { CorpusIndex, IndexRecord } from "../../index-corpus/scripts/corpus-index.ts";
 import type { QueryMatch } from "../../query-corpus/scripts/corpus-query.ts";
 import type { SurfacedMode } from "../../query-corpus/scripts/surfaced-ledger.ts";
+import type { SalientPerson } from "./salient-people-lib.ts";
 import {
   scorePreferenceMatch,
   type PreferenceSignal,
@@ -83,8 +84,19 @@ export interface RunLog {
   deepdive_path?: string;
   /** Did the deep-dive cursor wrap this run? */
   deepdive_wrapped: boolean;
-  /** Artifacts actually published (empty on dry-run / zero-artifact run). */
+  /**
+   * Artifacts actually PUBLISHED this run (internal audience — live in the feed,
+   * counted against the cap). Empty on dry-run / zero-artifact run. Outward drafts
+   * are tracked separately in `drafts_produced` (they do NOT publish).
+   */
   artifacts_published: string[];
+  /**
+   * OUTWARD DRAFTS produced this run (social-post / investor-update-snippet —
+   * born approval_status:"pending", routed to the approvals tray, NOT published,
+   * NOT counted against the cap). Phase 1b: the harness records drafts produced
+   * vs published artifacts. Empty/undefined on the common run that mines none.
+   */
+  drafts_produced?: string[];
   /**
    * DETERMINISTIC distill verification (PR #8 finding B): true when the agent's
    * mandated distill was SKIPPED despite pending feedback events (no [learned]
@@ -314,6 +326,13 @@ export interface BriefInput {
   feedbackSummary?: string;
   /** Prior-artifact baseline summary line (counts only — no content). */
   baselineSummary: string;
+  /**
+   * Salient un-briefed people (Phase 1b): recurring speakers (>= N transcripts)
+   * with no current person-brief, surfaced DETERMINISTICALLY by the salient-people
+   * detector. The agent JUDGES which (if any) earn a dossier this run. Empty/
+   * undefined → no person-brief candidates this run.
+   */
+  salientPeople?: SalientPerson[];
 }
 
 /**
@@ -348,6 +367,36 @@ export function renderBrief(b: BriefInput): string {
       " illustrate-card), each with its own novelty-scan + adversarial critic." +
       ` Publish at most **${b.cap}** survivors. Zero artifacts is a valid run` +
       " — quality beats quantity.",
+  );
+  out.push("");
+  out.push("## Miners you may run this brief (pick the format the material EARNS)");
+  out.push("");
+  out.push(
+    "Beyond the internal feed miners (extract-insights / write-article /" +
+      " make-podcast), this run may ALSO produce — only when the material" +
+      " genuinely warrants it:",
+  );
+  out.push("");
+  out.push(
+    "- **OUTWARD DRAFTS — `banger-extractor` (social-post) + `investor-snippet`" +
+      " (investor-update-snippet).** Over the selected transcripts, you MAY draft" +
+      " at most one banger and/or one investor-snippet WHEN a genuine earned" +
+      " secret / credible signal is actually present. These are RARER and a" +
+      " HIGHER bar than insight cards — **ZERO is the common, valid result.**" +
+      " They are born `approval_status: \"pending\"` (the skills stamp this) and" +
+      " the harness does NOT publish them — they are DRAFTS that surface in the" +
+      " approvals tray for a human to approve. Do NOT count a draft as a shipped" +
+      " feed artifact, and NEVER assert one is \"ready to post\".",
+  );
+  out.push(
+    "- **`person-brief` ON SALIENCE (internal — publishes).** If the SALIENT" +
+      " PEOPLE section below lists recurring un-briefed speakers, you MAY generate" +
+      " a grounded `person-brief` for the one(s) you judge worth a dossier (the" +
+      " detector surfaced WHO recurs; the judgment of whether a brief is worth it" +
+      " is yours). A person-brief is `audience: \"internal\"` and DOES publish to" +
+      " the feed, so it counts against the cap. The identity-grounding rule is" +
+      " load-bearing: every claim cited, every inference marked, no role" +
+      " fabricated (see skills/person-brief/SKILL.md).",
   );
   out.push("");
   out.push("## GENERATION BACKPRESSURE — PREFERENCES.md STEERS what you make (MANDATORY)");
@@ -492,10 +541,39 @@ export function renderBrief(b: BriefInput): string {
     for (const c of b.deepDive.match_context) out.push(`  - “…${c}…”`);
   }
   out.push("");
+  out.push("## Salient people (recurring, un-briefed — person-brief candidates)");
+  out.push("");
+  const salient = b.salientPeople ?? [];
+  if (salient.length === 0) {
+    out.push(
+      "- (none — no recurring un-briefed speakers cleared the salience bar this" +
+        " run; do NOT generate a person-brief.)",
+    );
+  } else {
+    out.push(
+      "These people SPOKE across several transcripts and have NO current" +
+        " person-brief (the detector is deterministic — it surfaced WHO recurs," +
+        " not whether a brief is worth it; that judgment is yours). For the" +
+        " one(s) you judge worth a grounded dossier, run the **person-brief**" +
+        " skill over the corpus (`skills/person-brief/SKILL.md`). A person-brief" +
+        " is internal and PUBLISHES (counts against the cap). Skipping a" +
+        " candidate is valid.",
+    );
+    out.push("");
+    for (const p of salient) {
+      out.push(
+        `- **${p.name}** — ${p.transcriptCount} transcripts, ${p.turnCount} turns` +
+          ` (brief slug would be \`${p.slug}\`)`,
+      );
+    }
+  }
+  out.push("");
   out.push("## After you generate");
   out.push("");
   out.push(
-    "- save survivors with `save.ts` (auto-publish straight to artifacts/).",
+    "- save survivors with `save.ts` (auto-publish straight to artifacts/)." +
+      " OUTWARD drafts (banger / investor-snippet) save with their OWN skill's" +
+      " save.ts as `approval_status: \"pending\"` — they are NOT auto-published.",
   );
   out.push(
     "- append each examined transcript to `index/surfaced.json` (path," +
@@ -515,6 +593,7 @@ export function summarizeRun(log: RunLog): string {
     `recency=${log.recency_paths.length} ` +
     `deepdive=${log.deepdive_path ? "1" : "0"}${log.deepdive_wrapped ? "(wrapped)" : ""} ` +
     `published=${log.artifacts_published.length}` +
+    (log.drafts_produced && log.drafts_produced.length ? ` drafts=${log.drafts_produced.length}` : "") +
     (log.guard ? ` guard=${log.guard}` : "") +
     (log.distill_skipped ? " distill_skipped=true" : "") +
     ` outcome=${log.outcome}`

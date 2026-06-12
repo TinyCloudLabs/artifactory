@@ -2,7 +2,7 @@
 // exercise the full HTTP surface via app.request() without binding a port.
 
 import { Hono } from "hono";
-import { rename } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import {
   appendEvent,
@@ -12,7 +12,9 @@ import {
   FEEDBACK_ACTIONS,
   type FeedbackEvent,
 } from "../../skills/_shared/lib/feedback.ts";
+import { validateArtifact } from "../../skills/_shared/lib/artifact.ts";
 import { scanArtifacts } from "./scan.ts";
+import { isPendingDraft, isPublished } from "./routing.ts";
 import { resolveAuth, setupAuth, type AuthEnv, type AuthOptions } from "./auth.ts";
 import {
   isValidRunId,
@@ -75,6 +77,22 @@ function safeJoin(base: string, ...parts: string[]): string | null {
   const target = resolve(base, ...parts);
   if (target === base || target.startsWith(base + sep)) return target;
   return null;
+}
+
+/**
+ * Path-safe artifact id guard for the drafts routes — same hardening posture
+ * as generate.ts's `isValidRunId`. Artifact ids are UUIDs (crypto.randomUUID)
+ * but we accept any opaque token that can't be used for traversal: bounded
+ * length, no slash / backslash / dot-dot / null byte / percent / whitespace.
+ * We never path-join the id directly (the dir is taken from the scanned
+ * card's type+slug), but rejecting a malformed id up front means a request
+ * like `/api/drafts/..%2f..%2fsecret/approve` is a 400, not a lookup.
+ */
+const ARTIFACT_ID_RE = /^[0-9A-Za-z:._-]+$/;
+function isValidArtifactId(id: string): boolean {
+  if (typeof id !== "string" || id.length === 0 || id.length > 200) return false;
+  if (id.includes("..")) return false;
+  return ARTIFACT_ID_RE.test(id);
 }
 
 // Overrides where Bun's mime table disagrees with what browsers want:
@@ -315,7 +333,12 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     );
     const offset = Math.max(0, Number.isNaN(offsetRaw) ? 0 : offsetRaw);
 
-    const all = await scanArtifacts(artifactsDir);
+    // ROUTING SEAM: the published feed shows internal artifacts + APPROVED
+    // outward artifacts. Outward-pending drafts are excluded here (they live
+    // in GET /api/drafts) so nothing outward-facing publishes before a human
+    // approves it. Pagination metadata reflects the PUBLISHED set, not the raw
+    // scan — otherwise `total`/`hasMore` would count hidden drafts.
+    const all = (await scanArtifacts(artifactsDir)).filter(isPublished);
     const page = all.slice(offset, offset + limit);
     const body: CardsResponse = {
       cards: page,
@@ -330,8 +353,152 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
     const { type, slug } = c.req.param();
     const all = await scanArtifacts(artifactsDir);
     const card = all.find((x) => x.type === type && x.slug === slug);
-    if (!card) return c.json({ error: "not found" }, 404);
+    // Pending outward drafts are not part of the published feed — they are only
+    // addressable through the drafts tray, so 404 them here too.
+    if (!card || !isPublished(card)) return c.json({ error: "not found" }, 404);
     return c.json(card);
+  });
+
+  // ── APPROVALS / DRAFTS tray ───────────────────────────────────────────────
+  // The other side of the routing seam: outward artifacts the skills stamped
+  // approval_status:"pending" route HERE instead of to the published feed.
+  // All three routes ride the same /api/* OpenKey gate as /api/cards (an
+  // unauth request → 401 before any of this).
+  //
+  // Action vocabulary (reuses the existing feedback machinery where it maps):
+  //   approve → POST /api/drafts/:id/approve — flips approval_status to
+  //             "approved" on disk; the draft then appears in /api/cards.
+  //   kill    → POST /api/drafts/:id/kill — a "less"/hide on a draft: logs a
+  //             `less` feedback event AND quarantines the dir (moved under
+  //             artifacts/.quarantine/ so the scanner no longer sees it —
+  //             recoverable, not deleted). Removes it from the tray.
+  //   expand  → POST /api/drafts/:id/expand — the "promote" signal: logs a
+  //             `promote` feedback event (actual deeper-artifact expansion is a
+  //             later orchestration step; here we only record the intent). The
+  //             draft stays in the tray pending approve/kill.
+
+  // GET /api/drafts — the pending outward drafts (approval_status:"pending",
+  // outward audience). Newest first (scanArtifacts already sorts).
+  app.get("/api/drafts", async (c) => {
+    const drafts = (await scanArtifacts(artifactsDir)).filter(isPendingDraft);
+    return c.json({ drafts, total: drafts.length });
+  });
+
+  // POST /api/drafts/:id/approve — set approval_status:"approved" on the
+  // artifact.json (atomic write + re-validate). Path-safe id guard up front;
+  // the on-disk dir is taken from the SCANNED card's type+slug (never the raw
+  // id), then safe-joined under artifactsDir as defence in depth.
+  app.post("/api/drafts/:id/approve", async (c) => {
+    const id = c.req.param("id");
+    if (!isValidArtifactId(id)) return c.json({ error: "invalid draft id" }, 400);
+
+    const card = (await scanArtifacts(artifactsDir)).find((x) => x.id === id);
+    if (!card || !isPendingDraft(card)) {
+      return c.json({ error: "draft not found" }, 404);
+    }
+
+    const dir = safeJoin(artifactsDir, card.type, card.slug);
+    if (!dir) return c.json({ error: "forbidden" }, 403);
+    const jsonPath = join(dir, "artifact.json");
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await readFile(jsonPath, "utf8"));
+    } catch {
+      return c.json({ error: "draft not found" }, 404);
+    }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return c.json({ error: "artifact malformed on disk" }, 422);
+    }
+    (raw as Record<string, unknown>).approval_status = "approved";
+
+    // Re-validate the full artifact before persisting — never write a record
+    // the contract would reject.
+    const result = validateArtifact(raw);
+    if (!result.ok) {
+      return c.json({ error: "artifact failed validation", details: result.errors }, 422);
+    }
+
+    // Atomic replace: same sibling-temp + rename() pattern the preferences PUT
+    // uses, so no scanner ever observes a partial artifact.json.
+    const tmp = `${jsonPath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmp, JSON.stringify(result.artifact, null, 2) + "\n");
+    await rename(tmp, jsonPath);
+
+    return c.json({ ok: true, id, approval_status: "approved" });
+  });
+
+  // POST /api/drafts/:id/kill — hide/"less" on a draft. Logs a `less` feedback
+  // event (existing machinery) and quarantines the dir so it leaves the tray
+  // while staying recoverable.
+  app.post("/api/drafts/:id/kill", async (c) => {
+    const id = c.req.param("id");
+    if (!isValidArtifactId(id)) return c.json({ error: "invalid draft id" }, 400);
+
+    const card = (await scanArtifacts(artifactsDir)).find((x) => x.id === id);
+    if (!card || !isPendingDraft(card)) {
+      return c.json({ error: "draft not found" }, 404);
+    }
+
+    const src = safeJoin(artifactsDir, card.type, card.slug);
+    if (!src) return c.json({ error: "forbidden" }, 403);
+
+    // Log the hide as a `less` feedback event (revealed preference) before we
+    // move the dir, so the distill-preferences loop still sees the signal.
+    await appendEvent(feedbackFile, {
+      artifact_id: card.id,
+      artifact_type: card.type,
+      action: "less",
+      ts: new Date().toISOString(),
+    });
+
+    // Quarantine, don't delete: move under
+    // artifacts/.quarantine/<type>/<slug>__<id> so the scanner (which walks type
+    // dirs; a leading-dot dir is just another type that holds no real artifacts of
+    // a known type) stops surfacing it but the bytes survive for recovery.
+    //
+    // The `__<id>` suffix makes quarantine LOSSLESS on a slug collision: two
+    // DISTINCT drafts can slugify to the same <type>/<slug> (slug = slugify of a
+    // truncated headline), but their artifact ids differ. Without the suffix,
+    // killing the second would clobber the first's quarantined copy via the
+    // pre-rename rm. The id is already validated by isValidArtifactId (no slashes,
+    // dots, or traversal), so it is safe as a path segment. We still rm the exact
+    // <slug>__<id> dest first so re-killing the SAME draft is idempotent.
+    const quarantineBase = safeJoin(artifactsDir, ".quarantine", card.type);
+    if (!quarantineBase) return c.json({ error: "forbidden" }, 403);
+    const dest = safeJoin(quarantineBase, `${card.slug}__${id}`);
+    if (!dest) return c.json({ error: "forbidden" }, 403);
+    try {
+      await rm(dest, { recursive: true, force: true }); // clear this draft's prior shadow
+      await mkdir(quarantineBase, { recursive: true });
+      await rename(src, dest);
+    } catch (err) {
+      return c.json({ error: `could not quarantine draft: ${String(err)}` }, 500);
+    }
+
+    return c.json({ ok: true, id, action: "kill", quarantined: true });
+  });
+
+  // POST /api/drafts/:id/expand — the "promote"/expand signal. Records intent
+  // via a `promote` feedback event; the draft stays pending (actual expansion
+  // is a later orchestration step).
+  app.post("/api/drafts/:id/expand", async (c) => {
+    const id = c.req.param("id");
+    if (!isValidArtifactId(id)) return c.json({ error: "invalid draft id" }, 400);
+
+    const card = (await scanArtifacts(artifactsDir)).find((x) => x.id === id);
+    if (!card || !isPendingDraft(card)) {
+      return c.json({ error: "draft not found" }, 404);
+    }
+
+    await appendEvent(feedbackFile, {
+      artifact_id: card.id,
+      artifact_type: card.type,
+      action: "promote",
+      ts: new Date().toISOString(),
+    });
+
+    return c.json({ ok: true, id, action: "expand", recorded: true });
   });
 
   app.get("/media/:type/:slug/:file", async (c) => {

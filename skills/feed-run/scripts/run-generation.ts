@@ -37,10 +37,12 @@ import {
   dedupBySignal,
   diffCreated,
   enforceCap,
+  partitionByRouting,
   readNovelty,
   resolveModel,
   scanArtifacts,
   summarizeGeneration,
+  type ArtifactRef,
   type CreatedArtifact,
   type GenerationSummary,
   type GenInvocationInput,
@@ -148,7 +150,7 @@ export async function runGeneration(opts: RunGenerationOptions): Promise<Generat
 
   // AFTER snapshot → diff to learn what the agent created THIS run.
   const after = await scanArtifacts(artifactsDir);
-  let createdRefs = diffCreated(before, after);
+  const createdRefs = diffCreated(before, after);
   const quarantined: QuarantinedArtifact[] = [];
 
   // DETERMINISTIC BACKSTOPS over whatever the agent actually wrote (the system
@@ -156,34 +158,61 @@ export async function runGeneration(opts: RunGenerationOptions): Promise<Generat
   // root is THIS run's dir (alongside the brief), so excess/dups land under
   // index/runs/<id>/{dedup,over-cap}/ for human review, never deleted.
   //
-  // 1. IN-RUN DEDUP (the core upgrade): two format passes can land on the same
-  //    underlying signal in one run. Keep the highest-value artifact per signal,
-  //    quarantine the rest. Runs FIRST so the cap counts only distinct signals.
-  const dedup = await dedupBySignal(createdRefs, briefDir);
+  // 1. PUBLISHED vs DRAFT routing FIRST (Phase 1b — the metadata seam). Outward
+  //    drafts (social-post / investor-update-snippet, born approval_status:
+  //    "pending") are NOT published and do NOT count against the cap — they route
+  //    to the approvals tray. Only internal-audience artifacts (insight-card /
+  //    article / podcast / person-brief) are published.
+  //
+  //    Routing MUST precede dedup: a same-meeting outward draft and a publishable
+  //    card can share a signal, and dedup picks the cluster winner by numeric
+  //    novelty. If we deduped the MIXED set, a high-novelty unapproved DRAFT could
+  //    quarantine the real feed artifact — an unreviewed draft silently
+  //    suppressing a published card. Partitioning first guarantees drafts never
+  //    participate in dedup against published artifacts (the "drafts never crowd
+  //    out feed artifacts" separation). (See PR #12 Medium.)
+  const { published, drafts } = await partitionByRouting(createdRefs);
+
+  // 2. IN-RUN DEDUP over the PUBLISHED set ONLY (the core upgrade): two format
+  //    passes can land on the same underlying signal in one run. Keep the
+  //    highest-value artifact per signal, quarantine the rest. Runs before the cap
+  //    so the cap counts only distinct signals. Drafts are intentionally NOT
+  //    deduped: they are rare, human-reviewed in the approvals tray, and must
+  //    never be silently quarantined by the harness — a reviewer decides their
+  //    fate. (Drafts also never dedup against each other for the same reason.)
+  const dedup = await dedupBySignal(published, briefDir);
   for (const ref of dedup.quarantined) {
     quarantined.push({ ref: `${ref.type}/${ref.slug}`, reason: "duplicate-signal" });
   }
-  createdRefs = dedup.kept;
+  const dedupedPublished = dedup.kept;
 
-  // 2. CAP ENFORCEMENT: if the agent ignored MAX_ARTIFACTS_PER_RUN, keep the
-  //    first `cap` by creation order and quarantine the excess.
-  const capped = await enforceCap(createdRefs, cap, briefDir);
+  // 3. CAP ENFORCEMENT over the PUBLISHED set only: if the agent ignored
+  //    MAX_ARTIFACTS_PER_RUN, keep the first `cap` by creation order and
+  //    quarantine the excess. Drafts are never cap-quarantined.
+  const capped = await enforceCap(dedupedPublished, cap, briefDir);
   for (const ref of capped.quarantined) {
     quarantined.push({ ref: `${ref.type}/${ref.slug}`, reason: "over-cap" });
   }
-  createdRefs = capped.kept;
 
-  // Enrich the SURVIVORS with novelty for the summary.
-  const created: CreatedArtifact[] = [];
-  for (const ref of createdRefs) {
-    created.push({
-      type: ref.type,
-      slug: ref.slug,
-      novelty: await readNovelty(ref.dir),
-    });
-  }
+  // Enrich the published SURVIVORS + the drafts with novelty for the summary.
+  const enrich = async (refs: ArtifactRef[]): Promise<CreatedArtifact[]> => {
+    const out: CreatedArtifact[] = [];
+    for (const ref of refs) {
+      out.push({ type: ref.type, slug: ref.slug, novelty: await readNovelty(ref.dir) });
+    }
+    return out;
+  };
+  const created = await enrich(capped.kept);
+  const draftSummaries = await enrich(drafts);
 
-  return buildSummary({ created, stdout: result.stdout, duration, exitCode, quarantined });
+  return buildSummary({
+    created,
+    drafts: draftSummaries,
+    stdout: result.stdout,
+    duration,
+    exitCode,
+    quarantined,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CardsResponse, FeedCard } from "../../src/types.ts";
 import { Card, FullCard, Glyph } from "./Card.tsx";
 import { PreferencesPanel } from "./Preferences.tsx";
+import { DraftsPanel } from "./Drafts.tsx";
 import { GenerateControl } from "./Generate.tsx";
 import { apiFetch, signOut } from "./auth.ts";
 
@@ -11,10 +12,12 @@ const UNDO_MS = 8000;
 type Route =
   | { kind: "feed" }
   | { kind: "article"; type: string; slug: string }
-  | { kind: "prefs" };
+  | { kind: "prefs" }
+  | { kind: "drafts" };
 
 function parseRoute(hash: string): Route {
   if (hash === "#/preferences") return { kind: "prefs" };
+  if (hash === "#/drafts") return { kind: "drafts" };
   const m = /^#\/a\/([^/]+)\/([^/]+)$/.exec(hash);
   if (m) {
     return {
@@ -90,6 +93,8 @@ export function App() {
         <ArticleView type={route.type} slug={route.slug} onHide={hideCard} />
       ) : route.kind === "prefs" ? (
         <PrefsView />
+      ) : route.kind === "drafts" ? (
+        <DraftsView />
       ) : (
         <Feed hidden={hidden} onHide={hideCard} />
       )}
@@ -237,6 +242,9 @@ function Feed({
           )}
         </div>
         <nav className="masthead-nav" aria-label="Feed controls">
+          <a className="quiet-link" href="#/drafts">
+            <Glyph name="promote" size={14} /> Approvals
+          </a>
           <a className="quiet-link" href="#/preferences">
             <Glyph name="sliders" size={14} /> Preferences
           </a>
@@ -318,6 +326,15 @@ function PrefsView() {
       <main>
         <PreferencesPanel />
       </main>
+    </>
+  );
+}
+
+function DraftsView() {
+  return (
+    <>
+      <BackBar />
+      <DraftsPanel />
     </>
   );
 }

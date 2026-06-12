@@ -18,7 +18,7 @@
 
 import { readdir, readFile, mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { ArtifactType } from "../../_shared/lib/artifact.ts";
+import type { ArtifactType, Audience } from "../../_shared/lib/artifact.ts";
 import { ARTIFACT_TYPES } from "../../_shared/lib/artifact.ts";
 
 // ---------------------------------------------------------------------------
@@ -117,6 +117,23 @@ export function buildSystemPrompt(input: GenInvocationInput): string {
     "   extract-insights (insight cards), write-article (longform), make-podcast",
     "   (micro-podcasts). Pick the format the material earns; not every",
     "   transcript yields an artifact.",
+    "3b. OUTWARD DRAFTS (banger-extractor → social-post, investor-snippet →",
+    "    investor-update-snippet) — OPTIONAL, HIGHER BAR, RARER than cards. Over the",
+    "    selected transcripts you MAY also draft AT MOST ONE banger and/or ONE",
+    "    investor-snippet, but ONLY when a genuine earned secret / credible signal",
+    "    is actually present. ZERO is the common, valid result — most runs produce",
+    "    no outward drafts. These are DRAFTS, NOT published: each skill's save.ts",
+    "    stamps approval_status:\"pending\" and the harness does NOT publish them —",
+    "    they surface in the approvals tray for a human. NEVER assert one is",
+    "    \"ready to post\". Drafts do NOT count against the published-artifact cap.",
+    "3c. PERSON-BRIEF ON SALIENCE — if the brief's SALIENT PEOPLE section lists",
+    "    recurring un-briefed speakers, you MAY generate a grounded person-brief",
+    "    (skills/person-brief/SKILL.md) for the one(s) you judge worth a dossier.",
+    "    The detector surfaced WHO recurs; whether a brief is worth it is YOUR",
+    "    judgment. A person-brief is audience:\"internal\" and DOES publish to the",
+    "    feed, so it COUNTS against the cap. The identity-grounding rule is",
+    "    load-bearing: every claim cited, every inference marked, no role",
+    "    fabricated. Skipping all candidates is valid.",
     "3a. ONE SIGNAL → ONE ARTIFACT (in-run dedup, MANDATORY). Before you pick an",
     "    angle for ANY new artifact, read (a) the surfaced ledger",
     "    (index/surfaced.json) and (b) the artifacts you have ALREADY created in",
@@ -250,6 +267,72 @@ export interface CreatedArtifact {
 export function diffCreated(before: ArtifactRef[], after: ArtifactRef[]): ArtifactRef[] {
   const beforeKeys = new Set(before.map((r) => r.key));
   return after.filter((r) => !beforeKeys.has(r.key));
+}
+
+// ---------------------------------------------------------------------------
+// PUBLISHED vs DRAFT routing (Phase 1b — the metadata seam, harness side)
+// ---------------------------------------------------------------------------
+//
+// The skills STAMP audience/approval_status; the harness ROUTES on it. An
+// artifact the feed-run agent creates is one of two things:
+//   - PUBLISHED — it goes live in the feed and COUNTS against MAX_ARTIFACTS_PER_RUN.
+//     These are the internal-audience artifacts: insight-card / article / podcast
+//     (no audience field, pure-internal) and person-brief (audience:"internal").
+//   - DRAFT — an OUTWARD artifact born approval_status:"pending" that the harness
+//     does NOT publish (it routes to the approvals tray). These are the outward
+//     comms drafts: social-post (audience:"public") and investor-update-snippet
+//     (audience:"investors"). Drafts do NOT count against the published cap.
+//
+// The discriminator is AUDIENCE: anything destined for a non-internal audience
+// (public/investors) is a draft; everything else (internal or audience-less) is
+// published. Reading the audience off disk keeps this routing grounded in what
+// the skill actually stamped, not a hardcoded type list.
+
+/** Read the audience an artifact.json stamped, if any. Never throws. */
+export async function readAudience(artifactDir: string): Promise<Audience | undefined> {
+  try {
+    const raw = await readFile(join(artifactDir, "artifact.json"), "utf8");
+    const a = JSON.parse(raw) as Record<string, unknown>;
+    const aud = a.audience;
+    if (aud === "public" || aud === "investors" || aud === "internal") return aud;
+  } catch {
+    // no readable audience — treat as published (internal-by-default)
+  }
+  return undefined;
+}
+
+/**
+ * Is this a DRAFT (outward, pending, NOT published)? True for a non-internal
+ * audience (public/investors) — the outward comms drafts the harness holds for
+ * approval. Internal / audience-less artifacts (the published feed types,
+ * including person-brief) are NOT drafts.
+ */
+export function isDraftAudience(audience: Audience | undefined): boolean {
+  return audience === "public" || audience === "investors";
+}
+
+export interface PartitionedArtifacts {
+  /** Internal-audience artifacts that PUBLISH and count against the cap. */
+  published: ArtifactRef[];
+  /** Outward pending drafts (social-post / investor-update-snippet) — NOT published. */
+  drafts: ArtifactRef[];
+}
+
+/**
+ * Partition this run's newly-created artifacts into PUBLISHED (internal — counts
+ * against the cap, goes live) vs DRAFTS (outward pending — routes to approvals,
+ * does NOT count). Reads each artifact's stamped audience off disk. Pure-ish
+ * (filesystem reads only); never throws.
+ */
+export async function partitionByRouting(created: ArtifactRef[]): Promise<PartitionedArtifacts> {
+  const published: ArtifactRef[] = [];
+  const drafts: ArtifactRef[] = [];
+  for (const ref of created) {
+    const audience = await readAudience(ref.dir);
+    if (isDraftAudience(audience)) drafts.push(ref);
+    else published.push(ref);
+  }
+  return { published, drafts };
 }
 
 /**
@@ -430,9 +513,15 @@ export function sameSignal(a: SignalFingerprint, b: SignalFingerprint): boolean 
  * synthesis) > a podcast (narrated synthesis) > an insight-card (atomic). Used
  * only when two same-signal artifacts have equal/absent novelty scores.
  */
-// Only the distillery (inward) formats participate in this precedence; outward
-// comms types are never produced by feed-run's generation pass, so they map to
-// 0 via the `?? 0` lookup below.
+// Only the distillery (inward / published) formats participate in this
+// precedence. Outward comms types (social-post / investor-update-snippet) map to
+// 0 via the `?? 0` lookup below — and that is SAFE BY CONSTRUCTION because
+// run-generation.ts partitions BEFORE dedup, so dedupBySignal only ever sees the
+// PUBLISHED set. An outward draft can therefore never reach this comparison, so
+// its 0 mapping can never cause it to win (or lose) a cluster against a
+// publishable card. This coupling is load-bearing: if dedup is ever run over the
+// mixed (draft+published) set again, this 0 mapping would let a high-novelty
+// draft suppress a feed artifact. (See PR #12 Medium — keep partition-before-dedup.)
 const FORMAT_VALUE: Partial<Record<ArtifactType, number>> = {
   article: 3,
   podcast: 2,
@@ -526,8 +615,17 @@ export async function dedupBySignal(
 // ---------------------------------------------------------------------------
 
 export interface GenerationSummary {
-  /** Artifacts created this run (from the before/after diff). */
+  /**
+   * PUBLISHED artifacts created this run (internal audience — live in the feed,
+   * counted against the cap). From the before/after diff, minus drafts.
+   */
   created: CreatedArtifact[];
+  /**
+   * OUTWARD DRAFTS created this run (social-post / investor-update-snippet —
+   * born approval_status:"pending", routed to the approvals tray, NOT published
+   * and NOT counted against the cap). Empty on the common run that mines none.
+   */
+  drafts?: CreatedArtifact[];
   /**
    * Artifacts the agent reported KILLING (clearing no novelty bar). Best-effort:
    * parsed from the agent's stdout summary line; absent → empty.
@@ -601,6 +699,7 @@ export function parseKilled(stdout: string): KilledArtifact[] {
  */
 export function buildSummary(args: {
   created: CreatedArtifact[];
+  drafts?: CreatedArtifact[];
   stdout: string;
   duration: number;
   exitCode: number;
@@ -611,6 +710,7 @@ export function buildSummary(args: {
     killed: parseKilled(args.stdout),
     duration: args.duration,
     exit_code: args.exitCode,
+    ...(args.drafts && args.drafts.length ? { drafts: args.drafts } : {}),
     ...(args.quarantined && args.quarantined.length ? { quarantined: args.quarantined } : {}),
   };
 }
@@ -618,11 +718,14 @@ export function buildSummary(args: {
 /** A one-line human summary of a generation run (mirrors summarizeRun's style). */
 export function summarizeGeneration(s: GenerationSummary): string {
   const created = s.created.map((c) => `${c.type}/${c.slug}`).join(", ") || "none";
+  const d = s.drafts?.length
+    ? ` drafts=${s.drafts.length} [${s.drafts.map((c) => `${c.type}/${c.slug}`).join(", ")}]`
+    : "";
   const q = s.quarantined?.length
     ? ` quarantined=${s.quarantined.length} [${s.quarantined.map((x) => `${x.ref}:${x.reason}`).join(", ")}]`
     : "";
   return (
-    `generation: created=${s.created.length} [${created}] ` +
+    `generation: created=${s.created.length} [${created}]${d} ` +
     `killed=${s.killed.length}${q} ` +
     `duration=${Math.round(s.duration)}ms exit=${s.exit_code}`
   );

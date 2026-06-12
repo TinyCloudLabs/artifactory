@@ -76,6 +76,12 @@ import {
   parsePreferenceSignal,
   hasSignal,
 } from "../../query-corpus/scripts/preference-signal.ts";
+import {
+  findSalientPeople,
+  summarizeSalient,
+  DEFAULT_SALIENCE_MIN_TRANSCRIPTS,
+  type SalientPerson,
+} from "./salient-people-lib.ts";
 
 // ---------------------------------------------------------------------------
 // argv
@@ -226,6 +232,7 @@ async function finish(
     deepdive_path: extras.deepdive_path,
     deepdive_wrapped: extras.deepdive_wrapped ?? false,
     artifacts_published: extras.artifacts_published ?? [],
+    drafts_produced: extras.drafts_produced,
     distill_skipped: extras.distill_skipped,
     distill_pending_events: extras.distill_pending_events,
     guard: extras.guard,
@@ -354,6 +361,25 @@ const baselineSummary =
   `${baseline.entries.length} prior artifact(s) in ${artifactsDir} form the surfaced baseline` +
   (baseline.warnings.length ? ` (${baseline.warnings.length} warning(s))` : "");
 
+// SALIENT-PEOPLE DETECTION (Phase 1b — person-brief on salience). DETERMINISTIC,
+// model-free: surface recurring un-briefed speakers (>= N transcripts, minus
+// those who already have a current person-brief). The detector decides WHO
+// recurs; the generation agent JUDGES which (if any) earn a dossier. Runs over
+// the freshly-built index + the artifacts dir; never throws on a missing dir.
+let salientPeople: SalientPerson[] = [];
+try {
+  salientPeople = await findSalientPeople(index, artifactsDir, {
+    minTranscripts: DEFAULT_SALIENCE_MIN_TRANSCRIPTS,
+  });
+  console.error(
+    `[feed-run] salient-people: ${summarizeSalient(salientPeople, DEFAULT_SALIENCE_MIN_TRANSCRIPTS)}`,
+  );
+} catch (err) {
+  // Surfacing failure is non-fatal — the run proceeds with no person-brief
+  // candidates (the brief simply lists none). NEVER aborts the run.
+  console.error(`[feed-run] salient-people: detection failed (${String(err).slice(0, 120)}) — none surfaced`);
+}
+
 // 3a. QUERY — recency window, unsurfaced-only. Empty window → deep-dive only.
 const recencyResult: QueryResult = queryCorpus(index, baseline, ledger, {
   since,
@@ -445,6 +471,7 @@ const brief = renderBrief({
   distillDegraded,
   feedbackSummary,
   baselineSummary,
+  salientPeople,
 });
 log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 : 0} deep-dive, cap ${cap})`);
 
@@ -470,6 +497,7 @@ log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 :
 const runDir = join(runsDir, runId.replace(/[:]/g, "-"));
 const briefPath = join(runDir, "run-brief.md");
 let artifactsPublished: string[] = [];
+let draftsProduced: string[] = [];
 // PR #8 review enforcement (findings A + B): the human-line guard outcome and
 // the distill-skipped flag for the run-log. Undefined unless a real agent
 // distill ran (set in the real-generation branch below).
@@ -625,6 +653,7 @@ if (dryRun) {
     }
 
     artifactsPublished = summary.created.map((c) => `${c.type}/${c.slug}`);
+    draftsProduced = (summary.drafts ?? []).map((c) => `${c.type}/${c.slug}`);
     log(
       "generate",
       summary.exit_code === 0 ? "ok" : "degraded",
@@ -633,7 +662,9 @@ if (dryRun) {
     log(
       "save",
       "ok",
-      `${artifactsPublished.length} artifact(s) published${advance.next ? `; deep-dive cursor advanced to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} and persisted` : ""}; agent appended surfaced entries (SKILL.md)`,
+      `${artifactsPublished.length} artifact(s) published` +
+        (draftsProduced.length ? `; ${draftsProduced.length} outward draft(s) → approvals tray (pending, not published)` : "") +
+        `${advance.next ? `; deep-dive cursor advanced to ${advance.next}${advance.wrapped ? " (wrapped)" : ""} and persisted` : ""}; agent appended surfaced entries (SKILL.md)`,
     );
   } catch (err) {
     // A generation failure drops THIS run's artifacts, not the run (zero
@@ -651,6 +682,7 @@ const finalLog = await finish(
     deepdive_path: deepDive?.path,
     deepdive_wrapped: advance.wrapped,
     artifacts_published: artifactsPublished,
+    drafts_produced: draftsProduced.length ? draftsProduced : undefined,
     distill_skipped: distillSkipped,
     distill_pending_events: distillPendingEvents,
     guard: guardOutcome,

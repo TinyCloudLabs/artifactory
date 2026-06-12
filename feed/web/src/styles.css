@@ -867,6 +867,91 @@ button.tag::after {
   border: 0;
 }
 
+/* ---- approvals / drafts tray ----
+   The routing seam's human surface. Inherits the card + fb tokens so the tray
+   reads as part of the Folio, with a quiet accent frame to mark drafts as
+   not-yet-published. */
+.drafts {
+  padding-top: 4px;
+}
+
+.drafts-head {
+  padding: 8px 0 6px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 4px;
+}
+
+.drafts-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+.drafts-sub {
+  margin: 6px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* a pending draft card: a faint accent left-rule sets it apart from feed cards */
+.card.draft {
+  border-left: 2px solid var(--accent);
+  padding-left: 16px;
+}
+
+.draft-badge {
+  color: var(--bg);
+  background: var(--ink-2);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.draft-pending {
+  color: var(--accent);
+}
+
+.draft-headline {
+  font-size: 21px;
+}
+
+/* The action row reuses .fb-row / .fb-action; approve is the primary action
+   (accent), kill is muted-but-reachable, expand sits between. Three columns
+   instead of six. */
+.fb-row.draft-actions {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.draft-action-approve {
+  color: var(--accent);
+}
+.draft-action-approve:hover {
+  color: var(--accent);
+}
+.draft-action-approve svg {
+  transform: scale(1.06);
+}
+
+.draft-action-kill:hover {
+  color: var(--ink);
+}
+
+/* phone width: the three actions still fit, but give the tray the same gutter
+   treatment as the masthead fix so nothing clips. */
+@media (max-width: 460px) {
+  .card.draft {
+    padding-left: 12px;
+  }
+  .drafts-title {
+    font-size: 25px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

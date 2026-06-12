@@ -17,7 +17,7 @@
 // NO real claude call, NO real generation, anywhere in this file.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, readFile, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -556,6 +556,67 @@ describe("runGeneration end-to-end — dedup + cap backstops fire", () => {
     // artifacts/ on disk matches the summary (2 published).
     const onDisk = await scanArtifacts(artifactsDir);
     expect(onDisk.length).toBe(2);
+  });
+
+  // PR #12 Medium regression: a high-novelty unapproved DRAFT and a same-signal
+  // publishable card MUST NOT compete in dedup. This drives the REAL runGeneration
+  // ordering (partition → dedup-published-only → cap), NOT dedupBySignal(published)
+  // directly. Under the old mixed-set ordering the 0.95-novelty social-post draft
+  // would win the cluster and quarantine the 0.5 insight-card — an unreviewed draft
+  // silently suppressing a feed artifact. This test FAILS if dedup ever runs over
+  // the mixed set again.
+  test("a high-novelty DRAFT same-signal as a card → the CARD survives, the draft is untouched", async () => {
+    const spawn: SpawnFn = () => {
+      const fs = require("node:fs");
+      const mk = (type: string, slug: string, body: Record<string, unknown>) => {
+        const d = join(artifactsDir, type, slug);
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(
+          join(d, "artifact.json"),
+          JSON.stringify({ id: slug, type, headline: slug, tags: [], generated_at: body.generated_at ?? "2026-06-11T14:00:00.000Z", quality: { critic_pass: true, quotes_verified: true }, ...body }),
+        );
+      };
+      // The publishable feed card (internal, lower novelty).
+      mk("insight-card", "drift-card", {
+        generated_at: "2026-06-11T14:00:01.000Z",
+        source_transcripts: ["/c/f.md"],
+        novelty: 0.5,
+        quality: { critic_pass: true, quotes_verified: true, notes: "novelty: fundraise drift 2m to 100k signal" },
+      });
+      // A SAME-SIGNAL outward draft with HIGHER novelty — would win a mixed-set dedup.
+      mk("social-post", "drift-banger", {
+        generated_at: "2026-06-11T14:00:02.000Z",
+        source_transcripts: ["/c/f.md"],
+        audience: "public",
+        approval_status: "pending",
+        novelty: 0.95,
+        quality: { critic_pass: true, quotes_verified: true, notes: "novelty: fundraise drift from 2m to 100k signal" },
+      });
+      return { status: 0, stdout: "shipped 2", stderr: "" };
+    };
+
+    const summary = await runGeneration({
+      briefPath,
+      artifactsDir,
+      cap: 3,
+      repoRoot: dir,
+      runId: "2026-06-11T14:00:00Z",
+      spawn,
+      env: {},
+    });
+
+    // The CARD reaches the published feed; nothing was quarantined.
+    expect(summary.created.map((c) => c.slug)).toEqual(["drift-card"]);
+    expect(summary.quarantined ?? []).toEqual([]);
+    // The DRAFT is carried separately (approvals tray), never deduped away.
+    expect(summary.drafts?.map((d) => `${d.type}/${d.slug}`)).toEqual(["social-post/drift-banger"]);
+
+    // On disk: both survive in artifacts/ (card published, draft pending), and the
+    // dedup quarantine dir was never created.
+    const onDisk = (await scanArtifacts(artifactsDir)).map((a) => `${a.type}/${a.slug}`).sort();
+    expect(onDisk).toEqual(["insight-card/drift-card", "social-post/drift-banger"]);
+    const dedupExists = await stat(join(briefPath, "..", "dedup")).then(() => true).catch(() => false);
+    expect(dedupExists).toBe(false);
   });
 });
 

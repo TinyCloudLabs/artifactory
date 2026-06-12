@@ -15,12 +15,32 @@ afterAll(async () => {
 describe("scanArtifacts", () => {
   test("returns only valid artifacts, skipping broken json and empty dirs", async () => {
     const cards = await scanArtifacts(fx.dir);
-    expect(cards.map((c) => c.id).sort()).toEqual(["art-1", "ins-1", "pod-1", "unk-1"]);
+    // The scanner is ROUTING-AGNOSTIC: it returns every valid artifact (internal
+    // AND outward, pending or approved). Routing is the app layer's job.
+    expect(cards.map((c) => c.id).sort()).toEqual([
+      "approved-snippet-1",
+      "art-1",
+      "draft-blank-status-1",
+      "draft-missing-status-1",
+      "draft-pending-1",
+      "ins-1",
+      "pod-1",
+      "unk-1",
+    ]);
   });
 
   test("sorts newest first by generated_at", async () => {
     const cards = await scanArtifacts(fx.dir);
-    expect(cards.map((c) => c.id)).toEqual(["pod-1", "ins-1", "unk-1", "art-1"]);
+    expect(cards.map((c) => c.id)).toEqual([
+      "pod-1",
+      "draft-pending-1",
+      "draft-missing-status-1",
+      "draft-blank-status-1",
+      "ins-1",
+      "approved-snippet-1",
+      "unk-1",
+      "art-1",
+    ]);
   });
 
   test("maps media URLs only for files that exist", async () => {

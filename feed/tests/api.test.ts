@@ -32,10 +32,20 @@ describe("GET /api/cards", () => {
     const res = await app.request("/api/cards");
     expect(res.status).toBe(200);
     const body = (await res.json()) as CardsResponse;
-    expect(body.total).toBe(4);
+    // 5 PUBLISHED cards: 3 internal (pod-1, ins-1, unk-1, art-1) + 1 approved
+    // outward (approved-snippet-1). The pending outward draft is excluded.
+    expect(body.total).toBe(5);
     expect(body.offset).toBe(0);
     expect(body.hasMore).toBe(false);
-    expect(body.cards.map((c) => c.id)).toEqual(["pod-1", "ins-1", "unk-1", "art-1"]);
+    expect(body.cards.map((c) => c.id)).toEqual([
+      "pod-1",
+      "ins-1",
+      "approved-snippet-1",
+      "unk-1",
+      "art-1",
+    ]);
+    // The pending outward draft never appears in the published feed.
+    expect(body.cards.map((c) => c.id)).not.toContain("draft-pending-1");
   });
 
   test("paginates with limit and offset", async () => {
@@ -44,8 +54,8 @@ describe("GET /api/cards", () => {
     expect(p1.hasMore).toBe(true);
 
     const p2 = (await (await app.request("/api/cards?limit=2&offset=2")).json()) as CardsResponse;
-    expect(p2.cards.map((c) => c.id)).toEqual(["unk-1", "art-1"]);
-    expect(p2.hasMore).toBe(false);
+    expect(p2.cards.map((c) => c.id)).toEqual(["approved-snippet-1", "unk-1"]);
+    expect(p2.hasMore).toBe(true);
   });
 
   test("clamps bad limit/offset values instead of erroring", async () => {
@@ -53,7 +63,7 @@ describe("GET /api/cards", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as CardsResponse;
     expect(body.offset).toBe(0);
-    expect(body.cards.length).toBe(4);
+    expect(body.cards.length).toBe(5);
   });
 });
 
