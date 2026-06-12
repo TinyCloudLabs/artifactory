@@ -5,6 +5,11 @@ node_modules/
 artifacts/
 out/
 
+# quarantined artifacts (skill output flagged for review — contains real
+# meeting content: names, unannounced numbers, the very leaks the comms
+# skills exist to catch). Same stance as artifacts/. Anchored to repo root.
+/.quarantine/
+
 # feedback event log (personal data, like artifacts/) — anchored to the
 # repo root so a future source dir named feedback/ isn't silently ignored
 /feedback/

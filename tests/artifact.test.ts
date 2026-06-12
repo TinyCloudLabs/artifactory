@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  isOutwardType,
   slugify,
   validateArtifact,
   writeArtifact,
@@ -93,6 +94,83 @@ describe("validateArtifact", () => {
   test("rejects non-ISO generated_at", () => {
     const a = { ...goodArtifact(), generated_at: "yesterday-ish" };
     expect(validateArtifact(a).ok).toBe(false);
+  });
+
+  test("accepts the new outward-facing types", () => {
+    for (const type of [
+      "social-post",
+      "investor-update-snippet",
+      "quote-card",
+      "person-brief",
+    ] as const) {
+      const result = validateArtifact({ ...goodArtifact(), type });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  test("defaults approval_status to pending for outward types", () => {
+    const result = validateArtifact({ ...goodArtifact(), type: "social-post" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.artifact.approval_status).toBe("pending");
+  });
+
+  test("leaves inward types' approval_status undefined", () => {
+    const result = validateArtifact(goodArtifact()); // insight-card
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.artifact.approval_status).toBeUndefined();
+  });
+
+  test("honors an explicit approved status", () => {
+    const result = validateArtifact({
+      ...goodArtifact(),
+      type: "social-post",
+      approval_status: "approved",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.artifact.approval_status).toBe("approved");
+  });
+
+  test("validates optional audience / approval_status / platform", () => {
+    const ok = validateArtifact({
+      ...goodArtifact(),
+      type: "investor-update-snippet",
+      audience: "investors",
+      approval_status: "pending",
+      platform: "memo",
+    });
+    expect(ok.ok).toBe(true);
+
+    expect(
+      validateArtifact({ ...goodArtifact(), audience: "everyone" }).ok,
+    ).toBe(false);
+    expect(
+      validateArtifact({ ...goodArtifact(), approval_status: "shipped" }).ok,
+    ).toBe(false);
+    expect(
+      validateArtifact({ ...goodArtifact(), platform: 42 }).ok,
+    ).toBe(false);
+  });
+
+  test("isOutwardType marks comms types outward, distill types inward", () => {
+    expect(isOutwardType("social-post")).toBe(true);
+    expect(isOutwardType("quote-card")).toBe(true);
+    expect(isOutwardType("person-brief")).toBe(true);
+    expect(isOutwardType("investor-update-snippet")).toBe(true);
+    expect(isOutwardType("insight-card")).toBe(false);
+    expect(isOutwardType("article")).toBe(false);
+    expect(isOutwardType("podcast")).toBe(false);
+  });
+
+  test("existing insight-card artifacts remain valid unchanged (backward-compat)", () => {
+    const a = goodArtifact();
+    const result = validateArtifact(a);
+    expect(result.ok).toBe(true);
+    // no new required field crept in
+    expect(a.audience).toBeUndefined();
+    expect(a.platform).toBeUndefined();
   });
 });
 
