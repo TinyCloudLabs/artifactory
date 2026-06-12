@@ -12,7 +12,7 @@
 //   - Every route is GATED (unauth → 401).
 
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -188,10 +188,13 @@ describe("POST /api/drafts/:id/kill", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, quarantined: true });
 
-    // Quarantined, not deleted: original gone, copy lives under .quarantine/.
+    // Quarantined, not deleted: original gone, copy lives under .quarantine/ at
+    // <slug>__<id> (the id suffix makes a slug collision lossless — see below).
     expect(existsSync(join(fx.dir, "social-post", "pending-banger"))).toBe(false);
     expect(
-      existsSync(join(fx.dir, ".quarantine", "social-post", "pending-banger", "artifact.json")),
+      existsSync(
+        join(fx.dir, ".quarantine", "social-post", "pending-banger__draft-pending-1", "artifact.json"),
+      ),
     ).toBe(true);
 
     // Gone from the tray (the other pending drafts remain) and never in the feed.
@@ -205,6 +208,56 @@ describe("POST /api/drafts/:id/kill", () => {
     const events = await readEvents(feedbackFile);
     const killed = events.find((e) => e.artifact_id === "draft-pending-1");
     expect(killed?.action).toBe("less");
+  });
+
+  // PR #12 Low regression: two DISTINCT drafts (different ids) can slugify to the
+  // same <type>/<slug>. Killing the second MUST NOT clobber the first's quarantined
+  // copy. The `__<id>` suffix on the quarantine dest makes recovery lossless.
+  test("a slug collision between two distinct drafts is LOSSLESS in quarantine", async () => {
+    const app = openApp();
+
+    // Kill the first draft (id=draft-pending-1, social-post/pending-banger).
+    const r1 = await app.request("/api/drafts/draft-pending-1/kill", { method: "POST" });
+    expect(r1.status).toBe(200);
+    const q1 = join(fx.dir, ".quarantine", "social-post", "pending-banger__draft-pending-1", "artifact.json");
+    expect(existsSync(q1)).toBe(true);
+
+    // A SECOND, distinct draft lands at the SAME <type>/<slug> path (same slug,
+    // different artifact id) — the realistic collision after the first was killed
+    // and its source dir moved to quarantine.
+    const collisionDir = join(fx.dir, "social-post", "pending-banger");
+    await mkdir(collisionDir, { recursive: true });
+    await writeFile(
+      join(collisionDir, "artifact.json"),
+      JSON.stringify({
+        id: "draft-pending-2",
+        type: "social-post",
+        headline: "A different draft that slugifies the same",
+        body: "Distinct content, same slug.",
+        approval_status: "pending",
+        audience: "public",
+        platform: "x",
+        generated_at: "2026-06-09T12:00:00Z",
+        tags: [],
+        source_transcripts: ["/tmp/t.md"],
+        quality: { critic_pass: true, quotes_verified: true },
+      }),
+    );
+
+    // Kill the second draft too.
+    const r2 = await app.request("/api/drafts/draft-pending-2/kill", { method: "POST" });
+    expect(r2.status).toBe(200);
+
+    // LOSSLESS: BOTH quarantined copies survive under distinct __<id> dirs.
+    expect(existsSync(q1)).toBe(true); // the first was NOT clobbered
+    const q2 = join(fx.dir, ".quarantine", "social-post", "pending-banger__draft-pending-2", "artifact.json");
+    expect(existsSync(q2)).toBe(true);
+
+    // And they are genuinely distinct artifacts (different ids on disk).
+    const a1 = JSON.parse(await readFile(q1, "utf8")) as { id: string };
+    const a2 = JSON.parse(await readFile(q2, "utf8")) as { id: string };
+    expect(a1.id).toBe("draft-pending-1");
+    expect(a2.id).toBe("draft-pending-2");
   });
 });
 

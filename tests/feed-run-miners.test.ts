@@ -294,6 +294,11 @@ describe("cap counts PUBLISHED only — drafts never crowd out feed artifacts", 
     expect(capped.quarantined.length).toBe(1);
   });
 
+  // UNIT test of the dedup CONTRACT over an already-published set (the safe input).
+  // It does NOT guard the production ORDERING — run-generation.ts must partition
+  // BEFORE calling dedupBySignal so a draft never competes. That ordering is
+  // regression-tested end-to-end in run-generation.test.ts ("a high-novelty DRAFT
+  // same-signal as a card → the CARD survives"), which drives runGeneration itself.
   test("dedup still holds over published (same-signal card + podcast → one survives)", async () => {
     await writeArt(artifactsDir, "insight-card", "drift-card", {
       novelty: 0.7,

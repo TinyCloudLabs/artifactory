@@ -452,15 +452,24 @@ export function createApp(opts: AppOptions): Hono<AuthEnv> {
       ts: new Date().toISOString(),
     });
 
-    // Quarantine, don't delete: move under artifacts/.quarantine/<type>/<slug>
-    // so the scanner (which walks type dirs; a leading-dot dir is just another
-    // type that holds no real artifacts of a known type) stops surfacing it but
-    // the bytes survive for recovery.
+    // Quarantine, don't delete: move under
+    // artifacts/.quarantine/<type>/<slug>__<id> so the scanner (which walks type
+    // dirs; a leading-dot dir is just another type that holds no real artifacts of
+    // a known type) stops surfacing it but the bytes survive for recovery.
+    //
+    // The `__<id>` suffix makes quarantine LOSSLESS on a slug collision: two
+    // DISTINCT drafts can slugify to the same <type>/<slug> (slug = slugify of a
+    // truncated headline), but their artifact ids differ. Without the suffix,
+    // killing the second would clobber the first's quarantined copy via the
+    // pre-rename rm. The id is already validated by isValidArtifactId (no slashes,
+    // dots, or traversal), so it is safe as a path segment. We still rm the exact
+    // <slug>__<id> dest first so re-killing the SAME draft is idempotent.
     const quarantineBase = safeJoin(artifactsDir, ".quarantine", card.type);
     if (!quarantineBase) return c.json({ error: "forbidden" }, 403);
-    const dest = join(quarantineBase, card.slug);
+    const dest = safeJoin(quarantineBase, `${card.slug}__${id}`);
+    if (!dest) return c.json({ error: "forbidden" }, 403);
     try {
-      await rm(dest, { recursive: true, force: true }); // clear any prior shadow
+      await rm(dest, { recursive: true, force: true }); // clear this draft's prior shadow
       await mkdir(quarantineBase, { recursive: true });
       await rename(src, dest);
     } catch (err) {

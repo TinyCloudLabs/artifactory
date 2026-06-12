@@ -513,9 +513,15 @@ export function sameSignal(a: SignalFingerprint, b: SignalFingerprint): boolean 
  * synthesis) > a podcast (narrated synthesis) > an insight-card (atomic). Used
  * only when two same-signal artifacts have equal/absent novelty scores.
  */
-// Only the distillery (inward) formats participate in this precedence; outward
-// comms types are never produced by feed-run's generation pass, so they map to
-// 0 via the `?? 0` lookup below.
+// Only the distillery (inward / published) formats participate in this
+// precedence. Outward comms types (social-post / investor-update-snippet) map to
+// 0 via the `?? 0` lookup below — and that is SAFE BY CONSTRUCTION because
+// run-generation.ts partitions BEFORE dedup, so dedupBySignal only ever sees the
+// PUBLISHED set. An outward draft can therefore never reach this comparison, so
+// its 0 mapping can never cause it to win (or lose) a cluster against a
+// publishable card. This coupling is load-bearing: if dedup is ever run over the
+// mixed (draft+published) set again, this 0 mapping would let a high-novelty
+// draft suppress a feed artifact. (See PR #12 Medium — keep partition-before-dedup.)
 const FORMAT_VALUE: Partial<Record<ArtifactType, number>> = {
   article: 3,
   podcast: 2,

@@ -54,6 +54,20 @@ export function approvalStatus(card: FeedCard): "pending" | "approved" {
  * Does this card belong in the PUBLISHED feed (GET /api/cards)? True for all
  * internal artifacts and for outward artifacts that have been approved.
  * Outward-pending artifacts are EXCLUDED — they live in the drafts tray.
+ *
+ * GATING ASYMMETRY (intentional, no leak — see PR #12 Nit). This feed gate keys
+ * on TYPE (isOutwardType + approval_status), while the harness
+ * partitionByRouting (skills/feed-run/scripts/run-generation-lib.ts) keys on
+ * AUDIENCE (isDraftAudience). They can disagree for a MALFORMED artifact — e.g.
+ * an outward type stamped audience:"internal", or an outward type with no
+ * audience at all. Both gates are still correct:
+ *   - The FEED is the real publish gate. It gates by type here, so an outward
+ *     type without an explicit "approved" status NEVER reaches /api/cards
+ *     regardless of its audience field. No unapproved outward artifact leaks.
+ *   - The HARNESS partition only decides cap/dedup participation (an internal
+ *     concern); it does not publish. The worst a type/audience mismatch can do
+ *     there is mis-bucket an artifact for cap accounting, never publish it.
+ * So there is no path by which the disagreement publishes an unapproved draft.
  */
 export function isPublished(card: FeedCard): boolean {
   return approvalStatus(card) === "approved";
