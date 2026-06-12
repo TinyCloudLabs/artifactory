@@ -430,7 +430,10 @@ export function sameSignal(a: SignalFingerprint, b: SignalFingerprint): boolean 
  * synthesis) > a podcast (narrated synthesis) > an insight-card (atomic). Used
  * only when two same-signal artifacts have equal/absent novelty scores.
  */
-const FORMAT_VALUE: Record<ArtifactType, number> = {
+// Only the distillery (inward) formats participate in this precedence; outward
+// comms types are never produced by feed-run's generation pass, so they map to
+// 0 via the `?? 0` lookup below.
+const FORMAT_VALUE: Partial<Record<ArtifactType, number>> = {
   article: 3,
   podcast: 2,
   "insight-card": 1,
@@ -494,7 +497,7 @@ export async function dedupBySignal(
     cluster.sort(
       (a, b) =>
         b.noveltyNum - a.noveltyNum ||
-        FORMAT_VALUE[b.ref.type] - FORMAT_VALUE[a.ref.type] ||
+        (FORMAT_VALUE[b.ref.type] ?? 0) - (FORMAT_VALUE[a.ref.type] ?? 0) ||
         a.ref.key.localeCompare(b.ref.key),
     );
     winners.push(cluster[0]!);

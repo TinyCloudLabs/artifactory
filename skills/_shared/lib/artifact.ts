@@ -12,8 +12,36 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export const ARTIFACT_TYPES = ["insight-card", "article", "podcast"] as const;
+export const ARTIFACT_TYPES = [
+  "insight-card",
+  "article",
+  "podcast",
+  // Phase-2 outward-facing comms types. These default to approval_status
+  // "pending" (see validateArtifact) — nothing outward-facing auto-publishes.
+  "social-post",
+  "investor-update-snippet",
+  "quote-card",
+  "person-brief",
+] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
+
+/** Outward-facing types gate at a human-approval step before they can ship. */
+export const OUTWARD_ARTIFACT_TYPES: readonly ArtifactType[] = [
+  "social-post",
+  "investor-update-snippet",
+  "quote-card",
+  "person-brief",
+] as const;
+
+export const APPROVAL_STATUSES = ["pending", "approved"] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+export const AUDIENCES = ["public", "investors", "internal"] as const;
+export type Audience = (typeof AUDIENCES)[number];
+
+export function isOutwardType(type: ArtifactType): boolean {
+  return OUTWARD_ARTIFACT_TYPES.includes(type);
+}
 
 export interface SourceQuote {
   quote: string;
@@ -55,6 +83,17 @@ export interface Artifact {
   generated_at: string; // ISO 8601
   generation_model?: string;
   quality: ArtifactQuality;
+  /**
+   * Human-approval gate state. Optional and backward-compatible: when absent
+   * on an OUTWARD type, validateArtifact treats it as "pending" (nothing
+   * outward-facing is approved by default). Inward types (insight-card,
+   * article, podcast) ignore it.
+   */
+  approval_status?: ApprovalStatus;
+  /** Intended audience for an outward artifact. */
+  audience?: Audience;
+  /** Target platform when relevant, e.g. "x" / "linkedin". Free-form. */
+  platform?: string;
 }
 
 export type ValidationResult =
@@ -104,8 +143,18 @@ export function validateArtifact(value: unknown): ValidationResult {
     errors.push("source_transcripts: required non-empty array of paths");
   }
 
-  for (const key of ["body", "quote", "attribution", "hero_image", "audio", "generation_model"]) {
+  for (const key of ["body", "quote", "attribution", "hero_image", "audio", "generation_model", "platform"]) {
     optString(key);
+  }
+
+  if (
+    a.approval_status !== undefined &&
+    !APPROVAL_STATUSES.includes(a.approval_status as ApprovalStatus)
+  ) {
+    errors.push(`approval_status: must be one of ${APPROVAL_STATUSES.join(", ")} when present`);
+  }
+  if (a.audience !== undefined && !AUDIENCES.includes(a.audience as Audience)) {
+    errors.push(`audience: must be one of ${AUDIENCES.join(", ")} when present`);
   }
 
   if (a.source_quotes !== undefined) {
@@ -135,7 +184,15 @@ export function validateArtifact(value: unknown): ValidationResult {
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, artifact: value as Artifact };
+
+  const artifact = value as Artifact;
+  // Default the approval gate to "pending" for outward-facing types when the
+  // field is absent — nothing outward-facing is approved by default. Inward
+  // types are left untouched (the field stays undefined / ignored).
+  if (artifact.approval_status === undefined && isOutwardType(artifact.type)) {
+    artifact.approval_status = "pending";
+  }
+  return { ok: true, artifact };
 }
 
 export function slugify(text: string): string {
