@@ -9,7 +9,7 @@
 //      without needing a VERSION bump.
 // Bump VERSION on SW changes to drop old caches on activate.
 
-const VERSION = "folio-5";
+const VERSION = "folio-6";
 const SHELL_CACHE = `shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 
@@ -118,6 +118,13 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Auth state must NEVER be served from cache: the catch-all
+  // stale-while-revalidate below would answer GET /auth/me with the cached
+  // signed-in 200 forever (only 200s are written back, so the real 401 can
+  // never evict it) — which resurrects a signed-out session every time the
+  // gate re-checks. Straight to the network, no fallback.
+  if (url.pathname.startsWith("/auth/")) return;
 
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/media/")) {
     // Range requests (audio seeks) go straight to the network — the server
