@@ -28,7 +28,7 @@ function goodArtifact(): Artifact {
     ],
     generated_at: "2026-06-10T12:00:00.000Z",
     generation_model: "agent-judgment",
-    quality: { critic_pass: true, quotes_verified: true, notes: "1 of 3 candidates survived" },
+    quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "1 of 3 candidates survived" },
   };
 }
 
@@ -80,6 +80,20 @@ describe("validateArtifact", () => {
     if (result.ok) throw new Error("unreachable");
     expect(result.errors.join("\n")).toContain("quality.critic_pass");
     expect(result.errors.join("\n")).toContain("quality.quotes_verified");
+    // The attribution guard is part of the contract: identity/role/affiliation
+    // grounding must be tracked just like quote verification.
+    expect(result.errors.join("\n")).toContain("quality.attributions_grounded");
+  });
+
+  test("rejects a quality block missing only attributions_grounded", () => {
+    const a = {
+      ...goodArtifact(),
+      quality: { critic_pass: true, quotes_verified: true },
+    };
+    const result = validateArtifact(a);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.errors.join("\n")).toContain("quality.attributions_grounded");
   });
 
   test("rejects malformed source_quotes entries", () => {

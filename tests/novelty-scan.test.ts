@@ -70,7 +70,7 @@ describe("novelty-scan CLI", () => {
         tags: ["fundraising"],
         source_transcripts: [onePath],
         generated_at: "2026-03-02T00:00:00Z",
-        quality: { critic_pass: true, quotes_verified: true },
+        quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true },
       }),
     );
   });

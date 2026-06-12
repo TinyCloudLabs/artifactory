@@ -97,7 +97,7 @@ function articleArtifact(overrides: Partial<Artifact> = {}): Record<string, unkn
     ],
     generated_at: "2026-06-10T12:00:00.000Z",
     generation_model: "agent-judgment",
-    quality: { critic_pass: true, quotes_verified: true, notes: "synthetic test artifact" },
+    quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "synthetic test artifact" },
     ...overrides,
   };
 }
@@ -312,7 +312,7 @@ describe("verify-quotes.ts CLI integration", () => {
 
   test("without --stamp the artifact file is untouched on success", async () => {
     const artifactPath = join(dir, "artifact-no-stamp.json");
-    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false } });
+    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false } });
     await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
     const before = await readFile(artifactPath, "utf8");
     const res = runScript("verify-quotes.ts", artifactPath);
@@ -324,7 +324,7 @@ describe("verify-quotes.ts CLI integration", () => {
   test("--stamp on success sets quality.quotes_verified=true, preserving the rest", async () => {
     const artifactPath = join(dir, "artifact-stamp.json");
     const artifact = articleArtifact({
-      quality: { critic_pass: true, quotes_verified: false, notes: "pre-stamp" },
+      quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false, notes: "pre-stamp" },
     });
     await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
     const res = runScript("verify-quotes.ts", artifactPath, "--stamp");
@@ -339,7 +339,7 @@ describe("verify-quotes.ts CLI integration", () => {
   });
 
   test("--stamp on failure exits 1 and does not flip the flag", async () => {
-    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false } });
+    const artifact = articleArtifact({ quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false } });
     (artifact.source_quotes as { quote: string }[])[0]!.quote =
       "the cache keys lack versioning so deploys wipe the cache";
     const artifactPath = join(dir, "artifact-stamp-fail.json");
@@ -354,7 +354,7 @@ describe("verify-quotes.ts CLI integration", () => {
     const artifactPath = join(dir, "artifact-stamp-empty.json");
     const artifact = articleArtifact({
       source_quotes: [],
-      quality: { critic_pass: true, quotes_verified: false },
+      quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false },
     });
     await writeFile(artifactPath, JSON.stringify(artifact, null, 2));
     const res = runScript("verify-quotes.ts", artifactPath, "--stamp");

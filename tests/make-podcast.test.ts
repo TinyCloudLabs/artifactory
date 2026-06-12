@@ -283,7 +283,7 @@ describe("podcast artifact saving", () => {
         audio: "episode.wav",
         generated_at: "2026-06-10T12:00:00.000Z",
         generation_model: "gemini-2.5-flash-preview-tts",
-        quality: { critic_pass: true, quotes_verified: true, notes: "1 angle of 3 survived" },
+        quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "1 angle of 3 survived" },
       };
       const wav = pcmToWav(new Uint8Array([1, 2, 3, 4]));
       const written = await writeArtifact(artifact, {
@@ -369,7 +369,7 @@ function podcastArtifact(overrides: Record<string, unknown> = {}): Record<string
       },
     ],
     generated_at: "2026-06-10T12:00:00.000Z",
-    quality: { critic_pass: true, quotes_verified: false, notes: "synthetic test artifact" },
+    quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false, notes: "synthetic test artifact" },
     ...overrides,
   };
 }

@@ -289,7 +289,7 @@ describe("priorArtifactIndex", () => {
         source_transcripts: ["/tmp/one.md"],
         source_quotes: [{ quote: "100 grand to close", transcript: "/tmp/one.md" }],
         generated_at: "2026-03-02T00:00:00Z",
-        quality: { critic_pass: true, quotes_verified: true, notes: "[novelty] lead=quantified-drift" },
+        quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "[novelty] lead=quantified-drift" },
       }),
     );
     const podDir = join(dir, "podcast", "older-episode");
@@ -303,7 +303,7 @@ describe("priorArtifactIndex", () => {
         tags: ["infra"],
         source_transcripts: ["/tmp/two.md"],
         generated_at: "2026-03-01T00:00:00Z",
-        quality: { critic_pass: true, quotes_verified: true },
+        quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true },
       }),
     );
     // Malformed artifact — must warn, not throw.

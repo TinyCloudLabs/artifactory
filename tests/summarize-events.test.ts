@@ -53,7 +53,7 @@ beforeAll(async () => {
       tags: ["pricing"],
       source_transcripts: ["/tmp/t.md"],
       generated_at: "2026-06-09T00:00:00Z",
-      quality: { critic_pass: true, quotes_verified: true },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true },
     }),
   );
 });

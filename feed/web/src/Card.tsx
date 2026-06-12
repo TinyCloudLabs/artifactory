@@ -378,6 +378,9 @@ function Foot({ card }: { card: FeedCard }) {
         {q ? (
           <>
             {q.critic_pass ? "✓" : "✗"} critic · {q.quotes_verified ? "✓" : "✗"} quotes
+            {q.attributions_grounded !== undefined
+              ? ` · ${q.attributions_grounded ? "✓" : "✗"} attribution`
+              : ""}
           </>
         ) : (
           "ungraded"

@@ -58,7 +58,7 @@ function insightArtifact(overrides: Record<string, unknown> = {}): Record<string
       },
     ],
     generated_at: "2026-06-10T12:00:00.000Z",
-    quality: { critic_pass: true, quotes_verified: false, notes: "synthetic test artifact" },
+    quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false, notes: "synthetic test artifact" },
     ...overrides,
   };
 }

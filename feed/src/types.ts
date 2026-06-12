@@ -27,6 +27,9 @@ export interface SourceQuote {
 export interface ArtifactQuality {
   critic_pass: boolean;
   quotes_verified: boolean;
+  /** Person identity/role/affiliation claims grounded in source. Optional for
+   *  back-compat with artifacts generated before the attribution guard. */
+  attributions_grounded?: boolean;
   notes?: string;
 }
 

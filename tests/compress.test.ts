@@ -116,7 +116,7 @@ function podcastJson(): string {
       source_transcripts: ["/tmp/synthetic.md"],
       audio: "episode.wav",
       generated_at: "2026-06-11T00:00:00.000Z",
-      quality: { critic_pass: true, quotes_verified: false, notes: "synthetic" },
+      quality: { critic_pass: true, quotes_verified: false, attributions_grounded: false, notes: "synthetic" },
     },
     null,
     2,

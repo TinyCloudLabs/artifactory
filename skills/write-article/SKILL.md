@@ -177,6 +177,22 @@ criteria, each pass/fail:
 3. **No generic filler** — does any paragraph survive only because it's
    inoffensive? Does the draft violate the writing-quality rules above?
    Rewrite or cut.
+4. **Identity grounding** (mandatory — trust-critical, not style) — does
+   every claim about a REAL PERSON's role, title, affiliation, employer,
+   location, or relationship appear verbatim-in-substance in the source? NEVER
+   infer, guess, or import a person's identity from outside context. When it's
+   unknown, refer to them ONLY by a transcript-grounded action ("a founder
+   TinyCloud spoke with", not "a Shape Rotator cohort founder"). Run the
+   attribution check (step 6) and STRIP or CORRECT every ungrounded
+   person-claim before publishing; list your person-claims and that each is
+   source-grounded in `quality.notes`.
+   >
+   > **Worked example (the real incident).**
+   > WRONG: "Odisea's Cush, a Shape Rotator cohort founder" — the source
+   > contained ZERO mentions of "Shape Rotator" or "cohort"; the affiliation
+   > was inferred and asserted as fact (quotes real, identity fabricated).
+   > RIGHT: "Cush, a founder on a call with TinyCloud" — add "Odisea" only if
+   > "Odisea" actually appears in the source (it does), and nothing more.
 
 If the draft fails criterion 1 after one honest rewrite, discard the whole
 article — back to step 2 or output nothing. Record the verdict in
@@ -192,20 +208,33 @@ the verdict in `quality.notes` with the novelty convention, e.g.
 `[novelty] lead=single-voice: ...; adversarial critic: ...` (`lead=` one
 of `quantified-drift` | `single-voice` | `cross-transcript`).
 
-### 6. Verify quotes (script — must exit 0)
+### 6. Verify — quotes AND attributions (scripts — must exit 0)
 
 ```sh
 bun skills/write-article/scripts/verify-quotes.ts drafts/<slug>.json --stamp
+bun skills/_shared/scripts/verify-attribution.ts drafts/<slug>.json --stamp
 ```
 
-Checks every `source_quotes[].quote` verbatim (whitespace-insensitive)
-against its transcript. An empty `source_quotes` list fails — articles
-without anchors don't ship. Fix or drop failing quotes (and the claims
-that depended on them), then re-run until exit 0. With `--stamp`, full
-success writes `quality.quotes_verified: true` into the draft for you
-(atomic write); on any failure nothing is stamped. **Never hand-set
-`quotes_verified`** — `--stamp` is the only sanctioned way. Remember:
-this proves the text, not the attribution (see the drafting-step caveat).
+**verify-quotes** checks every `source_quotes[].quote` verbatim
+(whitespace-insensitive) against its transcript. An empty `source_quotes`
+list fails — articles without anchors don't ship. Fix or drop failing quotes
+(and the claims that depended on them), then re-run until exit 0. With
+`--stamp`, full success writes `quality.quotes_verified: true` (atomic write).
+Remember: this proves the text, not the attribution (see the drafting caveat).
+
+**verify-attribution** is the identity-grounding analog (this is exactly what
+the drafting caveat warns about, made deterministic). It scans the prose for
+person+descriptor claims — "<Name> — <descriptor>", "<Org>'s <Name>", "<Name>
+of <Org>", "<Name> from <Place>", "<Name> who runs/founded …" — and checks
+each descriptor's key terms (org/place names, role nouns) against the source.
+Any ungrounded claim is FLAGGED with its missing terms and the script exits
+non-zero — STRIP or CORRECT it (refer to the person only by transcript-grounded
+action), then re-run. Deterministic; over-flags on paraphrase by design, so
+judge each flag, but ship nothing you can't ground. With `--stamp`, a
+fully-grounded result writes `quality.attributions_grounded: true`.
+
+**Never hand-set `quotes_verified` or `attributions_grounded`** — `--stamp` is
+the only sanctioned way for each. A draft isn't save-ready until BOTH exit 0.
 
 ### 7. Save (script)
 

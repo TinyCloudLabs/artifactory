@@ -32,6 +32,16 @@ export interface ArtifactQuality {
   critic_pass: boolean;
   /** Every source_quote was verified verbatim against its transcript. */
   quotes_verified: boolean;
+  /**
+   * Every claim about a REAL PERSON's identity, role, title, affiliation,
+   * employer, location, or relationship is explicitly supported by the source
+   * transcript — none inferred, guessed, or imported from outside context. Set
+   * true only after the attribution check (verify-attribution.ts, the analog of
+   * verify-quotes) ran and any ungrounded person-claim was stripped or
+   * corrected. The agent must also list the person-claims it made and that each
+   * is source-grounded in `notes`. Never hand-set this; let the script stamp it.
+   */
+  attributions_grounded: boolean;
   notes?: string;
 }
 
@@ -124,12 +134,16 @@ export function validateArtifact(value: unknown): ValidationResult {
 
   const q = a.quality as Record<string, unknown> | undefined;
   if (typeof q !== "object" || q === null) {
-    errors.push("quality: required object {critic_pass, quotes_verified, notes?}");
+    errors.push(
+      "quality: required object {critic_pass, quotes_verified, attributions_grounded, notes?}",
+    );
   } else {
     if (typeof q.critic_pass !== "boolean")
       errors.push("quality.critic_pass: required boolean");
     if (typeof q.quotes_verified !== "boolean")
       errors.push("quality.quotes_verified: required boolean");
+    if (typeof q.attributions_grounded !== "boolean")
+      errors.push("quality.attributions_grounded: required boolean");
     if (q.notes !== undefined && typeof q.notes !== "string")
       errors.push("quality.notes: must be a string when present");
   }

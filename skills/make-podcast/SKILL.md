@@ -241,18 +241,49 @@ Does it earn its runtime, or does it pad? Is the takeaway concrete?
 critic.** Set `quality.critic_pass: true` only on the survivor, with
 `quality.notes` recording what was cut/changed and why.
 
-Then verify the quote anchors (script — mandatory):
+**Identity grounding (mandatory — trust-critical, not style).** The podcast
+script paraphrases for the ear, which makes it EASY to slip an inferred
+identity in. NEVER state a person's role, title, affiliation, employer,
+location, or relationship unless it appears verbatim-in-substance in the
+source transcript — don't infer it, guess it, or import it from outside
+context. When it's unknown, name them ONLY by a transcript-grounded action
+("a founder TinyCloud spoke with", not "a Shape Rotator cohort founder"). The
+critic MUST run the attribution check (below) and STRIP or CORRECT every
+ungrounded person-claim before any TTS spend; list your person-claims and
+that each is source-grounded in `quality.notes`.
+
+> **Worked example (the real incident).**
+> WRONG: "Odisea's Cush, a Shape Rotator cohort founder" — the source
+> contained ZERO mentions of "Shape Rotator" or "cohort"; the accelerator
+> affiliation was inferred and stated as fact (the quotes were real, the
+> identity framing was fabricated).
+> RIGHT: "Cush, a founder on a call with TinyCloud" — add "Odisea" only if
+> "Odisea" actually appears in the source (it does), and nothing more.
+
+Then verify BOTH the quote anchors and the attributions (scripts — mandatory):
 
 ```sh
 bun skills/make-podcast/scripts/verify-quotes.ts <artifact.json> --stamp
+bun skills/_shared/scripts/verify-attribution.ts <artifact.json> --stamp
 ```
 
-Fix or drop failures and re-run until exit 0. With `--stamp`, full
-verification success writes `quality.quotes_verified: true` into the
-artifact for you (atomic write); on any failure nothing is stamped, and
-an empty `source_quotes` list (exit 0 but suspicious) is never stamped.
-**Never hand-set `quotes_verified`** — `--stamp` is the only sanctioned
-way.
+**verify-quotes** checks every `source_quotes[].quote` verbatim against its
+transcript; fix or drop failures and re-run until exit 0. With `--stamp`, full
+success writes `quality.quotes_verified: true` (atomic write); an empty
+`source_quotes` list is never stamped.
+
+**verify-attribution** is the identity-grounding analog: it scans the prose for
+person+descriptor claims ("<Name> — <descriptor>", "<Org>'s <Name>", "<Name>
+of <Org>", "<Name> from <Place>", "<Name> who runs/founded …") and checks each
+descriptor's key terms (org/place names, role nouns) against the source. Any
+ungrounded claim is FLAGGED with its missing terms and the script exits
+non-zero — STRIP or CORRECT it, then re-run. Deterministic; over-flags on
+paraphrase by design, so judge each flag, but ship nothing you can't ground.
+With `--stamp`, a fully-grounded result writes
+`quality.attributions_grounded: true`.
+
+**Never hand-set `quotes_verified` or `attributions_grounded`** — `--stamp` is
+the only sanctioned way for each, and BOTH must pass before TTS spend.
 
 ### 5. Adversarial novelty critic (your judgment — mandatory, BEFORE any TTS spend)
 

@@ -359,7 +359,7 @@ async function writeArtifact(
   await mkdir(d, { recursive: true });
   await writeFile(
     join(d, "artifact.json"),
-    JSON.stringify({ id: slug, type, headline: slug, tags: [], source_transcripts: [], generated_at: "2026-06-11T14:00:00.000Z", quality: { critic_pass: true, quotes_verified: true }, ...body }),
+    JSON.stringify({ id: slug, type, headline: slug, tags: [], source_transcripts: [], generated_at: "2026-06-11T14:00:00.000Z", quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true }, ...body }),
   );
 }
 
@@ -443,18 +443,18 @@ describe("in-run dedup — one signal → one artifact across formats", () => {
     await writeArtifact(artifactsDir, "insight-card", "fundraise-drift-card", {
       source_transcripts: ["/corpus/fundraise.md"],
       novelty: 0.7,
-      quality: { critic_pass: true, quotes_verified: true, notes: "novelty: the 2M to 100k fundraise drift across three standups" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: the 2M to 100k fundraise drift across three standups" },
     });
     await writeArtifact(artifactsDir, "podcast", "fundraise-drift-pod", {
       source_transcripts: ["/corpus/fundraise.md"],
       novelty: 0.9,
-      quality: { critic_pass: true, quotes_verified: true, notes: "novelty: fundraise drift from 2M down to 100k underlying signal" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: fundraise drift from 2M down to 100k underlying signal" },
     });
     // A genuinely DISTINCT artifact on a different signal — must survive.
     await writeArtifact(artifactsDir, "insight-card", "hiring-card", {
       source_transcripts: ["/corpus/standup.md"],
       novelty: 0.6,
-      quality: { critic_pass: true, quotes_verified: true, notes: "novelty: hiring plan timeline single voice topic" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: hiring plan timeline single voice topic" },
     });
 
     const created = await scanArtifacts(artifactsDir);
@@ -476,11 +476,11 @@ describe("in-run dedup — one signal → one artifact across formats", () => {
   test("distinct signals all ship (no false-positive quarantine)", async () => {
     await writeArtifact(artifactsDir, "insight-card", "a", {
       source_transcripts: ["/corpus/x.md"],
-      quality: { critic_pass: true, quotes_verified: true, notes: "novelty: pricing strategy reversal signal" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: pricing strategy reversal signal" },
     });
     await writeArtifact(artifactsDir, "article", "b", {
       source_transcripts: ["/corpus/y.md"],
-      quality: { critic_pass: true, quotes_verified: true, notes: "novelty: onboarding funnel drop off" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: onboarding funnel drop off" },
     });
     const created = await scanArtifacts(artifactsDir);
     const res = await dedupBySignal(created, qroot);
@@ -491,7 +491,7 @@ describe("in-run dedup — one signal → one artifact across formats", () => {
   test("readSignalFingerprint normalizes sources to basenames + lowercases the lead", async () => {
     await writeArtifact(artifactsDir, "insight-card", "f", {
       source_transcripts: ["/abs/path/To/Fundraise.MD"],
-      quality: { critic_pass: true, quotes_verified: true, notes: "Novelty: The DRIFT" },
+      quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "Novelty: The DRIFT" },
     });
     const fp = await readSignalFingerprint(join(artifactsDir, "insight-card", "f"));
     expect(fp.sources).toEqual(["fundraise.md"]);
@@ -524,12 +524,12 @@ describe("runGeneration end-to-end — dedup + cap backstops fire", () => {
       const mk = (type: string, slug: string, body: Record<string, unknown>) => {
         const d = join(artifactsDir, type, slug);
         fs.mkdirSync(d, { recursive: true });
-        fs.writeFileSync(join(d, "artifact.json"), JSON.stringify({ id: slug, type, headline: slug, tags: [], generated_at: body.generated_at ?? "2026-06-11T14:00:00.000Z", quality: { critic_pass: true, quotes_verified: true }, ...body }));
+        fs.writeFileSync(join(d, "artifact.json"), JSON.stringify({ id: slug, type, headline: slug, tags: [], generated_at: body.generated_at ?? "2026-06-11T14:00:00.000Z", quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true }, ...body }));
       };
-      mk("insight-card", "drift-card", { generated_at: "2026-06-11T14:00:01.000Z", source_transcripts: ["/c/f.md"], novelty: 0.5, quality: { critic_pass: true, quotes_verified: true, notes: "novelty: fundraise drift 2m to 100k signal" } });
-      mk("podcast", "drift-pod", { generated_at: "2026-06-11T14:00:02.000Z", source_transcripts: ["/c/f.md"], novelty: 0.9, quality: { critic_pass: true, quotes_verified: true, notes: "novelty: fundraise drift from 2m to 100k signal" } });
-      mk("insight-card", "topic-x", { generated_at: "2026-06-11T14:00:03.000Z", source_transcripts: ["/c/x.md"], novelty: 0.8, quality: { critic_pass: true, quotes_verified: true, notes: "novelty: pricing reversal distinct topic" } });
-      mk("insight-card", "topic-y", { generated_at: "2026-06-11T14:00:04.000Z", source_transcripts: ["/c/y.md"], novelty: 0.4, quality: { critic_pass: true, quotes_verified: true, notes: "novelty: onboarding funnel distinct topic" } });
+      mk("insight-card", "drift-card", { generated_at: "2026-06-11T14:00:01.000Z", source_transcripts: ["/c/f.md"], novelty: 0.5, quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: fundraise drift 2m to 100k signal" } });
+      mk("podcast", "drift-pod", { generated_at: "2026-06-11T14:00:02.000Z", source_transcripts: ["/c/f.md"], novelty: 0.9, quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: fundraise drift from 2m to 100k signal" } });
+      mk("insight-card", "topic-x", { generated_at: "2026-06-11T14:00:03.000Z", source_transcripts: ["/c/x.md"], novelty: 0.8, quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: pricing reversal distinct topic" } });
+      mk("insight-card", "topic-y", { generated_at: "2026-06-11T14:00:04.000Z", source_transcripts: ["/c/y.md"], novelty: 0.4, quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "novelty: onboarding funnel distinct topic" } });
       return { status: 0, stdout: "shipped 4", stderr: "" };
     };
 

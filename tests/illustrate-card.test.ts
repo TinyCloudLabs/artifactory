@@ -29,7 +29,7 @@ function goodArtifact(overrides: Partial<Artifact> = {}): Artifact {
     tags: ["pricing"],
     source_transcripts: ["/tmp/fireflies-style.md"],
     generated_at: "2026-06-10T12:00:00.000Z",
-    quality: { critic_pass: true, quotes_verified: true },
+    quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true },
     ...overrides,
   };
 }
@@ -191,7 +191,7 @@ describe("illustrate", () => {
   test("appends custom --note to existing quality.notes", async () => {
     await seed(
       goodArtifact({
-        quality: { critic_pass: true, quotes_verified: true, notes: "1 of 3 survived" },
+        quality: { critic_pass: true, quotes_verified: true, attributions_grounded: true, notes: "1 of 3 survived" },
       }),
     );
     await illustrate(args({ note: "retry: text artifacts in attempt 1" }), fakeProvider());
