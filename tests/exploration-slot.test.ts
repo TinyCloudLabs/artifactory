@@ -16,6 +16,9 @@ const ALL_RECENT = {
   article: "2026-06-11T10:00:00.000Z",
   podcast: "2026-06-10T10:00:00.000Z",
   digest: "2026-06-09T10:00:00.000Z",
+  // clip is an explorable internal format too; give it the most-recent
+  // timestamp so it never wins the least-recently-produced tests below.
+  clip: "2026-06-13T10:00:00.000Z",
 } as const;
 
 describe("explorationPick", () => {
