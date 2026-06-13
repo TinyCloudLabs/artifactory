@@ -16,6 +16,9 @@ export const ARTIFACT_TYPES = [
   "insight-card",
   "article",
   "podcast",
+  // Multi-thread roundup: shorter than an article (~300-500 words), weaves
+  // 2-3 related threads from across the corpus. Internal — always publishes.
+  "digest",
   // Phase-2 outward-facing comms types. These default to approval_status
   // "pending" (see validateArtifact) — nothing outward-facing auto-publishes.
   "social-post",

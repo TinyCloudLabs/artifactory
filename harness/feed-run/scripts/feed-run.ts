@@ -39,7 +39,7 @@
 // PREFERENCES.md (logged); empty recency → deep-dive-only; no eligible deep-dive
 // → recency-only. All step outcomes append to a structured run log.
 
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rename } from "node:fs/promises";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -65,8 +65,11 @@ import {
   parseRelativeSince,
   rankDeepDiveCandidates,
   rankRecencyByPreference,
+  explorationPick,
+  INTERNAL_FEED_FORMATS,
   renderBrief,
   resolveSince,
+  type InternalFeedFormat,
   summarizeRun,
   type PipelineStep,
   type RunLog,
@@ -95,7 +98,8 @@ function usage(): never {
       "[--mode daily|backfill] [--since 14d|YYYY-MM-DD] [--dry-run] [--no-generate] " +
       "[--model M] [--skip-index] " +
       "[--index-path PATH] [--ledger PATH] [--artifacts-dir DIR] " +
-      "[--preferences PATH] [--runs-dir DIR] [--run-log PATH] [--recency-limit N] [--run-id ID]",
+      "[--preferences PATH] [--runs-dir DIR] [--run-log PATH] [--recency-limit N] [--run-id ID] " +
+      "[--explore-every N]",
   );
   process.exit(2);
 }
@@ -114,6 +118,9 @@ let runsDir = "index/runs";
 let runLogPath = "index/run-log.jsonl";
 let recencyLimit: number | undefined;
 let runIdArg: string | undefined;
+// Format-exploration cadence: every Nth run the brief reserves one cap slot for
+// the least-recently-produced internal format (anti-monoculture). 0 disables.
+let exploreEvery = 3;
 
 const args = process.argv.slice(2);
 function takeValue(i: number): string {
@@ -170,6 +177,15 @@ for (let i = 0; i < args.length; i++) {
         process.exit(2);
       }
       recencyLimit = n;
+      break;
+    }
+    case "--explore-every": {
+      const n = Number(takeValue(++i));
+      if (!Number.isInteger(n) || n < 0) {
+        console.error("--explore-every must be a non-negative integer (0 disables)");
+        process.exit(2);
+      }
+      exploreEvery = n;
       break;
     }
     case "--run-id":
@@ -534,6 +550,50 @@ if (advance.next) {
   log("query-deepdive", "skipped", "no eligible older thread (all surfaced) — recency-only run");
 }
 
+// 3b. EXPLORATION SLOT — deterministic anti-monoculture nudge. The preference
+//     loop self-reinforces toward whatever earned reactions (a starved format
+//     gets no feedback, so no [learned] lines, so it stays starved); every
+//     --explore-every'th run the brief reserves one cap slot for the
+//     least-recently-produced internal format. Run ordinal = prior run-log
+//     lines + 1 (deterministic, no extra state file).
+async function latestGeneratedAtByFormat(): Promise<Partial<Record<InternalFeedFormat, string | null>>> {
+  const latest: Partial<Record<InternalFeedFormat, string | null>> = {};
+  for (const format of INTERNAL_FEED_FORMATS) {
+    let newest: string | null = null;
+    let slugs: string[] = [];
+    try {
+      slugs = (await readdir(join(artifactsDir, format), { withFileTypes: true }))
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      // format dir doesn't exist yet — never produced
+    }
+    for (const slug of slugs) {
+      try {
+        const a = JSON.parse(
+          await readFile(join(artifactsDir, format, slug, "artifact.json"), "utf8"),
+        ) as { generated_at?: unknown };
+        const ts = typeof a.generated_at === "string" ? a.generated_at : null;
+        if (ts && !Number.isNaN(Date.parse(ts)) && (newest === null || Date.parse(ts) > Date.parse(newest))) {
+          newest = ts;
+        }
+      } catch {
+        // unreadable artifact — skip; the scanner tolerates these too
+      }
+    }
+    latest[format] = newest;
+  }
+  return latest;
+}
+let priorRuns = 0;
+try {
+  priorRuns = (await readFile(runLogPath, "utf8")).split("\n").filter(Boolean).length;
+} catch {
+  // no run log yet — first run
+}
+const explorationFormat =
+  explorationPick(priorRuns + 1, exploreEvery, await latestGeneratedAtByFormat()) ?? undefined;
+
 // 4. BRIEF — the deterministic handoff artifact (titles/paths only, no content).
 const brief = renderBrief({
   runId,
@@ -548,8 +608,14 @@ const brief = renderBrief({
   feedbackSummary,
   baselineSummary,
   salientPeople,
+  explorationFormat,
 });
-log("brief", "ok", `brief prepared (${recency.length} recency + ${deepDive ? 1 : 0} deep-dive, cap ${cap})`);
+log(
+  "brief",
+  "ok",
+  `brief prepared (${recency.length} recency + ${deepDive ? 1 : 0} deep-dive, cap ${cap}` +
+    `${explorationFormat ? `, exploration slot: ${explorationFormat}` : ""})`,
+);
 
 // 5/6. GENERATE + SAVE.
 //

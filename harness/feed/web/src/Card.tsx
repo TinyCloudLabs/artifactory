@@ -11,6 +11,7 @@ export function typeLabel(type: string): string {
     "insight-card": "Insight",
     article: "Article",
     podcast: "Podcast",
+    digest: "Digest",
     "social-post": "Social post",
     "investor-update-snippet": "Investor snippet",
     "quote-card": "Quote card",

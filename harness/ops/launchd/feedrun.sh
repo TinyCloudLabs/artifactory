@@ -93,7 +93,7 @@ trap release_locks EXIT INT TERM
 # allowlist). It MUST export at least:
 #   PATH            — including the dirs holding `claude` and `bun`
 #   TRANSCRIPT_DIRS — comma-separated absolute corpus dirs (index-corpus reads it)
-# and MAY export FEEDRUN_MODE, FEEDRUN_MODEL, FEEDRUN_SINCE.
+# and MAY export FEEDRUN_MODE, FEEDRUN_MODEL, FEEDRUN_SINCE, FEEDRUN_EXPLORE_EVERY.
 ENV_FILE="$SCRIPT_DIR/feedrun.env"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
@@ -229,7 +229,8 @@ if [[ "$DRY_RUN" == "1" ]]; then
   bun harness/feed-run/scripts/feed-run.ts \
     --mode "$MODE" --no-generate --skip-index \
     ${RUN_ID_ARG[@]+"${RUN_ID_ARG[@]}"} \
-    ${FEEDRUN_SINCE:+--since "$FEEDRUN_SINCE"}
+    ${FEEDRUN_SINCE:+--since "$FEEDRUN_SINCE"} \
+    ${FEEDRUN_EXPLORE_EVERY:+--explore-every "$FEEDRUN_EXPLORE_EVERY"}
 else
   # Full headless run. The system prompt fully overrides the default (clean
   # run); the user message points the agent at SKILL.md. The orchestrator

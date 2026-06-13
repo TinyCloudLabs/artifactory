@@ -193,7 +193,8 @@ the run-log records.
    only surfaced paths). The recency set is "what's new"; the deep-dive is one
    older thread the cursor rotated to.
 2. **Generate** with the existing skills — `extract-insights`,
-   `write-article`, `make-podcast`, `illustrate-card` — each running its own
+   `write-article`, `write-digest`, `make-podcast`, `illustrate-card` — each
+   running its own
    `novelty-scan` + the **mandatory adversarial-novelty critic** baked into
    those skills. Honor the cap in the brief (`MAX_ARTIFACTS_PER_RUN`, default 3;
    backfill 25): publish the **best ≤ cap**. **Zero artifacts is a valid run.**
@@ -201,6 +202,15 @@ the run-log records.
    run drives" below): `banger-extractor` + `investor-snippet` produce
    pending **DRAFTS** (not published, not cap-counted); `person-brief` on a
    salient un-briefed person publishes internally (cap-counted).
+   **Honor the EXPLORATION SLOT when the brief carries one.** Every
+   `--explore-every`'th run (default every 3rd) the orchestrator reserves one
+   cap slot for the least-recently-produced internal format and says so in the
+   brief. This is the deterministic counterweight to preference backpressure:
+   the loop self-reinforces toward formats that already earn reactions, and a
+   starved format (no artifacts → no feedback → no `[learned]` lines) can
+   never recover on its own. Reach for the reserved format first where the
+   material supports it; the quality bar does not drop — skipping the slot
+   with a stated reason remains valid.
    **Let PREFERENCES.md STEER this (generation backpressure — MANDATORY, not
    optional).** Bias topic/format/depth toward `[learned]` loves; treat a
    `[learned]` `promote` signal as a COMMISSION to expand that thread into a
@@ -244,8 +254,9 @@ the run-log records.
 
 ## The miners this run drives (Phase 1b — outward drafts + person-brief on salience)
 
-Beyond the three internal feed miners (`extract-insights`, `write-article`,
-`make-podcast`), the recipe now invokes two more classes of miner. The seam is
+Beyond the four internal feed miners (`extract-insights`, `write-article`,
+`write-digest`, `make-podcast`), the recipe now invokes two more classes of
+miner. The seam is
 the artifact metadata: **the skills STAMP `audience`/`approval_status`; the
 harness ROUTES on it.**
 
@@ -283,7 +294,7 @@ claim cited, every inference marked, no role fabricated). A person-brief is
 
 `MAX_ARTIFACTS_PER_RUN` (default 3; backfill 25) is a guardrail on **published**
 artifacts — the internal-audience artifacts that go live in the feed
-(`insight-card`, `article`, `podcast`, and `person-brief`). The deterministic
+(`insight-card`, `article`, `digest`, `podcast`, and `person-brief`). The deterministic
 backstops in `run-generation.ts` enforce this by **partitioning** each run's
 newly-created artifacts on their stamped `audience`:
 
@@ -357,7 +368,8 @@ with `mode: "backfill"` — is **deferred to PR6** (noted as a TODO in the code)
 |---|---|---|---|
 | RECENCY_SINCE | `--since` | last run from ledger, else 7 days | recency lower bound (relative `14d`/`3w` or absolute date) |
 | DEEPDIVE_PER_RUN | (fixed) | 1 | older threads excavated per run ([D2]) |
-| MAX_ARTIFACTS_PER_RUN | mode | 3 (daily) / 25 (backfill) | cost guardrail on **PUBLISHED** artifacts (internal: cards/articles/podcasts/person-briefs). Outward DRAFTS (banger/investor-snippet) do NOT count. Surfaced in the brief |
+| MAX_ARTIFACTS_PER_RUN | mode | 3 (daily) / 25 (backfill) | cost guardrail on **PUBLISHED** artifacts (internal: cards/articles/digests/podcasts/person-briefs). Outward DRAFTS (banger/investor-snippet) do NOT count. Surfaced in the brief |
+| EXPLORE_EVERY | `--explore-every` | 3 (0 disables) | format-exploration cadence: every Nth run the brief reserves ONE cap slot for the least-recently-produced internal format (anti-monoculture; the agent may still decline — zero stays valid) |
 | MAX_ILLUSTRATE | derived | = artifacts published | one hero image per artifact |
 | SALIENCE_MIN_TRANSCRIPTS | (fixed) | 3 | a person must speak across >= this many transcripts to be a person-brief candidate |
 | SALIENT_TOP | (fixed) | 5 | top-N salient un-briefed people surfaced into the brief |
