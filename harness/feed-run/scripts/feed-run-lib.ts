@@ -15,6 +15,11 @@
 // run-log shape, the --since resolution) lives here, imported by both the CLI
 // (feed-run.ts) and the tests. No process side effects at import time.
 
+import {
+  EXPLORABLE_FORMATS,
+  FORMAT_REGISTRY,
+  type ExplorableFormat,
+} from "../../../skills/_shared/lib/formats.ts";
 import type { CorpusIndex, IndexRecord } from "../../index-corpus/scripts/corpus-index.ts";
 import type { QueryMatch } from "../../query-corpus/scripts/corpus-query.ts";
 import type { SurfacedMode } from "../../query-corpus/scripts/surfaced-ledger.ts";
@@ -307,9 +312,13 @@ export function rankRecencyByPreference(
 // Format-exploration slot (anti-monoculture)
 // ---------------------------------------------------------------------------
 
-/** Internal feed formats eligible for the exploration slot, in tie-break order. */
-export const INTERNAL_FEED_FORMATS = ["insight-card", "article", "podcast", "digest"] as const;
-export type InternalFeedFormat = (typeof INTERNAL_FEED_FORMATS)[number];
+/**
+ * Internal feed formats eligible for the exploration slot, in tie-break order
+ * — derived from the FORMAT_REGISTRY (skills/_shared/lib/formats.ts), the
+ * single source of truth for format behavior.
+ */
+export const INTERNAL_FEED_FORMATS = EXPLORABLE_FORMATS;
+export type InternalFeedFormat = ExplorableFormat;
 
 /**
  * Pick the format the exploration slot nudges this run, or null when the slot
@@ -395,6 +404,11 @@ export interface BriefInput {
  * lines, not transcript bodies). The generation agent reads the real files.
  */
 export function renderBrief(b: BriefInput): string {
+  // The internal miner roster, derived from the registry so a new format's
+  // skill shows up in the brief without anyone editing prose here.
+  const minerRoster = INTERNAL_FEED_FORMATS.map((f) => FORMAT_REGISTRY[f].miner)
+    .filter(Boolean)
+    .join(" / ");
   const out: string[] = [];
   out.push(`# Feed-run brief — ${b.runId}`);
   out.push("");
@@ -411,7 +425,7 @@ export function renderBrief(b: BriefInput): string {
   out.push(
     "This brief is plumbing. It tells you WHERE to look; you do the looking" +
       " and judging. For the transcripts below, run the existing generation" +
-      " skills (extract-insights / write-article / write-digest / make-podcast +" +
+      ` skills (${minerRoster} +` +
       " illustrate-card), each with its own novelty-scan + adversarial critic." +
       ` Publish at most **${b.cap}** survivors. Zero artifacts is a valid run` +
       " — quality beats quantity.",
@@ -420,9 +434,8 @@ export function renderBrief(b: BriefInput): string {
   out.push("## Miners you may run this brief (pick the format the material EARNS)");
   out.push("");
   out.push(
-    "Beyond the internal feed miners (extract-insights / write-article /" +
-      " write-digest / make-podcast), this run may ALSO produce — only when the material" +
-      " genuinely warrants it:",
+    `Beyond the internal feed miners (${minerRoster}), this run may ALSO` +
+      " produce — only when the material genuinely warrants it:",
   );
   out.push("");
   out.push(

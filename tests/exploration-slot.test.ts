@@ -51,7 +51,7 @@ describe("explorationPick", () => {
       explorationPick(3, 3, { ...ALL_RECENT, article: "not-a-date" }),
     ).toBe("article");
     // everything never-produced → first declared format wins
-    expect(explorationPick(3, 3, {})).toBe(INTERNAL_FEED_FORMATS[0]);
+    expect(explorationPick(3, 3, {})).toBe(INTERNAL_FEED_FORMATS[0]!);
   });
 });
 
