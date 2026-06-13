@@ -20,19 +20,16 @@
 // Server-only module: kept out of harness/feed/src/types.ts (which the browser bundle
 // imports) so the outward-type list lives in exactly one place per layer.
 
+import { OUTWARD_ARTIFACT_TYPES } from "../../../skills/_shared/lib/formats.ts";
 import type { FeedCard } from "./types.ts";
 
 /**
- * Outward-facing artifact types. Mirrors OUTWARD_ARTIFACT_TYPES in
- * skills/_shared/lib/artifact.ts. The scanner keeps `type` an open string
- * (the feed renders unknown future types), so we match by membership.
+ * Outward-facing artifact types, derived from the FORMAT_REGISTRY
+ * (skills/_shared/lib/formats.ts — the single source of truth). The scanner
+ * keeps `type` an open string (the feed renders unknown future types), so we
+ * match by membership in a Set rather than narrowing the type.
  */
-export const OUTWARD_TYPES: ReadonlySet<string> = new Set([
-  "social-post",
-  "investor-update-snippet",
-  "quote-card",
-  "person-brief",
-]);
+export const OUTWARD_TYPES: ReadonlySet<string> = new Set(OUTWARD_ARTIFACT_TYPES);
 
 export function isOutwardType(type: string): boolean {
   return OUTWARD_TYPES.has(type);

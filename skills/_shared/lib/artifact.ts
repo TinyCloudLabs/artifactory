@@ -12,36 +12,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export const ARTIFACT_TYPES = [
-  "insight-card",
-  "article",
-  "podcast",
-  // Phase-2 outward-facing comms types. These default to approval_status
-  // "pending" (see validateArtifact) — nothing outward-facing auto-publishes.
-  "social-post",
-  "investor-update-snippet",
-  "quote-card",
-  "person-brief",
-] as const;
-export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
-
-/** Outward-facing types gate at a human-approval step before they can ship. */
-export const OUTWARD_ARTIFACT_TYPES: readonly ArtifactType[] = [
-  "social-post",
-  "investor-update-snippet",
-  "quote-card",
-  "person-brief",
-] as const;
+// The format registry (which types exist, outward/internal, miner, labels)
+// lives in formats.ts — a browser-safe pure-data module — and is re-exported
+// here so script-side consumers keep one import surface.
+import { ARTIFACT_TYPES, isOutwardType, type ArtifactType } from "./formats.ts";
+export * from "./formats.ts";
 
 export const APPROVAL_STATUSES = ["pending", "approved"] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
 export const AUDIENCES = ["public", "investors", "internal"] as const;
 export type Audience = (typeof AUDIENCES)[number];
-
-export function isOutwardType(type: ArtifactType): boolean {
-  return OUTWARD_ARTIFACT_TYPES.includes(type);
-}
 
 export interface SourceQuote {
   quote: string;

@@ -15,6 +15,11 @@
 // run-log shape, the --since resolution) lives here, imported by both the CLI
 // (feed-run.ts) and the tests. No process side effects at import time.
 
+import {
+  EXPLORABLE_FORMATS,
+  FORMAT_REGISTRY,
+  type ExplorableFormat,
+} from "../../../skills/_shared/lib/formats.ts";
 import type { CorpusIndex, IndexRecord } from "../../index-corpus/scripts/corpus-index.ts";
 import type { QueryMatch } from "../../query-corpus/scripts/corpus-query.ts";
 import type { SurfacedMode } from "../../query-corpus/scripts/surfaced-ledger.ts";
@@ -303,6 +308,53 @@ export function rankRecencyByPreference(
   return ranked.map(({ match, preferenceScore, rationale }) => ({ match, preferenceScore, rationale }));
 }
 
+// ---------------------------------------------------------------------------
+// Format-exploration slot (anti-monoculture)
+// ---------------------------------------------------------------------------
+
+/**
+ * Internal feed formats eligible for the exploration slot, in tie-break order
+ * — derived from the FORMAT_REGISTRY (skills/_shared/lib/formats.ts), the
+ * single source of truth for format behavior.
+ */
+export const INTERNAL_FEED_FORMATS = EXPLORABLE_FORMATS;
+export type InternalFeedFormat = ExplorableFormat;
+
+/**
+ * Pick the format the exploration slot nudges this run, or null when the slot
+ * doesn't fire. The preference loop converges on whatever earned reactions
+ * most recently — an exploitation monoculture, and self-reinforcing: a starved
+ * format gets no reactions, so no [learned] lines, so it stays starved (this
+ * is how podcasts silently stopped in Jun 2026). Every `everyN`th run the
+ * brief reserves ONE cap slot for the least-recently-produced internal format.
+ * The agent may still decline the slot (zero artifacts stays valid) — the rule
+ * guarantees the NUDGE recurs, not the artifact.
+ *
+ * Deterministic: runCount is 1-based (this run's ordinal); a never-produced
+ * format outranks any produced one; ties resolve in INTERNAL_FEED_FORMATS
+ * order. everyN <= 0 disables the slot.
+ */
+export function explorationPick(
+  runCount: number,
+  everyN: number,
+  lastProducedAt: Partial<Record<InternalFeedFormat, string | null>>,
+): InternalFeedFormat | null {
+  if (everyN <= 0) return null;
+  if (runCount % everyN !== 0) return null;
+  let pick: InternalFeedFormat | null = null;
+  let pickTs = Infinity;
+  for (const format of INTERNAL_FEED_FORMATS) {
+    const raw = lastProducedAt[format] ?? null;
+    const parsed = raw === null ? Number.NEGATIVE_INFINITY : Date.parse(raw);
+    const ts = Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+    if (ts < pickTs) {
+      pickTs = ts;
+      pick = format;
+    }
+  }
+  return pick;
+}
+
 export interface BriefInput {
   runId: string;
   mode: RunMode;
@@ -333,6 +385,11 @@ export interface BriefInput {
    * undefined → no person-brief candidates this run.
    */
   salientPeople?: SalientPerson[];
+  /**
+   * Format-exploration slot (see explorationPick): when set, the brief reserves
+   * one cap slot for this least-recently-produced internal format.
+   */
+  explorationFormat?: InternalFeedFormat;
 }
 
 /**
@@ -347,6 +404,11 @@ export interface BriefInput {
  * lines, not transcript bodies). The generation agent reads the real files.
  */
 export function renderBrief(b: BriefInput): string {
+  // The internal miner roster, derived from the registry so a new format's
+  // skill shows up in the brief without anyone editing prose here.
+  const minerRoster = INTERNAL_FEED_FORMATS.map((f) => FORMAT_REGISTRY[f].miner)
+    .filter(Boolean)
+    .join(" / ");
   const out: string[] = [];
   out.push(`# Feed-run brief — ${b.runId}`);
   out.push("");
@@ -363,7 +425,7 @@ export function renderBrief(b: BriefInput): string {
   out.push(
     "This brief is plumbing. It tells you WHERE to look; you do the looking" +
       " and judging. For the transcripts below, run the existing generation" +
-      " skills (extract-insights / write-article / make-podcast +" +
+      ` skills (${minerRoster} +` +
       " illustrate-card), each with its own novelty-scan + adversarial critic." +
       ` Publish at most **${b.cap}** survivors. Zero artifacts is a valid run` +
       " — quality beats quantity.",
@@ -372,9 +434,8 @@ export function renderBrief(b: BriefInput): string {
   out.push("## Miners you may run this brief (pick the format the material EARNS)");
   out.push("");
   out.push(
-    "Beyond the internal feed miners (extract-insights / write-article /" +
-      " make-podcast), this run may ALSO produce — only when the material" +
-      " genuinely warrants it:",
+    `Beyond the internal feed miners (${minerRoster}), this run may ALSO` +
+      " produce — only when the material genuinely warrants it:",
   );
   out.push("");
   out.push(
@@ -398,6 +459,23 @@ export function renderBrief(b: BriefInput): string {
       " load-bearing: every claim cited, every inference marked, no role" +
       " fabricated (see skills/person-brief/SKILL.md).",
   );
+  if (b.explorationFormat) {
+    out.push("");
+    out.push("## EXPLORATION SLOT — format diversity (fires this run)");
+    out.push("");
+    out.push(
+      `This run reserves ONE of the **${b.cap}** cap slots for a` +
+        ` **${b.explorationFormat}** — the least-recently-produced internal` +
+        " format. The preference loop biases toward formats that already earn" +
+        " reactions, which starves the rest (a format nobody sees gets no" +
+        " feedback, so no `[learned]` lines, so it stays starved). This slot is" +
+        " the deterministic counterweight. Reach for the reserved format FIRST" +
+        " where the material supports it. The bar does NOT drop: if nothing" +
+        ` genuinely earns a ${b.explorationFormat}, skip the slot (zero/fewer` +
+        " artifacts stays a valid run) and say why in your run summary — the" +
+        " slot guarantees the nudge recurs, never the artifact.",
+    );
+  }
   out.push("");
   out.push("## GENERATION BACKPRESSURE — PREFERENCES.md STEERS what you make (MANDATORY)");
   out.push("");

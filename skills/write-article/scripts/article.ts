@@ -225,51 +225,12 @@ export function renderDigestMarkdown(digest: ArticleDigest): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quote verification — same contract as extract-insights' verify-quotes
+// Quote verification — same contract as extract-insights' verify-quotes.
+// Implementation lives in _shared/lib/quotes.ts (write-digest shares it);
+// re-exported here so this skill's scripts keep a single import surface.
 // ---------------------------------------------------------------------------
 
-export interface QuoteFailure {
-  index: number;
-  quote: string;
-  transcript: string;
-  reason: string;
-}
-
-/**
- * Verify every source_quote verbatim (whitespace-insensitive) against its
- * transcript file. Returns the failures; an empty array means all verified.
- */
-export async function verifyArtifactQuotes(
-  quotes: SourceQuote[],
-): Promise<QuoteFailure[]> {
-  const cache = new Map<string, Transcript>();
-  const failures: QuoteFailure[] = [];
-  for (const [index, sq] of quotes.entries()) {
-    try {
-      let transcript = cache.get(sq.transcript);
-      if (!transcript) {
-        transcript = parseTranscript(await readFile(sq.transcript, "utf8"), sq.transcript);
-        cache.set(sq.transcript, transcript);
-      }
-      if (!verifyQuote(transcript, sq.quote)) {
-        failures.push({
-          index,
-          quote: sq.quote,
-          transcript: sq.transcript,
-          reason: "quote not found verbatim in transcript",
-        });
-      }
-    } catch (e) {
-      failures.push({
-        index,
-        quote: sq.quote,
-        transcript: sq.transcript,
-        reason: `could not read transcript: ${(e as Error).message}`,
-      });
-    }
-  }
-  return failures;
-}
+export { verifyArtifactQuotes, type QuoteFailure } from "../../_shared/lib/quotes.ts";
 
 // ---------------------------------------------------------------------------
 // Save — validate + persist artifact.json with body.md alongside

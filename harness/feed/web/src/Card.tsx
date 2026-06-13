@@ -1,21 +1,20 @@
 import { marked } from "marked";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { FeedbackAction, FeedCard } from "../../src/types.ts";
+import { FORMAT_REGISTRY } from "../../../../skills/_shared/lib/formats.ts";
 import { apiFetch } from "./auth.ts";
 
 marked.setOptions({ gfm: true, breaks: false });
 
-/** Human type label for the kicker. Unknown types get prettified words. */
+/**
+ * Human type label for the kicker, from the FORMAT_REGISTRY (the browser-safe
+ * pure-data module — never import artifact.ts here, it pulls node:fs).
+ * Unknown types get prettified words.
+ */
 export function typeLabel(type: string): string {
-  const known: Record<string, string> = {
-    "insight-card": "Insight",
-    article: "Article",
-    podcast: "Podcast",
-    "social-post": "Social post",
-    "investor-update-snippet": "Investor snippet",
-    "quote-card": "Quote card",
-    "person-brief": "Person brief",
-  };
+  const known: Record<string, string> = Object.fromEntries(
+    Object.entries(FORMAT_REGISTRY).map(([t, meta]) => [t, meta.label]),
+  );
   const k = known[type];
   if (k) return k;
   const words = type.split(/[^a-zA-Z0-9]+/).filter(Boolean);
