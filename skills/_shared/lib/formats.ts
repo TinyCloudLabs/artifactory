@@ -18,6 +18,9 @@ export const ARTIFACT_TYPES = [
   // Multi-thread roundup: shorter than an article (~300-500 words), weaves
   // 2-3 related threads from across the corpus. Internal — always publishes.
   "digest",
+  // Short video clip (~15s) compiled narrative -> storyboard sheet -> video
+  // (make-clip). Internal — always publishes. Media is the mp4 + poster frame.
+  "clip",
   // Phase-2 outward-facing comms types. These default to approval_status
   // "pending" (see validateArtifact) — nothing outward-facing auto-publishes.
   "social-post",
@@ -56,6 +59,7 @@ export const FORMAT_REGISTRY = {
   article: { label: "Article", outward: false, miner: "write-article", explorable: true },
   podcast: { label: "Podcast", outward: false, miner: "make-podcast", explorable: true },
   digest: { label: "Digest", outward: false, miner: "write-digest", explorable: true },
+  clip: { label: "Clip", outward: false, miner: "make-clip", explorable: true },
   "social-post": { label: "Social post", outward: true, miner: "banger-extractor", explorable: false },
   "investor-update-snippet": { label: "Investor snippet", outward: true, miner: "investor-snippet", explorable: false },
   "quote-card": { label: "Quote card", outward: true, miner: "quote-card", explorable: false },
