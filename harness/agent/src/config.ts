@@ -29,7 +29,7 @@
 // that re-nests the roots or puts them inside the repo throws a config error
 // rather than silently running with an unsafe layout.
 
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 
@@ -73,7 +73,10 @@ function canonicalize(absPath: string): string {
     } catch {
       const parent = dirname(cur);
       if (parent === cur) return absPath; // reached "/" without an existing ancestor
-      tail = tail ? `${cur.slice(parent.length + 1)}/${tail}` : cur.slice(parent.length + 1);
+      // basename() is root-aware — a manual slice mis-joins when parent === "/"
+      // (dirname has no trailing sep), dropping a char of the segment.
+      const seg = basename(cur);
+      tail = tail ? `${seg}/${tail}` : seg;
       cur = parent;
     }
   }
