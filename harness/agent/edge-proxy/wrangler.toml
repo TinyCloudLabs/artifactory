@@ -1,0 +1,8 @@
+name = "tinyfeed-agent-proxy"
+main = "worker.mjs"
+account_id = "9959301f03d2db1a5fcf5e004278d467"
+compatibility_date = "2025-01-01"
+
+routes = [
+  { pattern = "api.feed.tinycloud.xyz", custom_domain = true }
+]
