@@ -41,6 +41,11 @@ drafts/
 artifacts-v2/
 .claude/
 
+# agent backend runtime state (the agent wallet key → did:pkh, the active
+# user delegation, per-run corpus/artifacts, and the sandboxed tc profile the
+# delegation activates). Identity-bearing — same stance as artifacts/.
+/harness/agent/.agent-state/
+
 # tc delegation/host hand-off artifacts (runtime, identity-bearing) + Listen corpus
 listen-read-request.json
 listen-read-grant.json

@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@tinycloud/node-sdk": [
+        "/Users/samgbafa/Documents/github/tinycloud-dev/repositories/js-sdk/packages/node-sdk/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

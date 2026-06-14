@@ -1,0 +1,10 @@
+{
+  "name": "distillery-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Distillery agent backend: holds an agent key, accepts a user delegation, runs the artifact pipeline under it, publishing to the user's space.",
+  "scripts": {
+    "start": "bun src/server.ts"
+  }
+}
