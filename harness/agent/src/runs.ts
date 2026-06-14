@@ -4,10 +4,20 @@
 // (the run itself is in-process, so a restart marks an unfinished run as error
 // on next read — see reconcile()).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.ts";
-import type { RunState } from "./runner.ts";
+import type { RunState, RunStatus, PublishedRef } from "./runner.ts";
+
+/** A light per-run summary for GET /agent/runs (drops the heavy `log` array). */
+export interface RunSummary {
+  run_id: string;
+  status: RunStatus;
+  startedAt: number;
+  finishedAt?: number;
+  published?: PublishedRef[];
+  error?: string;
+}
 
 function runDir(runId: string): string {
   return join(config.runsDir, runId);
@@ -52,4 +62,36 @@ export function readRun(runId: string): RunState | null {
 /** Run ids are server-minted; reject anything that could escape runsDir. */
 export function isValidRunId(runId: string): boolean {
   return /^run-\d+-[a-z0-9]{6}$/.test(runId);
+}
+
+/**
+ * Recent runs (newest first, capped) for GET /agent/runs — so a client can
+ * detect an in-progress build. Each entry drops the heavy `log` to keep the
+ * list light. RESILIENT: a run dir with a missing/corrupt status.json is
+ * skipped (readRun returns null), never throwing the whole list. If runsDir
+ * doesn't exist yet (no run has ever started), returns [].
+ *
+ * STALENESS: a "running"/"queued" summary can be stale after a server restart
+ * (the run is in-process, so a restart leaves its last-written status frozen).
+ * There's no reconcile() here yet — the front end's poll on GET /agent/run/:id
+ * is what resolves a stalled run for the user.
+ */
+export function listRuns(limit = 25): RunSummary[] {
+  if (!existsSync(config.runsDir)) return [];
+  const summaries: RunSummary[] = [];
+  for (const entry of readdirSync(config.runsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !isValidRunId(entry.name)) continue;
+    const state = readRun(entry.name);
+    if (!state) continue; // missing/corrupt status.json — skip, don't throw the list
+    summaries.push({
+      run_id: state.run_id,
+      status: state.status,
+      startedAt: state.startedAt,
+      ...(state.finishedAt !== undefined ? { finishedAt: state.finishedAt } : {}),
+      ...(state.published.length > 0 ? { published: state.published } : {}),
+      ...(state.error ? { error: state.error } : {}),
+    });
+  }
+  summaries.sort((a, b) => b.startedAt - a.startedAt);
+  return summaries.slice(0, limit);
 }
