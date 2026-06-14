@@ -1,0 +1,53 @@
+# docker-compose.yml — the distillery agent backend as a Phala Cloud CVM (dstack).
+#
+# Phala accepts ONE compose file with NO external file refs: the image is
+# pre-built and PUSHED to a registry (see DEPLOY.md), referenced here by tag —
+# NOT an inline/`build:` (the repo build context isn't on the CVM). Secrets are
+# NEVER in this file (it is stored plaintext): they are `${VAR}` references
+# resolved from the encrypted env file you pass as `phala deploy -e agent.env`.
+#
+# Deploy:
+#   phala deploy -c harness/agent/docker-compose.yml -n distillery-agent \
+#     -e harness/agent/agent.env -t tdx.small
+#
+# Required env (agent.env, client-side encrypted — see agent.env.example):
+#   AGENT_API_TOKEN          per-install bearer token (the feed sends it)
+#   ANTHROPIC_API_KEY        OR  CLAUDE_CODE_OAUTH_TOKEN  (claude -p auth in TEE)
+#   AGENT_ALLOWED_ORIGIN     the deployed feed origin (CORS; no wildcard)
+# Optional: AGENT_GEN_MODEL, TINYCLOUD_HOST, AGENT_CHAIN_ID, AGENT_NAME,
+#           AGENT_TRANSCRIPT_COUNT, GOOGLE_AI_API_KEY (illustrated hero).
+
+services:
+  agent:
+    image: ${AGENT_IMAGE:-docker.io/skgbafa/distillery-agent:latest}
+    restart: unless-stopped
+    ports:
+      - "4097:4097"
+    environment:
+      # Bind all interfaces so the CVM ingress reaches the server (the image
+      # default is already 0.0.0.0, repeated here for clarity).
+      AGENT_HOST_BIND: "0.0.0.0"
+      AGENT_PORT: "4097"
+      # ── Secrets / per-deploy config (from the encrypted env file) ──────────
+      AGENT_API_TOKEN: ${AGENT_API_TOKEN}
+      AGENT_ALLOWED_ORIGIN: ${AGENT_ALLOWED_ORIGIN}
+      # Claude auth: provide ONE. The runner's scrubbed-env allowlist passes both
+      # through; unset ones are simply absent (empty default keeps compose valid).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # Optional generation tuning + Gemini hero key.
+      AGENT_GEN_MODEL: ${AGENT_GEN_MODEL:-opus}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+      # TinyCloud node + chain the delegation targets (defaults match config.ts).
+      TINYCLOUD_HOST: ${TINYCLOUD_HOST:-https://node.tinycloud.xyz}
+      AGENT_CHAIN_ID: ${AGENT_CHAIN_ID:-1}
+      AGENT_NAME: ${AGENT_NAME:-Distillery Agent}
+      AGENT_TRANSCRIPT_COUNT: ${AGENT_TRANSCRIPT_COUNT:-5}
+    volumes:
+      # Persist the agent state (stable agent-key.json → stable did:pkh, the
+      # api-token, and the live delegation) across restarts/updates. Without this
+      # a restart mints a NEW DID and the feed's delegation breaks.
+      - agent-state:/home/agent/.tinycloud-agent
+
+volumes:
+  agent-state:

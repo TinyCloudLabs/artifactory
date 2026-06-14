@@ -25,6 +25,10 @@ out/
 !.env.example
 *.local
 
+# Phala CVM deploy secret env (claude key, api token, allowed origin) — encrypted
+# client-side by `phala deploy -e`, never committed. Only the .example is tracked.
+/harness/agent/agent.env
+
 # launchd per-deploy env (machine-specific tool paths + the OpenKey allowlist +
 # transcript dirs) and runtime logs — never committed; .example files document
 # the shape. Same stance as .env.
