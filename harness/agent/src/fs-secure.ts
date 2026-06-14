@@ -6,7 +6,7 @@
 // dirs 0700 and write files 0600 atomically (tmp + rename, both private), and
 // repair the mode of any pre-existing file/dir.
 
-import { chmodSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** mkdir -p with mode 0700, repairing the mode of any existing leaf dir. */
@@ -14,8 +14,11 @@ export function mkdirSecure(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   // recursive mkdir honors `mode` only for dirs it creates; fix a pre-existing
   // leaf that a prior loose-umask run (or another tool) may have left open.
+  // lstat (NOT stat) so a leaf SYMLINK doesn't make us chmod its target; only
+  // repair a real directory.
   try {
-    if ((statSync(dir).mode & 0o777) !== 0o700) chmodSync(dir, 0o700);
+    const st = lstatSync(dir);
+    if (st.isDirectory() && (st.mode & 0o777) !== 0o700) chmodSync(dir, 0o700);
   } catch {
     // best effort — a stat/chmod race shouldn't crash a write
   }
@@ -41,11 +44,14 @@ export function writeJsonSecure(path: string, body: unknown): void {
   writeFileSecure(path, JSON.stringify(body, null, 2) + "\n");
 }
 
-/** chmod an existing file to 0600 if it is looser. No-op when absent. */
+/** chmod an existing regular file to 0600 if it is looser. No-op when absent. */
 export function chmodFileSecure(path: string): void {
   if (!existsSync(path)) return;
+  // lstat (NOT stat) so a SYMLINK at `path` doesn't make us chmod its target;
+  // only repair a real regular file.
   try {
-    if ((statSync(path).mode & 0o777) !== 0o600) chmodSync(path, 0o600);
+    const st = lstatSync(path);
+    if (st.isFile() && (st.mode & 0o777) !== 0o600) chmodSync(path, 0o600);
   } catch {
     // best effort
   }
