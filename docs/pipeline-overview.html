@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Artifact Pipeline — Current vs Ideal</title>
+<title>Artifact Pipeline — Live Architecture</title>
 <style>
   :root {
     --bg: #fbfaf7;
@@ -18,6 +18,8 @@
     --built: #1f7a4d;
     --planned: #1f5fc8;
     --progress: #b8860b;
+    --live: #c8521f;          /* live/deployed — signal orange */
+    --remaining: #b8860b;
     --code-bg: #f3efe6;
     --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.04);
     font-synthesis: none;
@@ -104,15 +106,19 @@
   .legend .item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
   .dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
   .dot.built { background: var(--built); }
+  .dot.live { background: var(--live); }
   .dot.planned { background: var(--planned); }
   .dot.progress { background: var(--progress); }
+  .dot.remaining { background: var(--remaining); }
   .badge {
     display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
     text-transform: uppercase; padding: 1px 7px; border-radius: 999px; vertical-align: middle;
   }
   .badge.built { background: rgba(31,122,77,.12); color: var(--built); }
+  .badge.live { background: rgba(200,82,31,.13); color: var(--live); }
   .badge.planned { background: rgba(31,95,200,.12); color: var(--planned); }
   .badge.progress { background: rgba(184,134,11,.14); color: var(--progress); }
+  .badge.remaining { background: rgba(184,134,11,.14); color: var(--remaining); }
 
   .callout {
     border-left: 3px solid var(--accent); background: #fff8f3; padding: 12px 16px; border-radius: 0 8px 8px 0;
@@ -139,16 +145,20 @@
 <header class="hero">
   <div class="wrap">
     <p class="eyebrow">Distillery · Artifact Pipeline</p>
-    <h1>The Artifact Pipeline — Current vs Ideal</h1>
+    <h1>The Artifact Pipeline — Live Architecture</h1>
     <p class="lede">
-      How transcripts become shareable artifacts today, and where the pipeline is heading: from
-      local-disk-only generation to a TinyCloud-hosted producer/consumer loop. Every box and arrow
-      below is traced to a real file, skill, or a recorded decision. Where the code and the plan
-      disagree, the code is shown as <em>current</em> and the plan as <em>ideal</em>, and the delta is flagged.
+      The full TinyCloud producer/consumer loop is <strong>live in production</strong>. A user signs in
+      at TinyFeed with a passkey, the front end auto-delegates their Listen-read + artifacts-read/write
+      scopes to a <strong>TEE-hosted distillery agent</strong>, and one click generates a tweet + article
+      that the agent publishes to the user's <em>own</em> <code>xyz.tinycloud.artifacts</code> space — which a
+      pure-client feed then renders. Producer and consumer talk <strong>only</strong> through TinyCloud.
+      Every box and arrow below traces to a deployed file, skill, or recorded decision.
     </p>
     <div class="meta-row">
       <span class="pill">repo: <code>distillery</code></span>
-      <span class="pill">branch: <code>feat/artifact-pipeline</code></span>
+      <span class="pill">branch: <code>main</code></span>
+      <span class="pill">live: <code>https://tinyfeed.pages.dev</code></span>
+      <span class="pill">agent: Phala CVM (TEE · Intel TDX)</span>
       <span class="pill">contract: <code>skills/_shared/lib/artifact.ts</code></span>
       <span class="pill">registry: <code>skills/_shared/lib/formats.ts</code></span>
     </div>
@@ -158,13 +168,13 @@
 <nav class="toc">
   <div class="wrap">
     <a href="#legend">Legend</a>
-    <a href="#current">1 · Current flow</a>
-    <a href="#ideal">2 · Ideal flow</a>
+    <a href="#current">1 · Live flow</a>
+    <a href="#ideal">2 · TEE &amp; delegation</a>
     <a href="#delegation">3 · Delegation handshake</a>
     <a href="#lifecycle">4 · Artifact lifecycle</a>
     <a href="#model">5 · Data model</a>
-    <a href="#gap">6 · Gap table</a>
-    <a href="#deltas">7 · Code↔plan deltas</a>
+    <a href="#gap">6 · What shipped</a>
+    <a href="#deltas">7 · Remaining work</a>
   </div>
 </nav>
 
@@ -173,14 +183,13 @@
   <!-- LEGEND -->
   <section id="legend">
     <h2><span class="num">§0</span>Legend &amp; status key</h2>
-    <p class="sub">Status reflects what exists in the <code>distillery</code> repo today vs. what the
-      consolidated plan calls for. "In-progress" items are open work tracked on the team (js-sdk CLI
-      write-path fixes and the applications-space host verb).</p>
+    <p class="sub">Status reflects what is deployed and serving in production today (2026-06-14). The whole
+      loop is live; the few remaining items are genuine follow-ups, called out in §7.</p>
     <div class="panel">
       <div class="legend">
-        <span class="item"><span class="dot built"></span><strong>BUILT</strong>&nbsp;— exists in the repo / verified working</span>
-        <span class="item"><span class="dot planned"></span><strong>PLANNED</strong>&nbsp;— in the plan, not yet coded</span>
-        <span class="item"><span class="dot progress"></span><strong>IN-PROGRESS</strong>&nbsp;— open PR / spike landed, not merged</span>
+        <span class="item"><span class="dot live"></span><strong>LIVE</strong>&nbsp;— deployed &amp; serving in production</span>
+        <span class="item"><span class="dot built"></span><strong>BUILT</strong>&nbsp;— merged to <code>main</code> / verified working</span>
+        <span class="item"><span class="dot remaining"></span><strong>REMAINING</strong>&nbsp;— genuine follow-up, not yet shipped/deployed</span>
       </div>
       <p class="render-note" id="render-note">Diagram engine: detecting…</p>
     </div>
@@ -188,139 +197,140 @@
 
   <!-- 1. CURRENT FLOWCHART -->
   <section id="current">
-    <h2><span class="num">§1</span>Current state — local disk, no TinyCloud</h2>
+    <h2><span class="num">§1</span>Live production flow — passkey → TEE agent → the user's TinyCloud space</h2>
     <p class="sub">
-      Today the pipeline is entirely local. Transcripts come from local directories
-      (<code>$TRANSCRIPT_DIRS</code>); skills do <em>extract → triage → draft → critic →
-      verify-quotes → save</em> and write <code>artifacts/&lt;type&gt;/&lt;slug&gt;/artifact.json</code>
-      to local disk; the Folio feed is a local <code>hono</code> server that scans that disk on every
-      request. <strong>There is no TinyCloud integration in the running code.</strong>
+      The end-to-end loop is deployed. A user signs in at <strong>TinyFeed</strong> (Cloudflare Pages) with an
+      OpenKey passkey over a broadened manifest; the web-SDK session is <strong>persistent</strong>
+      (<code>restoreSession</code>, 7-day TTL) and on sign-in the front end <strong>auto-delegates</strong> the
+      Listen-read + artifacts-read/write scopes to the TEE-hosted agent's DID. One <strong>Generate</strong>
+      click hits the agent, which reads the user's Listen transcripts, distills a tweet + article under the
+      delegation, and publishes them via <code>tc-publish</code> to the <em>user's own</em>
+      <code>xyz.tinycloud.artifacts</code> space. The feed (a pure-client web-SDK app) reads SQL and renders.
     </p>
     <div class="panel">
       <figure>
         <div class="diagram-host" data-bm="current"></div>
         <figcaption>
-          <strong>All BUILT.</strong> Orchestration: <code>harness/feed-run/scripts/feed-run.ts</code> runs the
-          deterministic plumbing (index → distill-aggregate → query → brief, <em>no model calls</em>) and spawns a
-          headless <code>claude -p</code> generation agent via <code>run-generation.ts</code>. The agent runs the
-          miner skills, each with its own novelty-scan + adversarial critic, then <code>save.ts</code> writes to
-          <code>artifacts/</code>. The Folio feed (<code>harness/feed/src/server.ts</code>, hono + OpenKey passkey gate)
-          reads disk via <code>scan.ts</code> (<code>scanArtifacts()</code> — full re-read every scan) and logs the six
-          feedback actions to <code>feedback/events.jsonl</code>, which <code>distill-preferences</code> turns into
-          <code>[learned]</code> bullets in <code>PREFERENCES.md</code> (the backpressure control valve).
+          <strong>All LIVE.</strong> Front end: TinyFeed (feed repo, <code>main</code>) at
+          <code>tinyfeed.pages.dev</code> / <code>tinyfeed.tinycloud.xyz</code> — passkey sign-in, persistent
+          session, auto-agent delegation (persisted in localStorage, bound to BOTH the active space AND the agent
+          DID), one-click Generate. Host + DID are read at runtime from a served <code>agent-config.json</code>
+          (DID also auto-discovered from <code>GET {host}/agent/info</code>), so repointing needs no rebuild.
+          Agent: distillery <code>harness/agent</code> (<code>main</code>) on a Phala CVM (TEE) — endpoints
+          <code>GET /agent/info</code>, <code>POST /agent/delegation</code>, <code>POST /agent/run</code>,
+          <code>GET /agent/run/:id</code>. The run pipeline is <code>bootstrap → listen-read → generate
+          (claude -p) → critic → publish</code>, all under the delegation, writing only the
+          <code>feed</code> + <code>media</code> tables of the user's space (publish-only delegation).
         </figcaption>
       </figure>
     </div>
     <div class="callout delta">
-      <strong>Fidelity note.</strong> The plan sometimes calls the current feed a "Folio PWA that reads
-      artifacts from disk." Accurate, but the running code is more than a static reader: it is an
-      authenticated <code>hono</code> server (OpenKey passkey front-door, <code>/api/*</code> + <code>/media/*</code>
-      gated) that also serves a preferences panel and a <strong>Generate</strong> button
-      (<code>POST /api/generate</code>) which fires the same <code>feed-run</code> recipe on demand. The cards
-      themselves are still scanned from local disk.
+      <strong>Origins (historical).</strong> The pipeline began as a local-disk <em>Folio</em> setup — a
+      <code>hono</code> server that scanned <code>artifacts/&lt;type&gt;/&lt;slug&gt;/artifact.json</code> off disk
+      behind an OpenKey gate. That is gone: the consumer is now a pure-client web-SDK app and there is no
+      disk-scanning server in the live path. The quality machinery (<em>extract → triage → draft → critic →
+      verify-quotes</em>) carried over verbatim into the agent's generate stage.
     </div>
   </section>
 
   <!-- 2. IDEAL FLOWCHART -->
   <section id="ideal">
-    <h2><span class="num">§2</span>Ideal state — TinyCloud producer/consumer loop</h2>
+    <h2><span class="num">§2</span>The TEE boundary &amp; the delegation trust model</h2>
     <p class="sub">
-      Target: both sides talk only through TinyCloud. Listen transcripts are read via <code>tc</code> under a
-      <strong>delegation the agent requests from the user</strong> (the agent holds its own key, delegate
-      mode). Reframed skills produce <code>tweet</code> / <code>article</code> / <code>video</code> artifacts; a new
-      <code>tc-publish</code> step writes them to a <strong>hosted</strong> <code>xyz.tinycloud.artifacts</code>
-      applications space (hybrid SQL rows + KV image blobs). A new pure-client Feed web viewer renders the
-      cards and writes interaction metadata back to SQL; <code>distill-preferences</code> closes the loop. The
-      whole thing is a Smithers workflow with a human-approval gate for outward artifacts.
+      A deeper view of <em>where</em> the agent runs and <em>under whose authority</em> it acts. The agent is
+      deployed to a <strong>Phala Confidential VM (Intel TDX)</strong>, holds a stable
+      <code>did:pkh</code> on a named volume, and only ever acts under the <strong>user's signed delegation</strong>,
+      writing to the user's own space — never an owner key. The same per-user delegation is the real access
+      control; the API bearer token in the client bundle is only a casual-access gate.
     </p>
     <div class="panel">
       <figure>
         <div class="diagram-host" data-bm="ideal"></div>
         <figcaption>
-          Type remap (plan §"Types v1"): <code>banger-extractor</code> → <strong>tweet</strong>,
-          <code>write-article</code> + <code>illustrate-card</code> hero → <strong>article</strong>, plus a
-          <strong>new video skill</strong> (external YouTube URL + generated title/summary). Reused skills keep their
-          <em>extract → triage → draft → critic → verify-quotes → save</em> loop; only the publish target and the
-          type names change. The approval gate is the existing <code>approval_status: pending</code> seam, promoted
-          into a Smithers <code>&lt;Approval&gt;</code> node for outward artifacts.
+          The CVM (<code>f606e95d-2717-40e8-bf6a-68031d86a089</code>, <code>tdx.small</code>) runs the public image
+          <code>ghcr.io/tinycloudlabs/distillery-agent:b581bd8</code> (anon pull, no pull creds in the deploy).
+          The agent DID is <code>did:pkh:eip155:1:0x95d17f5248dCbf90E8257eDfFd4a458efE276F60</code>. Claude auth is
+          an <code>ANTHROPIC_API_KEY</code> TEE secret (no macOS Keychain). CORS is locked to the two
+          <code>tinyfeed</code> origins (exact-match allowlist, never <code>*</code>). On
+          <code>POST /agent/delegation</code> the agent validates the grant in two phases (chain, future expiry,
+          well-formed pkh space, audience == this agent's DID, granted resources a SUBSET of advertised
+          permissions) before <code>node.useDelegation</code> activates it. The delegated session is projected into a
+          sandboxed <code>tc</code> profile under <code>HOME=&lt;sandbox&gt;</code>, so every <code>tc</code> stage runs
+          <strong>as the delegator on the delegator's space</strong>.
         </figcaption>
       </figure>
     </div>
     <div class="callout">
-      <strong>What's actually new vs. reused.</strong>
-      <span class="badge built">BUILT</span> the miner skills, the artifact contract, the critic/verify loop,
-      <code>distill-preferences</code>.
-      <span class="badge planned">PLANNED</span> <code>tc-listen-read</code> (with delegation request),
-      the <code>video</code> skill, <code>tc-publish</code>, the Smithers workflow + approval gate, the pure-client Feed viewer,
-      and the interaction-metadata write-back.
-      <span class="badge progress">IN-PROGRESS</span> the js-sdk CLI write-path fixes (<code>kv put --space</code>,
-      binary KV round-trip) and the <code>space host</code> verb that makes a hosted <code>applications</code>
-      space reachable headlessly.
+      <strong>Security posture (live).</strong>
+      <span class="badge live">LIVE</span> TEE hosting, stable DID on a named volume, two-phase delegation
+      validation, multi-origin exact-match CORS, the sandboxed-HOME delegation threading (no owner key on disk),
+      and a scrubbed-env + tool-restricted <code>claude -p</code> generate step over untrusted transcript text.
+      <span class="badge remaining">REMAINING</span> Phase-2 real per-user auth (the bundled
+      <code>AGENT_API_TOKEN</code> is a casual gate, not a secret — the per-user delegation is the real protection).
     </div>
   </section>
 
   <!-- 3. DELEGATION SEQUENCE -->
   <section id="delegation">
-    <h2><span class="num">§3</span>The delegation handshake</h2>
+    <h2><span class="num">§3</span>The delegation handshake — front-end OpenKey flow</h2>
     <p class="sub">
-      How a non-owner agent (its own key) gains read/write into the owner's <code>applications</code> space.
-      Verified end-to-end headless between two local identities (<code>.context/tc-write-delegation-verified.md</code>,
-      Q4). There is <strong>no node-side approval inbox</strong> — the request/grant artifacts are the hand-off medium.
+      How the user grants the TEE agent read/write into their own space, with <strong>no extra wallet prompt</strong>.
+      The scopes are baked into the signed OpenKey recap at sign-in, so <code>delegateTo</code> is silent. This is the
+      live front-end flow (it replaced the earlier CLI request/grant file hand-off).
     </p>
     <div class="panel">
       <figure>
         <div class="mermaid" id="seq-delegation">
 sequenceDiagram
     autonumber
-    participant AG as Agent (own key, delegate)
-    participant U as User / Owner (root auth)
-    participant TC as tc CLI
+    participant U as User (passkey)
+    participant FE as TinyFeed (web SDK, pure client)
+    participant AG as Distillery agent (TEE)
     participant N as TinyCloud Node
 
-    Note over AG,N: Precondition — owner hosts the applications space (space/host SIWE → /delegate — IN-PROGRESS host verb)
-    AG->>TC: tc sql query ... --space applications (real attempt)
-    TC->>N: invoke tinycloud.sql/read
-    N-->>TC: 401 AUTH_UNAUTHORIZED
-    TC-->>AG: error.code + error.hint (exact --cap string)
-    AG->>TC: auth request --cap "...:read,write" --emit req.json
-    Note right of AG: req.json = tinycloud.auth.request (agent sessionDid + requested caps)
-    AG->>U: hand req.json to the owner, wait
-    U->>TC: auth grant req.json --yes  (owner profile)
-    TC->>N: node.delegateTo(agent sessionDid, caps)
-    N-->>TC: signed UCAN (iss=owner, aud=agent)
-    TC-->>U: grant.json (tinycloud.auth.delegation)
-    U->>AG: return grant.json
-    AG->>TC: auth import grant.json
-    AG->>TC: auth retry --last  → covered: true
-    AG->>TC: tc sql/kv ... --space OWNER_SPACE_URI
-    TC->>N: invoke with imported delegation
-    N-->>AG: rows / values (cross-identity read+write)
+    U->>FE: sign in (OpenKey passkey over broadened manifest)
+    Note over FE: manifest recap covers Listen-read + artifacts-rw + the agent delegation target
+    FE->>AG: GET /agent/info
+    AG-->>FE: { did, name, permissions[] }
+    FE->>FE: tcw.delegateTo(agentDid, scopes, {expiry})  (no extra prompt — scopes in signed recap)
+    FE->>FE: serializeDelegation()
+    FE->>AG: POST /agent/delegation { serialized }   (Bearer token)
+    AG->>AG: 2-phase validate, node.useDelegation(...), persist
+    AG-->>FE: { agentDid, delegationCid, spaceId, expiresAt }
+    FE->>FE: persist delegation in localStorage (bound to space + agent DID)
+    U->>FE: click Generate
+    FE->>AG: POST /agent/run {}   (Bearer token)
+    AG->>N: run pipeline under the delegation
+    N-->>AG: publishes to the user's xyz.tinycloud.artifacts
+    AG-->>FE: { run_id, status }
         </div>
         <figcaption>
-          Primitives (all <span class="badge built">TESTED</span>, <code>.context/tc-write-delegation-verified.md</code>):
-          <code>auth request --emit</code> · <code>auth grant</code> · <code>auth import</code> · <code>auth retry --last</code>.
-          Grants expire (default 7d). KV caps need a <strong>trailing slash</strong> and use actions
-          <code>get/put/list/del/metadata</code>; SQL uses <code>read/write</code> with <code>sql query</code> (read) /
-          <code>sql execute</code> (write). If the agent and owner are the <em>same</em> local key, skip the handshake and use
-          <code>auth request --cap "…" --grant --yes</code>.
+          Live primitives (all <span class="badge live">LIVE</span>): web-SDK <code>delegateTo</code> +
+          <code>serializeDelegation</code> on the client; <code>GET /agent/info</code> (public),
+          <code>POST /agent/delegation</code> + <code>POST /agent/run</code> (Bearer-auth) on the agent. Delegations
+          expire (default 7d) and are reused across sessions from localStorage, bound to BOTH the active space AND the
+          current agent DID — so a repoint to a new agent re-delegates rather than reusing a stale grant. The agent
+          validates the grant before activating it (audience must equal the agent's own DID; granted resources must be a
+          subset of the advertised permissions; the space must match exactly).
         </figcaption>
       </figure>
     </div>
-    <div class="callout warn">
-      <strong>Open delta (delegation UX).</strong> The plan wants <code>tc-listen-read</code> to "request a delegation
-      from the user and <em>wait</em>." The verified ground truth: there is no built-in polling URL or hosted approval
-      queue — the agent emits a request artifact, a human runs <code>auth grant</code> out-of-band and returns the grant
-      JSON, then the agent imports it and polls locally with <code>auth retry</code>. The "wait" is a human-in-the-loop file
-      hand-off, not a server round-trip. <em>(PLANNED skill, BUILT primitives.)</em>
+    <div class="callout delta">
+      <strong>What changed.</strong> The earlier design was a CLI file hand-off
+      (<code>auth request --emit</code> → human <code>auth grant</code> → <code>auth import</code> →
+      <code>auth retry</code>). The live flow is a single browser handshake: scopes ride the signed OpenKey recap, the
+      front end calls <code>delegateTo</code> with no extra prompt, and POSTs the serialized delegation to the agent.
+      No out-of-band file passing, no human approval step.
     </div>
   </section>
 
   <!-- 4. LIFECYCLE SEQUENCE -->
   <section id="lifecycle">
-    <h2><span class="num">§4</span>One artifact's lifecycle (ideal)</h2>
+    <h2><span class="num">§4</span>One artifact's lifecycle (live)</h2>
     <p class="sub">
-      A single artifact from transcript to rendered card, threading the existing quality loop through the new
-      TinyCloud publish target and the Smithers approval gate.
+      A single artifact from transcript to rendered card, as it runs in production: generated and published by the TEE
+      agent under the user's delegated session key, into the user's own space, with <strong>no human approval gate</strong>
+      (artifacts publish <code>approved</code>), and read by a pure-client web-SDK feed.
     </p>
     <div class="panel">
       <figure>
@@ -328,59 +338,56 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant L as Listen (xyz.tinycloud.listen)
-    participant SK as Distillery skill (banger→tweet)
+    participant SK as Agent generate (banger-extractor, write-article)
     participant CR as Critic + verify-quotes
-    participant GATE as Approval gate (Smithers)
-    participant PUB as tc-publish
-    participant ART as xyz.tinycloud.artifacts (SQL+KV)
-    participant FE as Feed viewer (web SDK)
+    participant PUB as tc-publish (delegated session key)
+    participant ART as User's xyz.tinycloud.artifacts (SQL+KV)
+    participant FE as TinyFeed (pure-client web SDK)
 
-    SK->>L: tc sql query / kv list (via delegation §3)
+    Note over SK,ART: precondition — front end bootstrapped the feed table (owner session, on connect)
+    SK->>L: tc sql query / kv list (under delegation §3)
     L-->>SK: transcript rows + KV transcript blobs
-    Note over SK: extract → triage → draft (agent judgment — novelty candidate required)
-    SK->>CR: draft artifact.json (drafts/slug.json)
+    Note over SK: extract, triage, draft (headless claude -p, novelty candidate required)
+    SK->>CR: draft artifact.json
     CR->>CR: adversarial novelty critic (quality.critic_pass)
-    CR->>L: verify-quotes.ts --stamp (verbatim vs transcript)
+    CR->>L: verify-quotes (verbatim vs transcript)
     CR-->>SK: quality.quotes_verified = true
-    alt outward type (tweet)
-        SK->>GATE: approval_status pending
-        GATE->>GATE: human approves (or denies)
-        GATE-->>PUB: approved
-    else internal type (article)
-        SK-->>PUB: publishes directly
-    end
-    PUB->>ART: SQL INSERT row (typed cols + raw_artifact JSON)
-    PUB->>ART: KV put hero image (base64 → string value)
-    FE->>ART: SQL SELECT recent artifacts
-    ART-->>FE: rows + media keys → render tweet/article/video card
+    SK->>PUB: survivors (no human gate — approved)
+    PUB->>ART: KV put media (base64 string value)
+    PUB->>ART: SQL INSERT feed row (approval_status='approved')
+    FE->>ART: SQL SELECT recent artifacts (own session)
+    ART-->>FE: rows + media keys, render tweet/article card
         </div>
         <figcaption>
-          The quality loop (<em>extract → triage → draft → critic → verify-quotes → save</em>) is
-          <span class="badge built">BUILT</span> in every skill today (e.g.
-          <code>skills/banger-extractor/SKILL.md</code>, <code>verify-quotes.ts</code>). What's
-          <span class="badge planned">PLANNED</span>: replacing the local <code>save.ts</code> disk write with
-          <code>tc-publish</code> (SQL row + KV blob), wrapping outward types in a Smithers
-          <code>&lt;Approval&gt;</code> node, and rendering from SQL in the web-SDK viewer instead of a disk scan.
+          The quality loop (<em>extract → triage → draft → critic → verify-quotes</em>) is
+          <span class="badge live">LIVE</span> inside the agent's <code>generate</code> stage. Publish is
+          <code>tc-publish</code> writing a KV media value + a SQL <code>feed</code> row with
+          <code>approval_status='approved'</code> — a <strong>publish-only</strong> delegation (Listen
+          <code>[read]</code>, <code>feed</code> <code>[read,write]</code>, media KV, <code>interactions [read]</code>),
+          so the agent never writes <code>interactions</code> or <code>control</code>. The owner's own front-end session
+          bootstraps the <code>feed</code> + <code>interactions</code> tables on connect (publish errors if the feed table
+          is absent). The feed reads SQL with the user's own session and renders.
         </figcaption>
       </figure>
     </div>
-    <div class="callout warn">
-      <strong>Known publish-path caveat.</strong> <code>tc kv put</code> currently has <em>no</em> <code>--space</code>
-      flag (writes the profile's primary space only), and binary via <code>kv put --file</code> round-trips as JSON
-      <code>{"type":"Buffer",…}</code>. The verified workaround is base64-into-a-string-value; the proper fix
-      (<code>kv put --space</code> + binary round-trip) is the <span class="badge progress">IN-PROGRESS</span> js-sdk task.
-      SQL writes into <code>--space applications</code> already work once the space is hosted.
+    <div class="callout delta">
+      <strong>Publish-path notes (live).</strong> The verified KV write is a base64 string value (binary KV round-trips
+      as <code>{"type":"Buffer",…}</code>, so media goes in as a base64 string); <code>tc kv put --space</code> and the
+      binary round-trip shipped in the js-sdk betas (<code>cli@0.7.0-beta.4</code>, <code>node-sdk@2.4.0-beta.2</code>,
+      <code>web-sdk@2.4.0-beta.2</code>) that the deployed agent uses. SQL writes into the user's space work via the
+      delegated session.
     </div>
   </section>
 
   <!-- 5. DATA MODEL -->
   <section id="model">
-    <h2><span class="num">§5</span>Data model — contract vs. hybrid SQL schema</h2>
+    <h2><span class="num">§5</span>Data model — contract &amp; the hybrid SQL schema (both live)</h2>
     <p class="sub">
-      Left: the real <code>Artifact</code> contract from <code>skills/_shared/lib/artifact.ts</code> (today's source
-      of truth — what every skill emits and the feed consumes). Right: the planned hybrid SQL schema from
-      <code>.context/artifact-pipeline-plan.md</code> — typed columns the Feed renders off, plus a
-      <code>raw_artifact</code> JSON column that preserves the full contract verbatim.
+      Left: the real <code>Artifact</code> contract from <code>skills/_shared/lib/artifact.ts</code> (the source of
+      truth — what the generate stage emits and the feed consumes). Right: the hybrid SQL schema now in production —
+      typed columns the feed renders off, plus a <code>raw_artifact</code> JSON column that preserves the full contract
+      verbatim. The agent writes the <code>feed</code> table (+ KV media); the front end bootstraps
+      <code>feed</code> + <code>interactions</code> on connect.
     </p>
     <div class="two-col">
       <div class="col panel">
@@ -413,8 +420,8 @@ sequenceDiagram
       </div>
 
       <div class="col panel">
-        <h3><span class="tag" style="color:var(--planned)">PLANNED — hybrid SQL schema</span><br/>
-          <code>artifacts</code> table · <span class="pathref">.context/artifact-pipeline-plan.md</span></h3>
+        <h3><span class="tag" style="color:var(--live)">LIVE — hybrid SQL schema</span><br/>
+          <code>feed</code> table · <span class="pathref">tc-publish/publish.ts · the user's space</span></h3>
         <table class="grid">
           <thead><tr><th>column</th><th>SQL type</th><th>source field</th></tr></thead>
           <tbody>
@@ -430,103 +437,104 @@ sequenceDiagram
         </table>
         <p style="font-size:13px;color:var(--muted);margin:12px 0 6px;"><strong>Decisions:</strong></p>
         <ul class="tight" style="font-size:13px;color:var(--muted);">
-          <li>SQL is canonical (stateful, replication-ready); KV holds image blobs.</li>
-          <li>Video = external YouTube URL reference (no media bytes stored).</li>
+          <li>SQL is canonical (stateful, replication-ready); KV holds media (base64 string values).</li>
           <li>Feed renders off typed columns + the <code>raw_artifact</code> JSON per type.</li>
-          <li>Lives in the owner's <code>applications</code> space under an <code>xyz.tinycloud.artifacts/…</code> db/path prefix (same shape as Listen).</li>
+          <li>Lives in the <strong>user's own</strong> <code>xyz.tinycloud.artifacts</code> space (each user publishes to their own space).</li>
+          <li>The agent writes only <code>feed</code> + media (publish-only delegation); rows land <code>approval_status='approved'</code>.</li>
         </ul>
         <table class="grid" style="margin-top:10px;">
-          <thead><tr><th colspan="2">interaction-metadata table (fast-follow)</th></tr></thead>
+          <thead><tr><th colspan="2">interactions table — bootstrapped by the front end</th></tr></thead>
           <tbody>
-            <tr><td><code>artifact_id</code></td><td>FK → artifacts.id</td></tr>
+            <tr><td><code>artifact_id</code></td><td>FK → feed.id</td></tr>
             <tr><td><code>action</code></td><td>more|less|save|already_knew|wrong|promote</td></tr>
             <tr><td><code>note</code> / <code>created_at</code></td><td>free-text / timestamp</td></tr>
           </tbody>
         </table>
         <p style="font-size:13px;color:var(--muted);margin:8px 0 0;">
-          Feeds the closed loop: <code>distill-preferences</code> reads these rows → <code>[learned]</code> bullets
-          (reuses the existing six-action machinery from <code>feedback.ts</code>).
+          The owner's front-end session bootstraps <code>feed</code> + <code>interactions</code> on connect. The agent's
+          delegation is <code>interactions [read]</code> only (never write) — preserving the reader-writes /
+          agent-reads split. Closing the preference loop off these rows (<code>distill-preferences</code> reading SQL)
+          is the remaining read-side work (§7).
         </p>
       </div>
     </div>
     <div class="callout delta">
-      <strong>Delta.</strong> The current contract has 8 types (<code>insight-card, article, podcast, digest,
-      social-post, investor-update-snippet, quote-card, person-brief</code>). The ideal Feed v1 collapses to
-      <strong>3 render types</strong> (<code>tweet, article, video</code>). The mapping is a presentation concern —
-      <code>raw_artifact</code> preserves the original type and all fields, so no contract data is lost; the SQL
-      <code>type</code> column is the feed's render selector.
+      <strong>Note.</strong> The contract supports 8 artifact types; the live run generates <strong>two</strong> per
+      run — a <code>tweet</code> (banger-extractor) and an <code>article</code> (write-article + hero) — and the feed
+      renders those card types. <code>raw_artifact</code> preserves the original type and all fields, so no contract data
+      is lost; the SQL <code>type</code> column is the feed's render selector.
     </div>
   </section>
 
   <!-- 6. GAP TABLE -->
   <section id="gap">
-    <h2><span class="num">§6</span>Current vs Ideal — gap table</h2>
-    <p class="sub">What exists vs. what's planned, with status and the file/decision each row traces to.</p>
+    <h2><span class="num">§6</span>What shipped</h2>
+    <p class="sub">Each concern, what is live in production, and the repo/PR or live coordinate it traces to.</p>
     <div class="panel" style="overflow:auto;">
       <table class="grid">
         <thead>
-          <tr><th>Concern</th><th>Current (BUILT)</th><th>Ideal (PLANNED)</th><th>Status</th></tr>
+          <tr><th>Concern</th><th>Live in production</th><th>Trace</th><th>Status</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Transcript source</strong></td>
-            <td>Local disk dirs via <code>$TRANSCRIPT_DIRS</code>; <code>index-corpus</code> over <code>.md/.txt</code></td>
-            <td>Listen (<code>xyz.tinycloud.listen</code>, applications space) read via <code>tc</code> + delegation</td>
-            <td><span class="badge built">BUILT</span>→<span class="badge planned">PLANNED</span></td>
+            <td><strong>Sign-in &amp; session</strong></td>
+            <td>OpenKey passkey over a broadened manifest; persistent web-SDK session (<code>restoreSession</code>, 7-day TTL) — no re-prompt on reload/nav</td>
+            <td>feed <code>main</code> (PR #7)</td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
-            <td><strong>Read access</strong></td>
-            <td>n/a — filesystem read</td>
-            <td><code>tc-listen-read</code> skill; agent own-key, delegate mode; request→grant→import</td>
-            <td><span class="badge planned">PLANNED</span> skill · <span class="badge built">BUILT</span> primitives</td>
+            <td><strong>Delegation</strong></td>
+            <td>Auto-delegate on sign-in via web-SDK <code>delegateTo</code> (scopes in the signed recap, no extra prompt); persisted in localStorage, bound to space + agent DID</td>
+            <td>feed <code>main</code> · agent <code>POST /agent/delegation</code></td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
-            <td><strong>Skills / generation</strong></td>
-            <td>9 skills; extract→triage→draft→critic→verify→save; headless <code>claude -p</code></td>
-            <td>Reuse skills; remap to tweet/article/video; add <code>video</code> skill</td>
-            <td><span class="badge built">BUILT</span> core · <span class="badge planned">PLANNED</span> video + remap</td>
+            <td><strong>Transcript source / read</strong></td>
+            <td>Listen (<code>xyz.tinycloud.listen</code>) read via <code>tc-listen-read</code> under the delegation</td>
+            <td>distillery <code>main</code> (PR #20)</td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
-            <td><strong>Quality gate</strong></td>
-            <td>Per-skill adversarial novelty critic + <code>verify-quotes.ts</code>; <code>approval_status</code> seam</td>
-            <td>Same loop + Smithers <code>&lt;Approval&gt;</code> node for outward artifacts</td>
-            <td><span class="badge built">BUILT</span>→<span class="badge planned">PLANNED</span> gate node</td>
+            <td><strong>Generation &amp; quality gate</strong></td>
+            <td>Headless <code>claude -p</code>: tweet (banger-extractor) + article (write-article + hero), adversarial critic + verify-quotes; no human gate</td>
+            <td>distillery <code>main</code> · agent <code>runner.ts</code></td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
             <td><strong>Publish target</strong></td>
-            <td><code>save.ts</code> → <code>artifacts/&lt;type&gt;/&lt;slug&gt;/artifact.json</code> on local disk</td>
-            <td><code>tc-publish</code> → hosted <code>xyz.tinycloud.artifacts</code>: SQL rows + KV image blobs</td>
-            <td><span class="badge planned">PLANNED</span></td>
+            <td><code>tc-publish</code> → the <strong>user's own</strong> <code>xyz.tinycloud.artifacts</code>: SQL <code>feed</code> rows (<code>approved</code>) + KV media (base64 string)</td>
+            <td>distillery <code>main</code> (PR #20)</td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
-            <td><strong>Applications-space hosting</strong></td>
-            <td>n/a</td>
-            <td>Owner hosts via <code>space/host</code> SIWE; delegates write to agent's key</td>
-            <td><span class="badge progress">IN-PROGRESS</span> (host verb + node-sdk wrapper)</td>
+            <td><strong>Space hosting &amp; CLI write path</strong></td>
+            <td><code>space/host</code> verb shipped; <code>tc kv put --space</code> + binary round-trip shipped (js-sdk betas <code>cli@0.7.0-beta.4</code>, <code>node-sdk@2.4.0-beta.2</code>, <code>web-sdk@2.4.0-beta.2</code>)</td>
+            <td>js-sdk <code>master</code> (betas published)</td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
-            <td><strong>CLI write path</strong></td>
-            <td>n/a</td>
-            <td><code>tc sql execute --space</code> (works); <code>tc kv put --space</code> + binary round-trip</td>
-            <td><span class="badge progress">IN-PROGRESS</span> (<code>kv put --space</code> fix)</td>
+            <td><strong>Agent hosting (TEE)</strong></td>
+            <td>Phala CVM (Intel TDX), stable <code>did:pkh</code> on a named volume, public image (anon pull), <code>ANTHROPIC_API_KEY</code> TEE secret, exact-match CORS to 2 origins</td>
+            <td>distillery <code>main</code> (PR #22) · <code>DEPLOY.md</code></td>
+            <td><span class="badge live">LIVE</span></td>
+          </tr>
+          <tr>
+            <td><strong>Runtime config / repoint</strong></td>
+            <td>Host + DID from a served <code>agent-config.json</code> (DID auto-discovered from <code>/agent/info</code>); only <code>VITE_AGENT_TOKEN</code> is build-time — repoint without a rebuild</td>
+            <td>feed <code>main</code> · <code>web/public/agent-config.json</code></td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
             <td><strong>Feed viewer</strong></td>
-            <td>Folio: <code>hono</code> server + OpenKey gate, scans disk (<code>scan.ts</code>), Generate button</td>
-            <td>New <strong>pure-client</strong> web-SDK app; signs in, reads SQL, renders 3 card types; no server</td>
-            <td><span class="badge built">BUILT</span> Folio · <span class="badge planned">PLANNED</span> viewer</td>
+            <td>Pure-client web-SDK app at <code>tinyfeed.pages.dev</code> / <code>tinyfeed.tinycloud.xyz</code>; reads SQL with the user's own session, renders cards (no disk-scanning server)</td>
+            <td>feed <code>main</code> (PR #7)</td>
+            <td><span class="badge live">LIVE</span></td>
           </tr>
           <tr>
             <td><strong>Interaction → preferences</strong></td>
-            <td>Feed logs 6 actions → <code>feedback/events.jsonl</code>; <code>distill-preferences</code> → <code>[learned]</code></td>
-            <td>Feed writes interaction rows to SQL; <code>distill-preferences</code> reads SQL (closed loop)</td>
-            <td><span class="badge built">BUILT</span> machinery · <span class="badge planned">PLANNED</span> SQL write-back (fast-follow)</td>
-          </tr>
-          <tr>
-            <td><strong>Orchestration</strong></td>
-            <td><code>feed-run.ts</code> orchestrator (plumbing) + headless agent</td>
-            <td>Smithers workflow: fetch → generate → critic → approval gate → publish</td>
-            <td><span class="badge built">BUILT</span> recipe · <span class="badge planned">PLANNED</span> Smithers wrap</td>
+            <td>Six feedback actions + <code>distill-preferences</code> machinery exist; SQL <code>interactions</code> table bootstrapped by the front end (agent reads it)</td>
+            <td>distillery <code>main</code> · feed <code>main</code></td>
+            <td><span class="badge built">BUILT</span> · read-side loop <span class="badge remaining">REMAINING</span></td>
           </tr>
         </tbody>
       </table>
@@ -535,45 +543,40 @@ sequenceDiagram
 
   <!-- 7. DELTAS -->
   <section id="deltas">
-    <h2><span class="num">§7</span>Where the code and the plan diverge</h2>
-    <p class="sub">High-signal mismatches a reader should know about. Code is shown as <em>current</em>; the plan as
-      <em>ideal</em>.</p>
+    <h2><span class="num">§7</span>Remaining work</h2>
+    <p class="sub">The loop is live; these are the genuine follow-ups that have not yet shipped or deployed.</p>
     <div class="panel anchor-list">
       <ul class="tight">
         <li>
-          <strong>Feed is a server, not a static reader.</strong> Plan: "Folio PWA reads artifacts from disk."
-          Code: <code>harness/feed/src/server.ts</code> is an authenticated <code>hono</code> server (OpenKey passkey,
-          gated <code>/api/*</code> + <code>/media/*</code>) with a preferences panel and a Generate button. The ideal
-          viewer is the opposite direction — a <em>pure-client</em> web-SDK app with no server.
+          <strong>Closed preference loop (read side).</strong> <span class="badge remaining">REMAINING</span> The
+          <code>interactions</code> table is bootstrapped and the six-action +
+          <code>distill-preferences</code> machinery exists, but <code>distill-preferences</code> reading those SQL rows to
+          drive <code>[learned]</code> bullets is not yet wired into the live loop.
         </li>
         <li>
-          <strong>Type count: 8 → 3.</strong> Code: <code>formats.ts</code> defines 8 artifact types. Plan: the Feed v1
-          renders 3 (tweet/article/video). No data loss — <code>raw_artifact</code> JSON keeps the full contract; the
-          SQL <code>type</code> column is just the render selector.
+          <strong><code>tinycloud-node #78</code> not yet deployed.</strong> <span class="badge remaining">REMAINING</span>
+          The CREATE INDEX authorizer fix is merged and Codex-clean but has not been deployed to the live node.
         </li>
         <li>
-          <strong>"Request delegation and wait" has no server poll.</strong> Plan implies the agent waits on an approval.
-          Verified code: the SDK uses request/grant artifact <em>files</em> (<code>auth request --emit</code> →
-          human <code>auth grant</code> → <code>auth import</code> → local <code>auth retry</code> poll). The wait is a
-          human file hand-off, not a hosted approval queue.
+          <strong>Smithers React version skew.</strong> <span class="badge remaining">REMAINING</span> The Smithers form of
+          the run (<code>.smithers/workflows/agent-run.tsx</code>) is not yet runnable: the local <code>.smithers</code>
+          orchestrator pins <code>smithers-orchestrator ^0.20.4</code> while the global CLI is <code>0.22.0</code> (a
+          React-version skew that blocks <code>graph</code>/<code>run</code>). Until they align, <code>/agent/run</code>
+          runs the same stages directly via <code>runner.ts</code>.
         </li>
         <li>
-          <strong>KV write into <code>applications</code> is blocked from the CLI today.</strong> <code>tc kv put</code>
-          ignores <code>--space</code> (primary space only) and binary round-trips as JSON. SQL writes into
-          <code>--space applications</code> work once the space is hosted; KV needs the IN-PROGRESS <code>kv put --space</code> fix
-          (base64-string workaround verified meanwhile).
+          <strong>Longer OpenKey grant TTL.</strong> <span class="badge remaining">REMAINING</span> The session/delegation
+          TTL is 7 days; a longer grant TTL is a deferred slice.
         </li>
         <li>
-          <strong><code>tc space create</code> is dead.</strong> Spike finding (<code>.context/applications-space-hosting.md</code>):
-          there is no <code>tinycloud.space/create</code> handler in the node; hosting goes through a
-          <code>space/host</code> SIWE → <code>/delegate</code>. The owner (root authority) can host its own
-          <code>applications</code> space headlessly — the prior "hosting is impossible" premise was wrong.
+          <strong>Phase-2 real per-user auth.</strong> <span class="badge remaining">REMAINING</span> The bundled
+          <code>AGENT_API_TOKEN</code> is a casual-access gate (the per-user delegation is the real protection); real
+          per-user auth is phase-2.
         </li>
         <li>
-          <strong>Outward comms skills aren't wired into the automated loop yet.</strong> README "routing seam (in flight)":
-          today <code>feed-run</code> drives the internal miners; <code>banger-extractor</code> /
-          <code>investor-snippet</code> / <code>quote-card</code> are invoked directly by an agent, and the approvals
-          surface itself isn't built. The ideal pulls them into the Smithers workflow behind the approval gate.
+          <strong>Phase-2 agent runtime.</strong> <span class="badge remaining">REMAINING</span> The backend uses
+          <code>claude -p</code>, not Eliza; adopting <code>@tinycloud/agent-client</code> / tinycloud-agents is a
+          deferred phase-2 step.
         </li>
       </ul>
     </div>
@@ -581,9 +584,9 @@ sequenceDiagram
 
   <footer>
     <p>
-      Generated for the <code>feat/artifact-pipeline</code> integration branch. Sources: the <code>distillery</code>
-      repo (current) and <code>.context/{artifact-pipeline-plan, tc-write-delegation-verified, applications-space-hosting}.md</code>
-      (ideal/verified). Diagrams: flowcharts rendered with
+      Reflects what is live in production as of 2026-06-14. Sources: <code>.context/PIPELINE-STATUS.md</code>
+      (canonical live status), <code>harness/agent/DEPLOY.md</code> (the live CVM/URL/DID/image coordinates), and
+      <code>harness/agent/README.md</code> (the agent API contract, auth, CORS, and run pipeline). Diagrams: flowcharts rendered with
       <a href="https://github.com/lukilabs/beautiful-mermaid">beautiful-mermaid</a> (its supported types);
       sequence diagrams with mermaid.js (beautiful-mermaid does not support sequence diagrams). Both via pinned CDN —
       open by double-clicking with an internet connection. See the diagram-engine note in §0.
@@ -600,33 +603,26 @@ sequenceDiagram
 
   // Flowchart sources — every node label maps to a real file/skill (see figcaptions).
   const CURRENT = `flowchart TD
-    T["Local transcripts<br/>$TRANSCRIPT_DIRS"] --> IDX["index-corpus<br/>(corpus-index.json)"]
-    IDX --> FR["feed-run.ts<br/>orchestrator (no model calls)"]
-    FR --> BR["run-brief.md"]
-    BR --> GEN["run-generation.ts<br/>headless claude -p"]
-    GEN --> SK["miner skills<br/>extract→draft→critic→verify"]
-    SK --> SAVE["save.ts"]
-    SAVE --> AJ["artifacts/&lt;type&gt;/&lt;slug&gt;/<br/>artifact.json (+ media) on DISK"]
-    AJ --> SCAN["scan.ts scanArtifacts()"]
-    SCAN --> FEED["Folio feed<br/>hono server + OpenKey gate"]
-    FEED --> FB["feedback/events.jsonl<br/>(6 actions)"]
-    FB --> DP["distill-preferences"]
-    DP --> PREF["PREFERENCES.md<br/>learned-tag backpressure"]
-    PREF --> FR`;
+    USER["User @ TinyFeed<br/>tinyfeed.pages.dev"] -->|OpenKey passkey<br/>broadened manifest| SESS["Persistent web-SDK session<br/>restoreSession · 7-day TTL"]
+    SESS -->|auto-delegate on sign-in| DELEG["delegateTo(agentDid, scopes)<br/>persisted in localStorage"]
+    DELEG -->|POST /agent/delegation| AGENT["Distillery agent<br/>Phala CVM (TEE)<br/>did:pkh ...0x95d1...F60"]
+    USER -->|one-click Generate<br/>POST /agent/run| AGENT
+    AGENT -->|under delegation| READ["listen-read<br/>tc · xyz.tinycloud.listen"]
+    READ --> GEN["generate<br/>headless claude -p<br/>tweet + article"]
+    GEN --> CRIT["critic + verify-quotes<br/>(no human gate)"]
+    CRIT --> PUB["tc-publish<br/>delegated session key"]
+    PUB --> ART["User's xyz.tinycloud.artifacts<br/>SQL feed rows + KV media"]
+    ART --> FEED["TinyFeed<br/>pure-client web SDK<br/>reads SQL, renders cards"]
+    FEED --> USER`;
 
   const IDEAL = `flowchart TD
-    L["Listen<br/>xyz.tinycloud.listen<br/>(applications space)"] -->|delegation §3| READ["tc-listen-read<br/>(own key, delegate)"]
-    READ --> SK["distillery skills<br/>banger→tweet · article+illustrate<br/>· new video skill"]
-    SK --> CRIT["critic + verify-quotes"]
-    CRIT --> GATE{"Smithers approval gate<br/>(outward only)"}
-    GATE -->|approved / internal| PUB["tc-publish"]
-    PUB --> ART["xyz.tinycloud.artifacts<br/>HOSTED applications space<br/>SQL rows + KV image blobs"]
-    ART --> VIEW["Feed web viewer<br/>pure-client web SDK"]
-    VIEW --> IM["interaction metadata<br/>→ SQL rows"]
-    IM --> DP["distill-preferences"]
-    DP --> PREF["PREFERENCES.md learned-tag"]
-    PREF --> SK
-    SMITH["Smithers workflow:<br/>fetch→generate→critic→gate→publish"] -.orchestrates.- READ`;
+    USER["User (root authority)<br/>signed recap covers scopes"] -->|serialized delegation<br/>aud = agent DID| VAL["TEE: POST /agent/delegation<br/>2-phase validate:<br/>chain · expiry · audience==self<br/>· resources subset of permissions"]
+    KEY["TEE: stable agent key (did:pkh)<br/>named volume"] --> VAL
+    CORS["CORS allowlist<br/>2 tinyfeed origins (exact)"] -->|guards| VAL
+    VAL --> SAND["TEE: sandboxed tc profile<br/>HOME=sandbox · delegated session<br/>(no owner key on disk)"]
+    SAND --> RUN["TEE: POST /agent/run<br/>scrubbed-env claude -p<br/>tool-restricted"]
+    SECRET["ANTHROPIC_API_KEY<br/>TEE env secret"] --> RUN
+    RUN -->|acts AS delegator<br/>on delegator's space| SPACE["User's xyz.tinycloud.artifacts<br/>(never an owner key)"]`;
 
   try {
     const mod = await import("https://esm.sh/beautiful-mermaid@1.1.3");
