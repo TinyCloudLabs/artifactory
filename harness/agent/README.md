@@ -203,9 +203,15 @@ scratch and told to Read/Write there. So the credentials must live in a
 
 The generate step also `--add-dir`s `skills/` + corpus + artifacts only (**never
 `repoRoot`**), and both roots sit outside the repo so neither is reachable via
-`cwd=repoRoot`. **This closes the reported add-dir vector and removes the
-deny/scratch overlap, but is not a full filesystem sandbox** — claude's Read tool
-in `-p` mode can open arbitrary absolute paths and `bun -e` can read any file the
-process can, so real confinement (separate uid / container / TEE) is the phase-2
-(Phala) hardening. Keep `AGENT_STATE_DIR` (credentials) out of any `--add-dir`'d
-path; the scratch root is meant to be `--add-dir`'d.
+`cwd=repoRoot`. **The server validates this layout at boot** (`assertSafeLayout`
+in `config.ts`): it resolves both roots to absolute paths and refuses to start —
+with a clear config error — if either is nested under the other or inside the
+repo (so a pathological `AGENT_RUNS_DIR=$AGENT_STATE_DIR/runs` or an in-repo
+override fails fast instead of silently re-introducing the overlap).
+
+**This closes the reported add-dir vector and removes the deny/scratch overlap,
+but is not a full filesystem sandbox** — claude's Read tool in `-p` mode can open
+arbitrary absolute paths and `bun -e` can read any file the process can, so real
+confinement (separate uid / container / TEE) is the phase-2 (Phala) hardening.
+Keep `AGENT_STATE_DIR` (credentials) out of any `--add-dir`'d path; the scratch
+root is meant to be `--add-dir`'d.

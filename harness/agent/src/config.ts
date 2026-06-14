@@ -24,6 +24,10 @@
 // Both roots stay OUTSIDE repoRoot so neither is reachable via cwd=repoRoot. See
 // runner.ts buildGenerationArgs. (The documented residual: claude's Read tool +
 // `bun -e` can still open arbitrary ABSOLUTE paths — true confinement is phase-2.)
+//
+// assertSafeLayout() enforces this at boot (fail-fast): a pathological override
+// that re-nests the roots or puts them inside the repo throws a config error
+// rather than silently running with an unsafe layout.
 
 import { resolve } from "node:path";
 import { homedir } from "node:os";
@@ -42,6 +46,52 @@ const agentStateDir = process.env.AGENT_STATE_DIR
 const runsDir = process.env.AGENT_RUNS_DIR
   ? resolve(process.env.AGENT_RUNS_DIR)
   : `${agentStateDir}-runs`;
+
+// True when `child` is `parent` or sits inside it (both must be absolute). The
+// trailing-sep guard stops `/a/b-runs` from counting as inside `/a/b`.
+function isWithin(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  const base = parent.endsWith("/") ? parent : parent + "/";
+  return child.startsWith(base);
+}
+
+/**
+ * Fail FAST at boot on an unsafe path layout. A pathological override (e.g.
+ * AGENT_RUNS_DIR=$AGENT_STATE_DIR/runs, or an in-repo / relative path) would
+ * re-nest the scratch under the credential dir — bringing back the deny/--add-dir
+ * overlap — or put credentials inside the repo (reachable via cwd=repoRoot). We
+ * refuse to run with such a layout rather than silently expose credentials.
+ */
+function assertSafeLayout(state: string, runs: string, repo: string): void {
+  // Both roots must be ABSOLUTE (resolve() guarantees this for our inputs; assert
+  // anyway so a future code change can't regress it).
+  for (const [name, p] of [["AGENT_STATE_DIR", state], ["AGENT_RUNS_DIR", runs]] as const) {
+    if (!p.startsWith("/")) {
+      throw new Error(`agent config: ${name} must resolve to an absolute path (got '${p}').`);
+    }
+  }
+  // (a) neither root may be nested under the other — keeps the credential deny
+  //     from overlapping the --add-dir'd scratch.
+  if (isWithin(runs, state) || isWithin(state, runs)) {
+    throw new Error(
+      `agent config: AGENT_RUNS_DIR ('${runs}') and AGENT_STATE_DIR ('${state}') must not be ` +
+        `nested in one another — the run scratch is --add-dir'd to the generate step and the ` +
+        `state dir is deny-listed; nesting reintroduces the overlap. Point them at separate dirs.`,
+    );
+  }
+  // (b) both must be OUTSIDE repoRoot — inside the repo they'd be reachable via
+  //     cwd=repoRoot (and could be --add-dir'd as part of the repo).
+  for (const [name, p] of [["AGENT_STATE_DIR", state], ["AGENT_RUNS_DIR", runs]] as const) {
+    if (isWithin(p, repo)) {
+      throw new Error(
+        `agent config: ${name} ('${p}') must be OUTSIDE the repo ('${repo}') — inside it the ` +
+          `generate step (cwd=repoRoot) could read it. Use a path outside the checkout.`,
+      );
+    }
+  }
+}
+
+assertSafeLayout(agentStateDir, runsDir, repoRoot);
 
 export const config = {
   /** The distillery checkout the skills run from (cwd of every skill spawn). */
