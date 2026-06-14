@@ -2,15 +2,24 @@
 // anchored to the distillery REPO ROOT (this file is harness/agent/src/, so the
 // repo root is three levels up — same convention as harness/feed/src/server.ts).
 //
-// All agent state lives under a SINGLE gitignored dir (AGENT_STATE_DIR, default
-// <repoRoot>/harness/agent/.agent-state):
+// All agent state lives under a SINGLE dir (AGENT_STATE_DIR, default
+// <home>/.tinycloud-agent — OUTSIDE the repo on purpose):
 //   agent-key.json            — the stable agent wallet key → did:pkh
 //   delegation.json           — the last-POSTed serialized PortableDelegation
+//   api-token                 — the per-install API bearer token
 //   runs/<run_id>/status.json — per-run state for GET /agent/run/:id
 //   tc-home/.tinycloud/...    — the sandboxed tc profile the delegation activates
 //                               (HOME for every skill spawn; never the user's ~)
+//
+// WHY OUTSIDE THE REPO: the generate `claude -p` step is --add-dir'd onto the
+// run's corpus/artifacts scratch (which live under AGENT_STATE_DIR). If the state
+// dir were inside repoRoot, a prompt-injected transcript could Read the agent key
+// / token / delegation via the allowed Read tool. Keeping the whole state tree
+// out of the repo (and never --add-dir'ing its root) puts those credentials
+// beyond the generate child's reach. See runner.ts buildGenerationArgs.
 
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 
 const repoRoot = process.env.DISTILLERY_REPO_ROOT
   ? resolve(process.env.DISTILLERY_REPO_ROOT)
@@ -18,7 +27,7 @@ const repoRoot = process.env.DISTILLERY_REPO_ROOT
 
 const agentStateDir = process.env.AGENT_STATE_DIR
   ? resolve(process.env.AGENT_STATE_DIR)
-  : resolve(repoRoot, "harness/agent/.agent-state");
+  : resolve(homedir(), ".tinycloud-agent");
 
 export const config = {
   /** The distillery checkout the skills run from (cwd of every skill spawn). */

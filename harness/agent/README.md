@@ -79,7 +79,7 @@ Env (all optional):
 | `AGENT_CHAIN_ID` | `1` | EVM chain the delegation must target |
 | `AGENT_MAX_DELEGATION_BYTES` | `262144` | size cap on the serialized delegation payload |
 | `TINYCLOUD_HOST` | `https://node.tinycloud.xyz` | node the agent signs into + the delegation targets |
-| `AGENT_STATE_DIR` | `<repo>/harness/agent/.agent-state` | all runtime state (gitignored, dir `0700`) |
+| `AGENT_STATE_DIR` | `~/.tinycloud-agent` | all runtime state (OUTSIDE the repo on purpose — see "Credential placement"; dir `0700`) |
 | `AGENT_TC_PROFILE` | `delegated` | sandbox tc profile the delegation activates |
 | `AGENT_NAME` | `Distillery Agent` | advertised in `/agent/info` |
 | `AGENT_TRANSCRIPT_COUNT` | `5` | Listen transcripts pulled per run |
@@ -117,8 +117,12 @@ env). The tc CLI's config dir is `os.homedir()/.tinycloud` with no env override
    `--allowedTools` auto-approves only file ops + `Bash(bun:*)`/`Bash(rm:*)` (the
    skill scripts + critic deletes), `--disallowedTools` hard-blocks `tc` + network
    tools (curl/wget/nc/ssh/scp) + keychain/env readers (security/env/printenv) +
-   WebFetch/WebSearch, and `--no-session-persistence` keeps the untrusted
-   transcript out of `~/.claude` history. `$HOME` stays the **real** home —
+   WebFetch/WebSearch + a path-scoped Read/Glob/Grep deny of `AGENT_STATE_DIR`,
+   `--no-session-persistence` keeps the untrusted transcript out of `~/.claude`
+   history, and `--add-dir` is scoped to ONLY `skills/` + the run's corpus +
+   artifacts — **never `repoRoot`**, and the state dir lives outside the repo so
+   the agent credentials are not under cwd or any `--add-dir` (see "Credential
+   placement"). `$HOME` stays the **real** home —
    claude's login token lives in the macOS Keychain, bound to the real `$HOME`, so
    a minimal HOME makes `claude -p` report "Not logged in". **Caveat:** `bun` is
    required and turing-complete (`bun -e <js>`), so the tool denylist raises the
@@ -159,7 +163,7 @@ via `smithers up` on this branch: the local `.smithers` orchestrator pins
 skew that blocks `graph`/`run`). Until the versions align, `/agent/run` runs the
 same stages directly (`runner.ts`).
 
-## Runtime state (gitignored: `/harness/agent/.agent-state/`, dir mode `0700`)
+## Runtime state (`AGENT_STATE_DIR`, default `~/.tinycloud-agent`, dir mode `0700`)
 
 ```
 agent-key.json              the stable agent wallet key → did:pkh           (0600)
@@ -175,3 +179,17 @@ live delegation + session key are never world-readable under a common umask.
 Per-run scratch (Listen transcripts in `corpus/` + generated `artifacts/`) is
 deleted after every run so the user's raw Listen data doesn't linger;
 `status.json` is kept for polling.
+
+### Credential placement (why the state dir is outside the repo)
+
+The generate `claude -p` step is `--add-dir`'d onto the run's corpus + artifacts
+scratch (which live under `AGENT_STATE_DIR`). If the state dir were inside the
+repo, `--add-dir repoRoot` (or cwd=repoRoot) would let a prompt-injected
+transcript Read the agent key / token / delegation via the allowed Read tool.
+So the state dir defaults **outside** the repo (`~/.tinycloud-agent`), the
+generate step `--add-dir`s only `skills/` + the run's corpus + artifacts (never
+`repoRoot`), and adds a path-scoped `Read/Glob/Grep` deny of the state dir.
+**This closes the reported add-dir vector but is not a full filesystem sandbox**
+— claude's Read tool can open arbitrary absolute paths and `bun -e` can read any
+file the process can, so real confinement (separate uid / container / TEE) is the
+phase-2 (Phala) hardening. Keep `AGENT_STATE_DIR` outside any `--add-dir`'d path.

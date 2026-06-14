@@ -72,21 +72,22 @@ type EnvMode = "sandbox" | "generate";
  *      a. SCRUBBED env (buildGenerateEnv): an allowlist that drops every
  *         secret-bearing var (no TC_/AWS_/DB creds, no agent secrets) — so an
  *         injection can't exfiltrate them from the environment.
- *      b. TOOL RESTRICTION (buildGenerationArgs): claude runs with
- *         --allowedTools scoped to file ops + `Bash(bun:*)`/`Bash(rm:*)` only
- *         (no unrestricted Bash → no `tc`, `curl`, `cat ~/.tinycloud`),
- *         --disallowedTools `Bash(tc:*)`, and --no-session-persistence (the
- *         untrusted transcript never lands in ~/.claude history).
+ *      b. TOOL RESTRICTION (buildGenerationArgs): --allowedTools for the
+ *         workflow (file ops + `Bash(bun:*)`/`Bash(rm:*)`), --disallowedTools
+ *         hard-blocking `tc`/network/keychain/web tools + a path-scoped Read/
+ *         Glob/Grep deny of the agent state dir, --no-session-persistence, and
+ *         --add-dir scoped to ONLY skills + corpus + artifacts (NOT repoRoot).
+ *      c. CREDENTIAL PLACEMENT (config.ts): the agent state dir lives OUTSIDE
+ *         repoRoot, so the credentials are not under cwd or any --add-dir.
  *
  *    HOME stays the REAL home here (NOT a minimal sandbox). claude's login token
  *    lives in the macOS Keychain, and keychain access is bound to the real $HOME
  *    + per-user session vars — a minimal HOME makes `claude -p` report "Not
- *    logged in" (verified empirically). So this stage does NOT isolate the
- *    filesystem: a transcript-injected read via an allowed file tool could still
- *    reach ~/.tinycloud on disk. Full process/filesystem isolation (separate
- *    HOME with re-auth'd creds, or a container/TEE) is the phase-2 (Phala/TEE)
- *    hardening. The env scrub + tool restriction are the MVP wins we CAN land
- *    without breaking claude auth or the skill scripts.
+ *    logged in" (verified empirically). HONEST LIMIT: claude's Read tool in -p
+ *    mode can still open arbitrary ABSOLUTE paths and `bun -e` can read any file
+ *    this process can, so the above RAISE THE BAR + close the reported in-repo
+ *    add-dir vector but do NOT fully sandbox the filesystem. Real confinement
+ *    (separate uid / container / TEE) is the phase-2 (Phala) hardening.
  */
 function run(cmd: string, args: string[], mode: EnvMode = "sandbox"): Promise<SpawnResult> {
   const env =
@@ -333,22 +334,32 @@ function buildGenerationArgs(
 
   // TOOL POSTURE (defense-in-depth — see the run() "generate" doc for the honest
   // threat model). In headless `claude -p`, --allowedTools does NOT make Bash
-  // exclusive (general Bash runs by default), so two levers do the real work:
+  // exclusive (general Bash runs by default), so:
   //  - --allowedTools: AUTO-APPROVES exactly the workflow tools (file ops +
   //    `Bash(bun:*)` to run skill scripts + `Bash(rm:*)` for the critic's
   //    artifact deletes) so headless runs don't hang waiting on approval.
   //  - --disallowedTools: HARD-BLOCKS the concrete escape/exfil vectors an
-  //    injection would reach for — `tc` (the delegated CLI), network tools
-  //    (curl/wget/nc/ssh/scp), keychain/env readers (security/env/printenv), and
-  //    claude's own WebFetch/WebSearch. Verified to deny these in -p mode.
-  //  CAVEAT: `bun` is required AND turing-complete, so `bun -e <js>` is a residual
-  //  exfil path — this denylist raises the bar against casual/direct injection but
-  //  is NOT a sandbox. True isolation = phase-2 TEE.
-  //  --no-session-persistence keeps the untrusted transcript out of ~/.claude
-  //  history; --add-dir scopes file tools to corpus+artifacts (+repo for SKILLs).
+  //    injection reaches for — `tc`, network tools (curl/wget/nc/ssh/scp),
+  //    keychain/env readers (security/env/printenv), WebFetch/WebSearch, plus a
+  //    path-scoped Read/Glob/Grep deny of the agent state dir (best-effort).
+  //
+  // CREDENTIAL REACH (the fix for the add-dir finding): the agent state dir
+  // (api-token / agent-key.json / delegation.json) now lives OUTSIDE repoRoot
+  // (config.ts default ~/.tinycloud-agent), and we DO NOT --add-dir repoRoot — we
+  // add ONLY the run's corpus + artifacts scratch (+ the skills dir the recipe
+  // runs). cwd stays repoRoot so `bun skills/...` resolves; repo SOURCE is
+  // readable (not secret) but the credential dir is not under cwd or any add-dir.
+  //
+  // HONEST CAVEAT: claude's Read tool in -p mode can still open arbitrary ABSOLUTE
+  // paths, and `bun -e <js>` (bun is required + turing-complete) can read any file
+  // this process can — so the denylist + out-of-repo state RAISE THE BAR and close
+  // the reported add-dir vector, but do NOT fully sandbox the filesystem. Real
+  // confinement (separate uid / container / TEE) is the phase-2 (Phala) hardening.
+  // --no-session-persistence keeps the untrusted transcript out of ~/.claude.
   const allowedTools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash(bun:*)", "Bash(rm:*)"].join(
     " ",
   );
+  const stateGlob = `${config.agentStateDir}/**`;
   const disallowedTools = [
     "Bash(tc:*)",
     "Bash(curl:*)",
@@ -361,7 +372,12 @@ function buildGenerationArgs(
     "Bash(printenv:*)",
     "WebFetch",
     "WebSearch",
+    `Read(${stateGlob})`,
+    `Glob(${stateGlob})`,
+    `Grep(${stateGlob})`,
   ].join(" ");
+
+  const skillsDir = join(config.repoRoot, "skills");
 
   return [
     "-p",
@@ -376,7 +392,7 @@ function buildGenerationArgs(
     disallowedTools,
     "--no-session-persistence",
     "--add-dir",
-    config.repoRoot,
+    skillsDir,
     "--add-dir",
     corpusDir,
     "--add-dir",
