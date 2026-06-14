@@ -27,14 +27,14 @@ export function createRun(): RunState {
     startedAt: Date.now(),
     log: [],
   };
-  mkdirSync(runDir(runId), { recursive: true });
+  mkdirSync(runDir(runId), { recursive: true, mode: 0o700 });
   writeRun(state);
   return state;
 }
 
 /** Persist the run's current state (called after every stage). */
 export function writeRun(state: RunState): void {
-  mkdirSync(runDir(state.run_id), { recursive: true });
+  mkdirSync(runDir(state.run_id), { recursive: true, mode: 0o700 });
   writeFileSync(statusPath(state.run_id), JSON.stringify(state, null, 2) + "\n", "utf-8");
 }
 

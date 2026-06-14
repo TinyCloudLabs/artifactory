@@ -32,6 +32,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
+import { mkdirSecure } from "./fs-secure.ts";
 
 const repoRoot = process.env.DISTILLERY_REPO_ROOT
   ? resolve(process.env.DISTILLERY_REPO_ROOT)
@@ -129,6 +130,14 @@ function assertSafeLayout(stateIn: string, runsIn: string, repoIn: string): void
 }
 
 assertSafeLayout(agentStateDir, runsDir, repoRoot);
+
+// Create BOTH roots 0700 at startup (mkdirSecure also repairs a pre-existing
+// looser mode). The run scratch root is the load-bearing one: a lazy
+// mkdirSync(recursive) elsewhere would create it 0755 under the default umask,
+// leaving another local user able to traverse in and read the user's RAW Listen
+// transcripts/artifacts mid-run. A 0700 parent blocks that for all children.
+mkdirSecure(agentStateDir);
+mkdirSecure(runsDir);
 
 export const config = {
   /** The distillery checkout the skills run from (cwd of every skill spawn). */

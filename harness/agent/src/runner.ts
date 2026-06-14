@@ -202,8 +202,9 @@ export async function runPipeline(
   state.status = "running";
   step("run started");
 
-  await mkdir(corpusDir, { recursive: true });
-  await mkdir(artifactsDir, { recursive: true });
+  // 0700: corpus holds the user's RAW Listen transcripts — never group/other-readable.
+  await mkdir(corpusDir, { recursive: true, mode: 0o700 });
+  await mkdir(artifactsDir, { recursive: true, mode: 0o700 });
 
   try {
   // NO bootstrap step: the front end owns table creation (it has feed +
