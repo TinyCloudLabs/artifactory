@@ -29,8 +29,9 @@
 // that re-nests the roots or puts them inside the repo throws a config error
 // rather than silently running with an unsafe layout.
 
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
+import { realpathSync } from "node:fs";
 
 const repoRoot = process.env.DISTILLERY_REPO_ROOT
   ? resolve(process.env.DISTILLERY_REPO_ROOT)
@@ -56,36 +57,69 @@ function isWithin(child: string, parent: string): boolean {
 }
 
 /**
- * Fail FAST at boot on an unsafe path layout. A pathological override (e.g.
- * AGENT_RUNS_DIR=$AGENT_STATE_DIR/runs, or an in-repo / relative path) would
- * re-nest the scratch under the credential dir — bringing back the deny/--add-dir
- * overlap — or put credentials inside the repo (reachable via cwd=repoRoot). We
- * refuse to run with such a layout rather than silently expose credentials.
+ * Canonicalize an absolute path so the nesting checks can't be fooled by a
+ * symlink or case-insensitive FS (e.g. AGENT_RUNS_DIR=/tmp/link where /tmp/link →
+ * $AGENT_STATE_DIR/runs would pass a purely lexical startsWith). The dirs may not
+ * exist yet at first boot and realpathSync throws on a missing path, so we
+ * realpath the nearest EXISTING ancestor and re-append the not-yet-created tail.
  */
-function assertSafeLayout(state: string, runs: string, repo: string): void {
+function canonicalize(absPath: string): string {
+  let tail = "";
+  let cur = absPath;
+  // Walk up to an existing ancestor (terminates: dirname("/") === "/").
+  for (;;) {
+    try {
+      return tail ? resolve(realpathSync(cur), tail) : realpathSync(cur);
+    } catch {
+      const parent = dirname(cur);
+      if (parent === cur) return absPath; // reached "/" without an existing ancestor
+      tail = tail ? `${cur.slice(parent.length + 1)}/${tail}` : cur.slice(parent.length + 1);
+      cur = parent;
+    }
+  }
+}
+
+/**
+ * Fail FAST at boot on an unsafe path layout. A pathological override (e.g.
+ * AGENT_RUNS_DIR=$AGENT_STATE_DIR/runs, an in-repo / relative path, or a SYMLINK
+ * into either) would re-nest the scratch under the credential dir — bringing back
+ * the deny/--add-dir overlap — or put credentials inside the repo (reachable via
+ * cwd=repoRoot). We refuse to run with such a layout rather than silently expose
+ * credentials. Paths are CANONICALIZED (realpath) first so symlinks / case-only
+ * differences can't slip a nested layout past the lexical checks.
+ */
+function assertSafeLayout(stateIn: string, runsIn: string, repoIn: string): void {
   // Both roots must be ABSOLUTE (resolve() guarantees this for our inputs; assert
   // anyway so a future code change can't regress it).
-  for (const [name, p] of [["AGENT_STATE_DIR", state], ["AGENT_RUNS_DIR", runs]] as const) {
+  for (const [name, p] of [["AGENT_STATE_DIR", stateIn], ["AGENT_RUNS_DIR", runsIn]] as const) {
     if (!p.startsWith("/")) {
       throw new Error(`agent config: ${name} must resolve to an absolute path (got '${p}').`);
     }
   }
+  const state = canonicalize(stateIn);
+  const runs = canonicalize(runsIn);
+  const repo = canonicalize(repoIn);
+
   // (a) neither root may be nested under the other — keeps the credential deny
   //     from overlapping the --add-dir'd scratch.
   if (isWithin(runs, state) || isWithin(state, runs)) {
     throw new Error(
-      `agent config: AGENT_RUNS_DIR ('${runs}') and AGENT_STATE_DIR ('${state}') must not be ` +
-        `nested in one another — the run scratch is --add-dir'd to the generate step and the ` +
-        `state dir is deny-listed; nesting reintroduces the overlap. Point them at separate dirs.`,
+      `agent config: AGENT_RUNS_DIR ('${runsIn}' → '${runs}') and AGENT_STATE_DIR ('${stateIn}' → ` +
+        `'${state}') must not be nested in one another — the run scratch is --add-dir'd to the ` +
+        `generate step and the state dir is deny-listed; nesting reintroduces the overlap. ` +
+        `Point them at separate dirs.`,
     );
   }
   // (b) both must be OUTSIDE repoRoot — inside the repo they'd be reachable via
   //     cwd=repoRoot (and could be --add-dir'd as part of the repo).
-  for (const [name, p] of [["AGENT_STATE_DIR", state], ["AGENT_RUNS_DIR", runs]] as const) {
+  for (const [name, raw, p] of [
+    ["AGENT_STATE_DIR", stateIn, state],
+    ["AGENT_RUNS_DIR", runsIn, runs],
+  ] as const) {
     if (isWithin(p, repo)) {
       throw new Error(
-        `agent config: ${name} ('${p}') must be OUTSIDE the repo ('${repo}') — inside it the ` +
-          `generate step (cwd=repoRoot) could read it. Use a path outside the checkout.`,
+        `agent config: ${name} ('${raw}' → '${p}') must be OUTSIDE the repo ('${repo}') — inside ` +
+          `it the generate step (cwd=repoRoot) could read it. Use a path outside the checkout.`,
       );
     }
   }
