@@ -13,9 +13,9 @@ MVP: runs locally (`bun`). Phala/TEE deploy is phase 2 (Listen's
 ## API contract
 
 ```
-GET  /agent/info             → { did, name, permissions: PermissionEntry[] }
-POST /agent/delegation       { serialized } → { ok, agentDid, delegationCid, spaceId, expiresAt }
-POST /agent/run              {} (uses the stored delegation) → { run_id, status:"queued" }
+GET  /agent/info             → { did, name, permissions: PermissionEntry[] }            (public)
+POST /agent/delegation       { serialized } → { ok, agentDid, delegationCid, spaceId, expiresAt }   (AUTH)
+POST /agent/run              {} (uses the stored delegation) → { run_id, status:"queued" }           (AUTH)
 GET  /agent/run/:run_id      → { run_id, status:"queued"|"running"|"done"|"error", published?:[{type,slug}], error? }
 ```
 
@@ -23,6 +23,40 @@ GET  /agent/run/:run_id      → { run_id, status:"queued"|"running"|"done"|"err
 `xyz.tinycloud.listen` (SQL `conversations` read + KV `transcript` get/list) and
 read/write on `xyz.tinycloud.artifacts` (SQL feed + KV media). The front end
 splices these into the OpenKey manifest so they're covered in the signed recap.
+
+### Auth (required on the two mutating endpoints)
+
+`POST /agent/delegation` and `POST /agent/run` are credential-holding /
+publishing endpoints, so each REQUIRES a per-install bearer token:
+
+```
+Authorization: Bearer <token>      # preferred
+x-agent-token:  <token>            # equivalent alternative
+```
+
+The token comes from `AGENT_API_TOKEN` if set; otherwise the server **generates
+one on first boot, persists it `0600` at `<AGENT_STATE_DIR>/api-token`, and
+prints it once** in the startup banner. The front end reads it from there and
+sends it on every `delegation`/`run` call. A missing/invalid token → `401`.
+`GET /agent/info` and `GET /agent/run/:id` stay public.
+
+### CORS
+
+CORS is locked to a single trusted browser origin via `AGENT_ALLOWED_ORIGIN`
+(e.g. `https://feed.example.com`) — **never** the `*` wildcard. The server
+reflects `Access-Control-Allow-Origin` only when the request `Origin` exactly
+matches. When `AGENT_ALLOWED_ORIGIN` is unset, no cross-origin request is
+reflected (same-origin / curl only).
+
+### Delegation validation
+
+`POST /agent/delegation` validates the incoming delegation BEFORE activating or
+persisting it (`400` on any failure): numeric `chainId` == the agent's chain,
+expiry in the future, well-formed pkh `spaceId`, the activated session's space
+agrees with the delegation, the audience DID == THIS agent's `did:pkh` (no
+foreign audience), and the granted `resources[]` are a SUBSET of the advertised
+`permissions` (no scope escalation). A serialized payload over
+`AGENT_MAX_DELEGATION_BYTES` is rejected before parsing.
 
 ## Run
 
@@ -36,12 +70,17 @@ Env (all optional):
 |---|---|---|
 | `AGENT_PORT` | `4097` | listen port |
 | `AGENT_HOST_BIND` | `127.0.0.1` | bind address (loopback; a tunnel/front end connects via localhost) |
+| `AGENT_API_TOKEN` | (generated + persisted) | per-install bearer token required on POST delegation/run; auto-generated + logged once if unset |
+| `AGENT_ALLOWED_ORIGIN` | (none) | the single trusted CORS origin; no wildcard, no reflection when unset |
+| `AGENT_CHAIN_ID` | `1` | EVM chain the delegation must target |
+| `AGENT_MAX_DELEGATION_BYTES` | `262144` | size cap on the serialized delegation payload |
 | `TINYCLOUD_HOST` | `https://node.tinycloud.xyz` | node the agent signs into + the delegation targets |
-| `AGENT_STATE_DIR` | `<repo>/harness/agent/.agent-state` | all runtime state (gitignored) |
+| `AGENT_STATE_DIR` | `<repo>/harness/agent/.agent-state` | all runtime state (gitignored, dir `0700`) |
 | `AGENT_TC_PROFILE` | `delegated` | sandbox tc profile the delegation activates |
 | `AGENT_NAME` | `Distillery Agent` | advertised in `/agent/info` |
 | `AGENT_TRANSCRIPT_COUNT` | `5` | Listen transcripts pulled per run |
 | `AGENT_GEN_MODEL` | `opus` | model for the headless `claude -p` generate step |
+| `AGENT_GENERATE_PATH` | `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` | PATH for the generate child (excludes dirs carrying `tc`) |
 | `NODE_SDK_DIST` | (built js-sdk checkout) | override the `@tinycloud/node-sdk` dist path |
 
 The generate step spawns `claude -p`, so `claude` must be on PATH (and logged
@@ -67,26 +106,43 @@ env). The tc CLI's config dir is `os.homedir()/.tinycloud` with no env override
    delegated profile, so `tc` operates **as the delegator on the delegator's
    space** — never an owner/cli-test key (hard rule). The user's real
    `~/.tinycloud` is never touched.
-3. The **generate** stage (`claude -p`) runs with the **real** `$HOME` (claude's
-   credentials live in `~/.claude`) and writes artifact files locally — it
-   touches no `tc` and no delegation. Only the tc-backed stages get the sandbox
-   HOME.
+3. The **generate** stage (`claude -p`) runs over UNTRUSTED transcript text, so
+   it gets a **scrubbed env**: an allowlist (claude/Gemini creds + the macOS
+   keychain-session vars claude needs to find its login token) with every
+   secret-bearing var dropped and `tc` removed from `PATH`. It writes artifact
+   files locally and touches no `tc` / no delegation. `$HOME` stays the **real**
+   home here — claude's login token lives in the macOS Keychain and keychain
+   access is bound to the real `$HOME`, so a minimal HOME makes `claude -p`
+   report "Not logged in". Consequence: this stage scrubs the env but does NOT
+   isolate the filesystem (a prompt-injected transcript could still read
+   `~/.tinycloud` on disk). Full process/filesystem isolation is the **phase-2
+   (Phala/TEE)** hardening. The other stages get the sandbox HOME.
 
 ## The pipeline (`POST /agent/run`)
 
 `bootstrap → listen-read → generate → critic → publish`, all under the
 delegation, into a per-run scratch dir (`<AGENT_STATE_DIR>/runs/<id>/`):
 
-1. **bootstrap** — `tc-publish/bootstrap-schema.ts` ensures the user's three
-   artifact DBs (idempotent; the node's rejection of `CREATE INDEX` is expected).
-2. **listen-read** — `tc-listen-read/listen-read.ts` pulls the user's Listen
+1. **listen-read** — `tc-listen-read/listen-read.ts` pulls the user's Listen
    transcripts into the run's corpus. **Empty-Listen-safe:** 0 transcripts →
    the run completes with 0 artifacts (valid), skipping generate + publish.
-3. **generate** — headless `claude -p` distills one tweet (banger-extractor) and
+2. **generate** — headless `claude -p` distills one tweet (banger-extractor) and
    one article (write-article + hero) into the run's artifacts dir, with an
    adversarial critic + verify-quotes gate (no human approval, per §9).
-4. **publish** — `tc-publish/publish.ts` upserts each survivor to the user's
+3. **publish** — `tc-publish/publish.ts` upserts each survivor to the user's
    `xyz.tinycloud.artifacts` (KV media + SQL feed row, `approval_status='approved'`).
+
+**Publish-only — no schema bootstrap (team decision, 2026-06-14).** The agent's
+delegation is intentionally minimal: Listen `[read]`, `artifacts/feed`
+`[read,write]`, media KV, `interactions [read]` — NO write on `interactions` or
+`control`. So the agent does **not** run the 3-DB `bootstrap-schema` (it would
+401 on the interactions/control `CREATE TABLE` and crash). The **front end**
+owns table creation (the owner's own session bootstraps `feed` + `interactions`
+on connect). `tc-publish` only ever writes `feed` + `media` (a pure INSERT into
+the pre-existing feed table), which the delegation covers; the agent never
+writes `interactions`, preserving the §1 reader-write / agent-read split.
+**Precondition:** the feed table must already exist (front-end bootstrap on
+connect) — otherwise publish errors with "no such table: artifact".
 
 The Smithers form of this flow is authored at
 `.smithers/workflows/agent-run.tsx` (phase-2 target). It is **not yet runnable**
@@ -95,12 +151,19 @@ via `smithers up` on this branch: the local `.smithers` orchestrator pins
 skew that blocks `graph`/`run`). Until the versions align, `/agent/run` runs the
 same stages directly (`runner.ts`).
 
-## Runtime state (gitignored: `/harness/agent/.agent-state/`)
+## Runtime state (gitignored: `/harness/agent/.agent-state/`, dir mode `0700`)
 
 ```
-agent-key.json              the stable agent wallet key → did:pkh
-delegation.json             the last-POSTed serialized delegation (restored on restart)
+agent-key.json              the stable agent wallet key → did:pkh           (0600)
+api-token                   the per-install API bearer token                (0600)
+delegation.json             the last-POSTed serialized delegation (restored on restart)  (0600)
 runs/<run_id>/status.json   per-run state for GET /agent/run/:id
-runs/<run_id>/{corpus,artifacts}/   per-run scratch
-tc-home/.tinycloud/...      the sandboxed delegated tc profile
+runs/<run_id>/{corpus,artifacts}/   per-run scratch — WIPED after each run (success + error)
+tc-home/.tinycloud/...      the sandboxed delegated tc profile (profile/key/session.json all 0600)
 ```
+
+All credential files are written atomically `0600` inside `0700` dirs, so the
+live delegation + session key are never world-readable under a common umask.
+Per-run scratch (Listen transcripts in `corpus/` + generated `artifacts/`) is
+deleted after every run so the user's raw Listen data doesn't linger;
+`status.json` is kept for polling.

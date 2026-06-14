@@ -9,7 +9,7 @@
 // After this, `tc --profile <name>` (HOME=sandbox) operates as the delegator on
 // the delegator's space — the run-under-delegation guarantee, no owner keys.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type {
   DelegatedAccess,
   PortableDelegation,
@@ -19,6 +19,9 @@ import { config } from "./config.ts";
 import { ensureAgentKey } from "./agent-key.ts";
 import { loadNodeSdk } from "./node-sdk.ts";
 import { extractRestorable, writeDelegatedProfile } from "./profile-writer.ts";
+import { validateDelegation, type CapabilityHelpers } from "./delegation-validator.ts";
+import { mkdirSecure, writeJsonSecure } from "./fs-secure.ts";
+import { PERMISSIONS } from "./permissions.ts";
 
 export interface ActiveDelegation {
   delegation: PortableDelegation;
@@ -35,6 +38,9 @@ export class AgentSession {
   readonly agentDid: string;
   private active: ActiveDelegation | null = null;
   private deserialize!: (s: string) => PortableDelegation;
+  /** SDK capability helpers, captured at bootstrap (the bare specifier can't be
+   *  statically value-imported — see node-sdk.ts), passed to the validator. */
+  private helpers!: CapabilityHelpers;
 
   private constructor(node: TinyCloudNode, agentAddress: string) {
     this.node = node;
@@ -44,7 +50,9 @@ export class AgentSession {
 
   /** Boot the agent: ensure the key, sign the node in, restore a persisted delegation. */
   static async bootstrap(): Promise<AgentSession> {
-    mkdirSync(config.agentStateDir, { recursive: true });
+    // 0700 — the state dir holds the agent key, the live delegation, and the
+    // sandbox session (all bearer secrets).
+    mkdirSecure(config.agentStateDir);
 
     const sdk = await loadNodeSdk();
     const { key, generated } = ensureAgentKey(config.agentKeyPath);
@@ -62,6 +70,10 @@ export class AgentSession {
 
     const session = new AgentSession(node, agentAddress);
     session.deserialize = sdk.deserializeDelegation;
+    session.helpers = {
+      isCapabilitySubset: sdk.isCapabilitySubset,
+      principalDidEquals: sdk.principalDidEquals,
+    };
 
     // Restore a delegation persisted from a prior run (so a restart keeps the
     // sandbox profile valid without re-POSTing).
@@ -95,13 +107,32 @@ export class AgentSession {
    * Throws (caller maps to HTTP 4xx/5xx) on a malformed or unusable delegation.
    */
   async activate(serialized: string): Promise<ActiveDelegation> {
-    const delegation = this.deserialize(serialized);
-    if (typeof delegation.chainId !== "number" || !Number.isFinite(delegation.chainId)) {
-      throw new Error("Delegation is missing chainId.");
+    // Cap the serialized payload BEFORE deserialize — bounds the parse cost and
+    // blocks an oversized blob from being decoded at all.
+    const byteLen = Buffer.byteLength(serialized, "utf-8");
+    if (byteLen > config.maxDelegationBytes) {
+      throw new Error(
+        `invalid delegation: serialized payload ${byteLen} bytes exceeds the ` +
+          `${config.maxDelegationBytes}-byte cap.`,
+      );
     }
 
+    const delegation = this.deserialize(serialized);
+
+    // useDelegation (wallet mode) does NOT verify the audience or scopes, so we
+    // mint the session, then validate the delegation + the minted session TOGETHER
+    // (audience, chainId, expiry, space agreement, no scope escalation) BEFORE we
+    // project it into the sandbox profile or persist it. Any failure throws (400).
     const access: DelegatedAccess = await this.node.useDelegation(delegation);
     const restorable = extractRestorable(access);
+
+    validateDelegation(delegation, {
+      agentDid: this.agentDid,
+      expectedChainId: config.chainId,
+      permissions: PERMISSIONS,
+      restorable,
+      helpers: this.helpers,
+    });
 
     writeDelegatedProfile({
       home: config.tcHome,
@@ -140,6 +171,7 @@ function loadPersistedDelegation(): string | null {
 }
 
 function persistDelegation(serialized: string): void {
-  mkdirSync(config.agentStateDir, { recursive: true });
-  writeFileSync(config.delegationPath, JSON.stringify({ serialized }, null, 2) + "\n", "utf-8");
+  // The serialized delegation embeds the bearer UCAN — write it 0600 in a 0700
+  // dir (writeJsonSecure ensures both), never world-readable.
+  writeJsonSecure(config.delegationPath, { serialized });
 }

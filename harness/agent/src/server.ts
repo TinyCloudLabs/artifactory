@@ -19,50 +19,61 @@ import { config } from "./config.ts";
 import { AgentSession, type ActiveDelegation } from "./session.ts";
 import { runPipeline, type RunState } from "./runner.ts";
 import { createRun, isValidRunId, readRun, writeRun } from "./runs.ts";
+import { PERMISSIONS } from "./permissions.ts";
+import { ensureApiToken, tokenMatches } from "./api-token.ts";
 
-// The scopes the user must delegate to the agent (server-info shape, so the
-// front end can splice them into the OpenKey manifest before sign-in). Mirrors
-// Listen's AGENT_PERMISSIONS but scoped to the two app spaces this agent needs:
-// Listen-read (in) + artifacts read/write (out).
-const PERMISSIONS = [
-  {
-    service: "tinycloud.sql",
-    path: "xyz.tinycloud.listen/conversations",
-    actions: ["read"],
-    description: "Read your Listen conversations to distill them into artifacts.",
-  },
-  {
-    service: "tinycloud.kv",
-    path: "xyz.tinycloud.listen/",
-    actions: ["get", "list", "metadata"],
-    description: "Read your Listen transcripts to distill them into artifacts.",
-  },
-  {
-    service: "tinycloud.sql",
-    path: "xyz.tinycloud.artifacts/",
-    actions: ["read", "write"],
-    description: "Publish distilled artifacts to your feed.",
-  },
-  {
-    service: "tinycloud.kv",
-    path: "xyz.tinycloud.artifacts/",
-    actions: ["get", "put", "list", "metadata"],
-    description: "Publish artifact media (hero images, audio) to your space.",
-  },
-] as const;
+// ── AUTH + CORS ───────────────────────────────────────────────────────────
+// This is a credential-holding service: POST /agent/delegation and POST
+// /agent/run mutate state / publish under the active delegation, so they REQUIRE
+// the per-install bearer token. The front end reads the token from the server's
+// startup log (or sets AGENT_API_TOKEN) and sends it on every mutating call as:
+//     Authorization: Bearer <token>      (or:  x-agent-token: <token>)
+// GET /agent/info stays public (it returns only the DID + advertised perms).
+//
+// CORS is locked to a single trusted origin (AGENT_ALLOWED_ORIGIN) — NEVER the
+// `*` wildcard, which would let any web page drive this agent. When the env is
+// unset, no cross-origin request is reflected (curl / same-origin only).
+const { token: apiToken, generated: tokenGenerated } = ensureApiToken(
+  config.apiTokenPath,
+  config.apiToken,
+);
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "600",
-};
+/** The CORS headers for an allowed request: reflect the origin only if it matches. */
+function corsHeaders(req: Request): Record<string, string> {
+  const base: Record<string, string> = {
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-agent-token",
+    "Access-Control-Max-Age": "600",
+    Vary: "Origin",
+  };
+  const origin = req.headers.get("origin");
+  if (config.allowedOrigin && origin && origin === config.allowedOrigin) {
+    base["Access-Control-Allow-Origin"] = config.allowedOrigin;
+  }
+  return base;
+}
 
-function json(status: number, body: unknown): Response {
+function json(req: Request, status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    headers: { "Content-Type": "application/json", ...corsHeaders(req) },
   });
+}
+
+/** Pull the presented bearer token from Authorization: Bearer or x-agent-token. */
+function presentedToken(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (auth) {
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (m) return m[1]!.trim();
+  }
+  const xToken = req.headers.get("x-agent-token");
+  return xToken ? xToken.trim() : null;
+}
+
+/** True when the request carries the valid per-install token. */
+function isAuthorized(req: Request): boolean {
+  return tokenMatches(apiToken, presentedToken(req));
 }
 
 const session = await AgentSession.bootstrap();
@@ -71,8 +82,8 @@ const session = await AgentSession.bootstrap();
 // one delegated tc profile, so one run at a time keeps the session coherent.
 let runningRunId: string | null = null;
 
-async function handleInfo(): Promise<Response> {
-  return json(200, {
+async function handleInfo(req: Request): Promise<Response> {
+  return json(req, 200, {
     did: session.agentDid,
     name: config.name,
     permissions: PERMISSIONS,
@@ -85,11 +96,11 @@ async function handlePostDelegation(req: Request): Promise<Response> {
   try {
     body = await req.json();
   } catch {
-    return json(400, { error: { code: "invalid_json", message: "Body must be JSON." } });
+    return json(req, 400, { error: { code: "invalid_json", message: "Body must be JSON." } });
   }
   const serialized = body?.serialized;
   if (typeof serialized !== "string" || serialized.length === 0) {
-    return json(400, {
+    return json(req, 400, {
       error: { code: "invalid_body", message: "Body must be { serialized: string } (non-empty)." },
     });
   }
@@ -97,7 +108,7 @@ async function handlePostDelegation(req: Request): Promise<Response> {
   try {
     const active = await session.activate(serialized);
     console.log(`[agent] activated delegation cid=${active.delegationCid} space=${active.spaceId}`);
-    return json(200, {
+    return json(req, 200, {
       ok: true,
       agentDid: session.agentDid,
       delegationCid: active.delegationCid,
@@ -107,25 +118,28 @@ async function handlePostDelegation(req: Request): Promise<Response> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[agent] activation failed:`, err);
-    // A malformed/expired delegation is the client's fault (400); a node failure
-    // mid-activation is ours (500). We can't always tell — deserialize errors
-    // and missing chainId are 400, everything else 500.
-    const clientFault = /chainId|JSON|deserialize|invalid/i.test(message);
-    return json(clientFault ? 400 : 500, {
+    // A malformed/expired/over-broad delegation is the client's fault (400); a
+    // node failure mid-activation is ours (500). The validator + deserializer
+    // throw messages prefixed "invalid delegation" / mention chainId|JSON|
+    // deserialize|expired|escalation — treat those as 400, everything else 500.
+    const clientFault = /chainId|JSON|deserialize|invalid|expired|escalation|exceeds|audience/i.test(
+      message,
+    );
+    return json(req, clientFault ? 400 : 500, {
       error: { code: clientFault ? "invalid_delegation" : "activation_failed", message },
     });
   }
 }
 
-async function handlePostRun(): Promise<Response> {
+async function handlePostRun(req: Request): Promise<Response> {
   const active = session.getActive();
   if (!active) {
-    return json(409, {
+    return json(req, 409, {
       error: { code: "no_delegation", message: "No delegation granted yet. POST /agent/delegation first." },
     });
   }
   if (runningRunId) {
-    return json(409, {
+    return json(req, 409, {
       error: { code: "run_in_progress", message: `A run is already in progress (${runningRunId}).` },
     });
   }
@@ -137,7 +151,7 @@ async function handlePostRun(): Promise<Response> {
   // GET /agent/run/:id. Errors are captured into the run's status.json.
   void executeRun(state, active);
 
-  return json(202, { run_id: state.run_id, status: "queued" });
+  return json(req, 202, { run_id: state.run_id, status: "queued" });
 }
 
 async function executeRun(state: RunState, active: ActiveDelegation): Promise<void> {
@@ -155,20 +169,30 @@ async function executeRun(state: RunState, active: ActiveDelegation): Promise<vo
   }
 }
 
-function handleGetRun(runId: string): Response {
+function handleGetRun(req: Request, runId: string): Response {
   if (!isValidRunId(runId)) {
-    return json(400, { error: { code: "invalid_run_id", message: "Malformed run_id." } });
+    return json(req, 400, { error: { code: "invalid_run_id", message: "Malformed run_id." } });
   }
   const state = readRun(runId);
   if (!state) {
-    return json(404, { error: { code: "not_found", message: `Unknown run ${runId}.` } });
+    return json(req, 404, { error: { code: "not_found", message: `Unknown run ${runId}.` } });
   }
   // The API contract response (drop internal fields: startedAt/log/etc.).
-  return json(200, {
+  return json(req, 200, {
     run_id: state.run_id,
     status: state.status,
     published: state.published,
     ...(state.error ? { error: state.error } : {}),
+  });
+}
+
+/** 401 for a mutating request that lacks the valid per-install token. */
+function unauthorized(req: Request): Response {
+  return json(req, 401, {
+    error: {
+      code: "unauthorized",
+      message: "Missing or invalid agent token (Authorization: Bearer <token> or x-agent-token).",
+    },
   });
 }
 
@@ -179,22 +203,24 @@ Bun.serve({
     const url = new URL(req.url);
 
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: corsHeaders(req) });
     }
     if (url.pathname === "/agent/info" && req.method === "GET") {
-      return handleInfo();
+      return handleInfo(req); // public
     }
     if (url.pathname === "/agent/delegation" && req.method === "POST") {
+      if (!isAuthorized(req)) return unauthorized(req);
       return handlePostDelegation(req);
     }
     if (url.pathname === "/agent/run" && req.method === "POST") {
-      return handlePostRun();
+      if (!isAuthorized(req)) return unauthorized(req);
+      return handlePostRun(req);
     }
     const runMatch = url.pathname.match(/^\/agent\/run\/([^/]+)$/);
     if (runMatch && req.method === "GET") {
-      return handleGetRun(decodeURIComponent(runMatch[1]!));
+      return handleGetRun(req, decodeURIComponent(runMatch[1]!));
     }
-    return json(404, { error: { code: "not_found", message: `${req.method} ${url.pathname}` } });
+    return json(req, 404, { error: { code: "not_found", message: `${req.method} ${url.pathname}` } });
   },
 });
 
@@ -202,3 +228,20 @@ console.log(`[agent] listening on ${config.hostname}:${config.port}`);
 console.log(`[agent] repo root   ${config.repoRoot}`);
 console.log(`[agent] tc sandbox  ${config.tcHome}/.tinycloud (profile: ${config.profileName})`);
 console.log(`[agent] state dir   ${config.agentStateDir}`);
+console.log(
+  `[agent] CORS origin ${config.allowedOrigin ?? "(none — set AGENT_ALLOWED_ORIGIN for a browser front end)"}`,
+);
+// Log the per-install API token ONCE so the operator/front end can pick it up.
+// (When AGENT_API_TOKEN is set, it's already known — we only banner a generated one.)
+if (tokenGenerated) {
+  console.log("");
+  console.log("==================================================================");
+  console.log(`  Agent API token (send as 'Authorization: Bearer <token>'):`);
+  console.log(`    ${apiToken}`);
+  console.log(`  Persisted at ${config.apiTokenPath} (0600). Required on`);
+  console.log(`  POST /agent/delegation and POST /agent/run.`);
+  console.log("==================================================================");
+  console.log("");
+} else {
+  console.log(`[agent] API token   loaded (required on POST /agent/{delegation,run})`);
+}

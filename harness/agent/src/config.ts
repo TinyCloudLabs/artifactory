@@ -29,6 +29,8 @@ export const config = {
   agentKeyPath: resolve(agentStateDir, "agent-key.json"),
   /** The last-granted serialized delegation (for restart restore). */
   delegationPath: resolve(agentStateDir, "delegation.json"),
+  /** The per-install API bearer token (generated + persisted if unset). */
+  apiTokenPath: resolve(agentStateDir, "api-token"),
   /** Per-run status dir root. */
   runsDir: resolve(agentStateDir, "runs"),
   /** Sandbox HOME for skill spawns — tc reads <home>/.tinycloud. */
@@ -42,6 +44,16 @@ export const config = {
   /** Loopback by default (a tunnel/front end connects via localhost). */
   hostname: process.env.AGENT_HOST_BIND ?? "127.0.0.1",
   name: process.env.AGENT_NAME ?? "Distillery Agent",
+  /** The single trusted browser origin allowed by CORS (no wildcard). When
+   *  unset, NO cross-origin request is reflected (same-origin / curl only). */
+  allowedOrigin: process.env.AGENT_ALLOWED_ORIGIN?.trim() || null,
+  /** Per-install API bearer token. If set via env it wins; otherwise the
+   *  server generates one on first boot, persists it (0600), and logs it once. */
+  apiToken: process.env.AGENT_API_TOKEN?.trim() || null,
+  /** Cap on the serialized-delegation payload the server will deserialize. */
+  maxDelegationBytes: Number(process.env.AGENT_MAX_DELEGATION_BYTES ?? 256 * 1024),
+  /** The EVM chain the agent operates on; a delegation must match it. */
+  chainId: Number(process.env.AGENT_CHAIN_ID ?? 1),
   /** Advertised delegation lifetime (informational, for GET /agent/info). */
   delegationExpiry: process.env.AGENT_DELEGATION_EXPIRY ?? "7d",
   /** How many Listen transcripts a run pulls. */

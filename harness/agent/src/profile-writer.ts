@@ -15,9 +15,10 @@
 // runs every skill with env HOME=<agentStateDir>/tc-home. The user's real
 // ~/.tinycloud is never touched, and no owner/cli-test key can leak in.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { DelegatedAccess, PortableDelegation } from "@tinycloud/node-sdk";
+import { chmodFileSecure, mkdirSecure, writeJsonSecure } from "./fs-secure.ts";
 
 /**
  * The handles needed to rehydrate a delegation activation in a fresh node via
@@ -73,12 +74,6 @@ function loadExistingCreatedAt(path: string): string | null {
   }
 }
 
-function writeJsonAtomic(path: string, body: unknown): void {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(body, null, 2) + "\n", "utf-8");
-  renameSync(tmp, path);
-}
-
 /**
  * Write the full delegated profile (profile.json + key.json + session.json) and
  * point the sandbox config at it as the default profile. Runs once per grant;
@@ -86,7 +81,7 @@ function writeJsonAtomic(path: string, body: unknown): void {
  */
 export function writeDelegatedProfile(input: ProfileSynthesisInput): void {
   const dir = profileDir(input.home, input.profileName);
-  mkdirSync(dir, { recursive: true });
+  mkdirSecure(dir);
 
   const profilePath = join(dir, "profile.json");
   const keyPath = join(dir, "key.json");
@@ -108,8 +103,10 @@ export function writeDelegatedProfile(input: ProfileSynthesisInput): void {
     createdAt,
     authMethod: "openkey" as const,
   };
-  writeJsonAtomic(profilePath, profile);
-  writeJsonAtomic(keyPath, input.restorable.jwk);
+  // key.json is the delegated session signing key (a bearer secret); profile.json
+  // is non-secret but kept 0600 for uniformity inside the 0700 profile dir.
+  writeJsonSecure(profilePath, profile);
+  writeJsonSecure(keyPath, input.restorable.jwk);
 
   writeSessionOnly(input);
   writeGlobalConfig(input.home, input.profileName);
@@ -118,7 +115,7 @@ export function writeDelegatedProfile(input: ProfileSynthesisInput): void {
 /** Rewrite only session.json (runs on every refresh; profile.json/key.json are stable). */
 export function writeSessionOnly(input: ProfileSynthesisInput): void {
   const dir = profileDir(input.home, input.profileName);
-  mkdirSync(dir, { recursive: true });
+  mkdirSecure(dir);
 
   const ownerDid = `did:pkh:eip155:${input.delegation.chainId}:${input.delegation.ownerAddress}`;
 
@@ -132,7 +129,9 @@ export function writeSessionOnly(input: ProfileSynthesisInput): void {
     chainId: input.delegation.chainId,
     ownerDid,
   };
-  writeJsonAtomic(join(dir, "session.json"), session);
+  // session.json carries the live delegationHeader (a bearer UCAN) + jwk — the
+  // most sensitive file on disk. 0600, atomic, in the 0700 profile dir.
+  writeJsonSecure(join(dir, "session.json"), session);
 }
 
 /** Move session.json aside so `tc` surfaces AUTH_REQUIRED (revoked/expired). */
@@ -148,7 +147,7 @@ export function clearSession(home: string, profileName: string): void {
 
 function writeGlobalConfig(home: string, defaultProfile: string): void {
   const configPath = join(configDir(home), "config.json");
-  mkdirSync(configDir(home), { recursive: true });
+  mkdirSecure(configDir(home));
   // Always (re)write so the sandbox default profile tracks the active grant.
-  writeJsonAtomic(configPath, { defaultProfile, version: 1 });
+  writeJsonSecure(configPath, { defaultProfile, version: 1 });
 }
