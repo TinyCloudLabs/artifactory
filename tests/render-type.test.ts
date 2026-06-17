@@ -20,6 +20,7 @@ describe("renderTypeFor — §4.2 mapping", () => {
     "insight-card": "article",
     digest: "article",
     podcast: "article",
+    clip: "video",
     "person-brief": "article",
   };
 
@@ -37,11 +38,11 @@ describe("renderTypeFor — §4.2 mapping", () => {
     }
   });
 
-  test("V1 produces only tweet + article (video deferred)", () => {
+  test("V1 includes video for clip artifacts", () => {
     const shapes = new Set(ARTIFACT_TYPES.map(renderTypeFor));
     expect(shapes.has("tweet")).toBe(true);
     expect(shapes.has("article")).toBe(true);
-    expect(shapes.has("video")).toBe(false);
+    expect(shapes.has("video")).toBe(true);
   });
 });
 
@@ -66,6 +67,14 @@ describe("artifact schema — §1 DDL", () => {
     const feed = ARTIFACT_DBS[0]!.tables[0]!;
     expect(feed).toMatch(/approval_status\s+TEXT NOT NULL,/);
     expect(feed).not.toMatch(/approval_status\s+TEXT NOT NULL DEFAULT/);
+  });
+
+  test("feed.artifact has first-class video KV columns plus URL fallback", () => {
+    const feed = ARTIFACT_DBS[0]!.tables[0]!;
+    expect(feed).toMatch(/video_key\s+TEXT/);
+    expect(feed).toMatch(/video_sha256\s+TEXT/);
+    expect(feed).toMatch(/video_mime\s+TEXT/);
+    expect(feed).toMatch(/video_url\s+TEXT/);
   });
 
   test("interaction carries nonce + recorded_at for replay protection", () => {

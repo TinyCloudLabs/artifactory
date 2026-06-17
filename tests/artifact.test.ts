@@ -162,6 +162,7 @@ describe("validateArtifact", () => {
     expect(isOutwardType("insight-card")).toBe(false);
     expect(isOutwardType("article")).toBe(false);
     expect(isOutwardType("podcast")).toBe(false);
+    expect(isOutwardType("clip")).toBe(false);
   });
 
   test("existing insight-card artifacts remain valid unchanged (backward-compat)", () => {

@@ -26,6 +26,12 @@ export interface ArtifactDb {
    */
   tables: string[];
   /**
+   * Additive migrations for older hosted spaces. SQLite lacks portable
+   * ADD COLUMN IF NOT EXISTS support, so bootstrap callers should treat
+   * duplicate-column failures as already-applied.
+   */
+  migrations: string[];
+  /**
    * Indexes — BEST-EFFORT. The node's SQLite authorizer currently REJECTS
    * `CREATE INDEX`/`CREATE UNIQUE INDEX` with "not authorized" regardless of
    * cap (server-side constraint, not a capability gap). Bootstrap attempts
@@ -56,6 +62,9 @@ const FEED_DDL = `CREATE TABLE IF NOT EXISTS artifact (
   audio_key          TEXT,
   audio_sha256       TEXT,
   audio_mime         TEXT,
+  video_key          TEXT,
+  video_sha256       TEXT,
+  video_mime         TEXT,
   video_url          TEXT,
 
   audience           TEXT,
@@ -98,6 +107,11 @@ export const ARTIFACT_DBS: readonly ArtifactDb[] = [
   {
     db: "xyz.tinycloud.artifacts/feed",
     tables: [FEED_DDL],
+    migrations: [
+      `ALTER TABLE artifact ADD COLUMN video_key TEXT`,
+      `ALTER TABLE artifact ADD COLUMN video_sha256 TEXT`,
+      `ALTER TABLE artifact ADD COLUMN video_mime TEXT`,
+    ],
     indexes: [
       `CREATE INDEX IF NOT EXISTS idx_artifact_published_at ON artifact(published_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_artifact_render_type  ON artifact(render_type, published_at DESC)`,
@@ -107,6 +121,7 @@ export const ARTIFACT_DBS: readonly ArtifactDb[] = [
   {
     db: "xyz.tinycloud.artifacts/interactions",
     tables: [INTERACTION_DDL],
+    migrations: [],
     indexes: [
       `CREATE INDEX IF NOT EXISTS idx_interaction_artifact ON interaction(artifact_id)`,
       `CREATE INDEX IF NOT EXISTS idx_interaction_distill  ON interaction(recorded_at, id)`,
@@ -116,6 +131,7 @@ export const ARTIFACT_DBS: readonly ArtifactDb[] = [
   {
     db: "xyz.tinycloud.artifacts/control",
     tables: [CURSOR_DDL],
+    migrations: [],
     indexes: [],
   },
 ];
