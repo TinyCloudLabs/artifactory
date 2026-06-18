@@ -126,8 +126,8 @@
       </p>
       <div class="meta">
         <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>cb9c1ee</code></div>
-        <div class="pill"><strong>Feed:</strong> 9 commits ahead of origin/main through <code>13853c5</code></div>
-        <div class="pill"><strong>Latest functional checkpoint:</strong> Feed surfaces run lock fetch failures</div>
+        <div class="pill"><strong>Feed:</strong> 10 commits ahead of origin/main through <code>2065564</code></div>
+        <div class="pill"><strong>Latest functional checkpoint:</strong> Feed reports missing run lock endpoint</div>
         <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS</div>
       </div>
     </header>
@@ -322,6 +322,12 @@
             <td>Keeps active-run resume compatible with older backends while making the operator-facing Run lock section fail loud on network errors.</td>
             <td><code>web/src/agentClient.ts</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">2065564</span></td>
+            <td>Report missing run lock endpoint</td>
+            <td>Keeps cold-start run resume tolerant of old backends while making the operator-facing Run lock section report a missing <code>/agent/runs</code> endpoint.</td>
+            <td><code>web/src/agentClient.ts</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -330,10 +336,10 @@
       <h2>Latest Checkpoint</h2>
       <p class="note">
         <span class="status-ok">Newest local checkpoint:</span>
-        <code>13853c5 Surface run lock fetch failures</code>.
+        <code>2065564 Report missing run lock endpoint</code>.
         Feed still soft-degrades cold-start run detection for older backends, but
-        the operator-facing Run lock section now reports network failures instead
-        of rendering them as no active lock.
+        the operator-facing Run lock section now reports missing routes and
+        network failures instead of rendering them as no active lock.
       </p>
     </section>
 
