@@ -31,6 +31,12 @@ run to `error` with a stale-run explanation. This catches server restarts,
 crashes, and lost child processes so Feed does not show an abandoned build as
 running forever.
 
+`POST /agent/run` and the Smithers agent-run workflows share a disk-backed run
+lock at `<AGENT_RUNS_DIR>/agent-run.lock`, so only one delegated pipeline can
+use the mutable tc profile at a time across processes. Done/error runs release
+the lock during cleanup; stale or malformed locks are reclaimed before the next
+run starts.
+
 `permissions` advertises the scopes the user must delegate: Listen-read on
 `xyz.tinycloud.listen` (SQL `conversations` read + KV `transcript` get/list) and
 read/write on `xyz.tinycloud.artifacts` (SQL feed + KV media). The front end
@@ -199,8 +205,8 @@ bun run smithers:agent-run:staged
 
 `smithers:agent-run:staged` is the first stage-level orchestration path:
 `preflight → listen → generate → publish → cleanup`. It remains an operator/dev
-entry point until the HTTP endpoint has a shared cross-process run lock and can
-delegate to Smithers safely.
+entry point until the HTTP endpoint delegates to Smithers task execution safely;
+it already shares the same cross-process run lock as `/agent/run`.
 
 ## Runtime state — TWO separate roots, both outside the repo, dir mode `0700`
 
@@ -219,6 +225,7 @@ when AGENT_STATE_DIR is overridden) — RUN SCRATCH only:
 ```
 <run_id>/status.json          per-run state for GET /agent/run/:id
 <run_id>/{corpus,artifacts}/  per-run scratch — WIPED after each run (success + error)
+agent-run.lock                shared active-run lock for HTTP + Smithers runners
 ```
 
 All credential files are written atomically `0600` inside `0700` dirs, so the

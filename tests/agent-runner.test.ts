@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyListenReadResult } from "../harness/agent/src/listen-read-outcome.ts";
-import { reconcileStaleRun } from "../harness/agent/src/runs.ts";
+import { canReclaimRunLock, reconcileStaleRun } from "../harness/agent/src/runs.ts";
 import {
   createPipelineContext,
   sanitizeArtifactMediaForPublish,
@@ -156,6 +156,38 @@ describe("agent run stale-state reconciliation", () => {
 
     expect(changed).toBe(false);
     expect(state.status).toBe("running");
+  });
+});
+
+describe("agent run lock reclamation", () => {
+  test("keeps unknown active locks before the stale threshold", () => {
+    expect(
+      canReclaimRunLock(
+        {
+          run_id: "missing-run-state",
+          owner: "unit-test",
+          pid: 123,
+          acquiredAt: 1_000,
+        },
+        1_000 + 19 * 60 * 1000,
+        20 * 60 * 1000,
+      ),
+    ).toBe(false);
+  });
+
+  test("reclaims unknown locks after the stale threshold", () => {
+    expect(
+      canReclaimRunLock(
+        {
+          run_id: "missing-run-state",
+          owner: "unit-test",
+          pid: 123,
+          acquiredAt: 1_000,
+        },
+        1_000 + 21 * 60 * 1000,
+        20 * 60 * 1000,
+      ),
+    ).toBe(true);
   });
 });
 

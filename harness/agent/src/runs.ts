@@ -5,7 +5,16 @@
 // status; readRun/listRuns reconcile those stale records to error once their
 // last log heartbeat ages past config.runStaleMs.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.ts";
 import type { RunState, RunStatus, PublishedRef } from "./runner.ts";
@@ -23,6 +32,17 @@ export interface RunSummary {
   log?: string[];
 }
 
+export interface RunLock {
+  run_id: string;
+  owner: string;
+  pid: number;
+  acquiredAt: number;
+}
+
+export type RunLockResult =
+  | { ok: true; lock: RunLock }
+  | { ok: false; activeRunId: string; message: string };
+
 function runDir(runId: string): string {
   return join(config.runsDir, runId);
 }
@@ -31,9 +51,12 @@ function statusPath(runId: string): string {
   return join(runDir(runId), "status.json");
 }
 
+function lockPath(): string {
+  return join(config.runsDir, "agent-run.lock");
+}
+
 /** A fresh queued run record + its on-disk home. */
-export function createRun(): RunState {
-  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+export function createRun(runId = createRunId()): RunState {
   const state: RunState = {
     run_id: runId,
     status: "queued",
@@ -46,10 +69,112 @@ export function createRun(): RunState {
   return state;
 }
 
+export function createRunId(): string {
+  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /** Persist the run's current state (called after every stage). */
 export function writeRun(state: RunState): void {
   mkdirSync(runDir(state.run_id), { recursive: true, mode: 0o700 });
   writeFileSync(statusPath(state.run_id), JSON.stringify(state, null, 2) + "\n", "utf-8");
+}
+
+export function acquireRunLock(
+  runId: string,
+  owner: string,
+  now = Date.now(),
+): RunLockResult {
+  mkdirSync(config.runsDir, { recursive: true, mode: 0o700 });
+  const path = lockPath();
+  const lock: RunLock = {
+    run_id: runId,
+    owner,
+    pid: process.pid,
+    acquiredAt: now,
+  };
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let fd: number | null = null;
+    try {
+      fd = openSync(path, "wx", 0o600);
+      writeFileSync(fd, JSON.stringify(lock, null, 2) + "\n", "utf-8");
+      return { ok: true, lock };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const existing = readRunLock();
+      if (!existing) {
+        try {
+          unlinkSync(path);
+          continue;
+        } catch {
+          // A competing process may have already replaced it; report busy below.
+        }
+      }
+      const activeRunId = existing?.run_id ?? "unknown";
+      if (existing && canReclaimRunLock(existing, now)) {
+        try {
+          unlinkSync(path);
+          continue;
+        } catch {
+          // Another process may have removed/replaced it; fall through to busy.
+        }
+      }
+      return {
+        ok: false,
+        activeRunId,
+        message: `A run is already in progress (${activeRunId}).`,
+      };
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+  }
+
+  return {
+    ok: false,
+    activeRunId: readRunLock()?.run_id ?? "unknown",
+    message: "A run is already in progress.",
+  };
+}
+
+export function releaseRunLock(runId: string): void {
+  const existing = readRunLock();
+  if (!existing || existing.run_id !== runId) return;
+  try {
+    unlinkSync(lockPath());
+  } catch {
+    // best effort
+  }
+}
+
+export function readRunLock(): RunLock | null {
+  const path = lockPath();
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Partial<RunLock>;
+    if (
+      typeof parsed.run_id === "string" &&
+      typeof parsed.owner === "string" &&
+      typeof parsed.pid === "number" &&
+      typeof parsed.acquiredAt === "number"
+    ) {
+      return parsed as RunLock;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function canReclaimRunLock(
+  lock: RunLock,
+  now = Date.now(),
+  staleMs = config.runStaleMs,
+): boolean {
+  const state = isValidRunId(lock.run_id) ? readRun(lock.run_id) : null;
+  if (state) {
+    return state.status === "done" || state.status === "error";
+  }
+  return Number.isFinite(staleMs) && staleMs > 0 && now - lock.acquiredAt >= staleMs;
 }
 
 /** Read a run's state, or null if unknown. */

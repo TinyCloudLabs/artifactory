@@ -17,7 +17,14 @@ import {
   runPublishStage,
   type RunState,
 } from "../../harness/agent/src/runner.ts";
-import { createRun, readRun, writeRun } from "../../harness/agent/src/runs.ts";
+import {
+  acquireRunLock,
+  createRun,
+  createRunId,
+  readRun,
+  releaseRunLock,
+  writeRun,
+} from "../../harness/agent/src/runs.ts";
 
 const inputSchema = z.object({
   logTail: z.number().int().min(1).max(200).default(40),
@@ -44,6 +51,7 @@ const stageBaseSchema = z.object({
 
 const preflightSchema = stageBaseSchema.extend({
   hasDelegation: z.boolean(),
+  hasLock: z.boolean(),
   notes: z.array(z.string()),
 });
 
@@ -151,6 +159,7 @@ export default smithers((ctx) => {
   const shouldPublish = generate?.ok === true && generate.skipped === false;
   const terminal =
     preflight !== undefined &&
+    preflight.hasLock === true &&
     (preflight.ok === false ||
       listen?.listenStatus === "empty" ||
       listen?.listenStatus === "error" ||
@@ -162,12 +171,32 @@ export default smithers((ctx) => {
       <Sequence>
         <Task id="preflight" output={outputs.preflight}>
           {async () => {
-            const state = createRun();
             const notes = [
               "This staged workflow runs the same runner helpers as /agent/run, but exposes Smithers nodes for preflight, listen, generate, publish, and cleanup.",
-              "Operator/dev entry point only for now: the HTTP server still owns production /agent/run and has its own in-process serialization.",
+              "Operator/dev entry point only for now: it shares the cross-process run lock with production /agent/run, but the HTTP endpoint has not moved onto Smithers task execution yet.",
             ];
+            const runId = createRunId();
+            const lock = acquireRunLock(runId, "smithers-agent-run-staged");
+            if (!lock.ok) {
+              const state: RunState = {
+                run_id: lock.activeRunId,
+                status: "running",
+                published: [],
+                startedAt: Date.now(),
+                error: lock.message,
+                log: [`${new Date().toISOString()} ${lock.message}`],
+              };
+              return {
+                ...base("preflight", state, logTailMax, false),
+                hasDelegation: false,
+                hasLock: false,
+                notes: [...notes, "Another agent run already holds the shared run lock."],
+              };
+            }
+
+            let state: RunState | null = null;
             try {
+              state = createRun(runId);
               const session = await AgentSession.bootstrap();
               const active = session.getActive();
               if (!active) {
@@ -175,16 +204,29 @@ export default smithers((ctx) => {
                   state,
                   new Error("No active delegation found. Connect an agent from Feed or POST /agent/delegation first."),
                 );
-                return { ...base("preflight", state, logTailMax, false), hasDelegation: false, notes };
+                return { ...base("preflight", state, logTailMax, false), hasDelegation: false, hasLock: true, notes };
               }
               const pipe = createPipelineContext(active, state, writeRun);
               state.status = "running";
               pipe.step("run started");
               await prepareRunScratch(pipe);
-              return { ...base("preflight", state, logTailMax, true), hasDelegation: true, notes };
+              return { ...base("preflight", state, logTailMax, true), hasDelegation: true, hasLock: true, notes };
             } catch (err) {
+              if (!state) {
+                releaseRunLock(runId);
+                state = {
+                  run_id: runId,
+                  status: "error",
+                  published: [],
+                  startedAt: Date.now(),
+                  finishedAt: Date.now(),
+                  error: err instanceof Error ? err.message : String(err),
+                  log: [`${new Date().toISOString()} ERROR: ${err instanceof Error ? err.message : String(err)}`],
+                };
+                return { ...base("preflight", state, logTailMax, false), hasDelegation: false, hasLock: false, notes };
+              }
               markError(state, err);
-              return { ...base("preflight", state, logTailMax, false), hasDelegation: false, notes };
+              return { ...base("preflight", state, logTailMax, false), hasDelegation: false, hasLock: true, notes };
             }
           }}
         </Task>
@@ -284,7 +326,11 @@ export default smithers((ctx) => {
               if (!state) {
                 throw new Error(`Unknown agent run ${runId}`);
               }
-              await cleanupRunScratch(runId);
+              try {
+                await cleanupRunScratch(runId);
+              } finally {
+                releaseRunLock(runId);
+              }
               return { ...base("cleanup", state, logTailMax, state.status !== "error"), cleaned: true, published: state.published };
             }}
           </Task>

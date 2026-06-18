@@ -39,12 +39,13 @@ tc-publish`. It writes the usual `<AGENT_RUNS_DIR>/<run_id>/status.json` and
 returns a bounded log tail in the Smithers output.
 
 For now, treat `agent-run` as an operator/dev command, not the production HTTP
-control path. The HTTP server still serializes its own in-process runs, and this
-workflow does not yet share a cross-process run lock with the server. The next
-orchestration migration is to wire the exported runner stage helpers
-(`createPipelineContext`, `runListenReadStage`, `runGenerateStage`,
-`runPublishStage`) as separate Smithers tasks so each stage has independent
-retry, observability, and backpressure.
+control path. The HTTP server and Smithers workflows now share a disk-backed
+run lock in `AGENT_RUNS_DIR`, so only one delegated pipeline can use the mutable
+tc profile at a time across processes. The next orchestration migration is to
+wire the exported runner stage helpers (`createPipelineContext`,
+`runListenReadStage`, `runGenerateStage`, `runPublishStage`) as separate
+Smithers tasks so each stage has independent retry, observability, and
+backpressure.
 
 `agent-run-staged` is that first stage-level workflow. It is still an
 operator/dev entry point, but it breaks a run into Smithers nodes:

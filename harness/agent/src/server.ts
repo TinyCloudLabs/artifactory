@@ -19,7 +19,16 @@
 import { config } from "./config.ts";
 import { AgentSession, type ActiveDelegation } from "./session.ts";
 import { runPipeline, type RunState } from "./runner.ts";
-import { createRun, isValidRunId, listRuns, readRun, writeRun } from "./runs.ts";
+import {
+  acquireRunLock,
+  createRun,
+  createRunId,
+  isValidRunId,
+  listRuns,
+  readRun,
+  releaseRunLock,
+  writeRun,
+} from "./runs.ts";
 import { PERMISSIONS } from "./permissions.ts";
 import { ensureApiToken, tokenMatches } from "./api-token.ts";
 
@@ -83,10 +92,6 @@ function isAuthorized(req: Request): boolean {
 
 const session = await AgentSession.bootstrap();
 
-// Serialize runs: the pipeline writes to a per-run scratch dir but shares the
-// one delegated tc profile, so one run at a time keeps the session coherent.
-let runningRunId: string | null = null;
-
 async function handleInfo(req: Request): Promise<Response> {
   return json(req, 200, {
     did: session.agentDid,
@@ -143,14 +148,22 @@ async function handlePostRun(req: Request): Promise<Response> {
       error: { code: "no_delegation", message: "No delegation granted yet. POST /agent/delegation first." },
     });
   }
-  if (runningRunId) {
+  const runId = createRunId();
+  const lock = acquireRunLock(runId, "agent-http");
+  if (!lock.ok) {
     return json(req, 409, {
-      error: { code: "run_in_progress", message: `A run is already in progress (${runningRunId}).` },
+      error: { code: "run_in_progress", message: lock.message, run_id: lock.activeRunId },
     });
   }
 
-  const state = createRun();
-  runningRunId = state.run_id;
+  let state: RunState;
+  try {
+    state = createRun(runId);
+  } catch (err) {
+    releaseRunLock(runId);
+    const message = err instanceof Error ? err.message : String(err);
+    return json(req, 500, { error: { code: "run_create_failed", message } });
+  }
 
   // Fire-and-forget: the run executes in the background; the client polls
   // GET /agent/run/:id. Errors are captured into the run's status.json.
@@ -170,7 +183,7 @@ async function executeRun(state: RunState, active: ActiveDelegation): Promise<vo
     writeRun(state);
     console.error(`[agent] run ${state.run_id} failed:`, err);
   } finally {
-    if (runningRunId === state.run_id) runningRunId = null;
+    releaseRunLock(state.run_id);
   }
 }
 

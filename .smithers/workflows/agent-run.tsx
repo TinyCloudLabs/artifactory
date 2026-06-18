@@ -9,7 +9,7 @@ import { z } from "zod/v4";
 import { config } from "../../harness/agent/src/config.ts";
 import { AgentSession } from "../../harness/agent/src/session.ts";
 import { runPipeline, type RunState } from "../../harness/agent/src/runner.ts";
-import { createRun, writeRun } from "../../harness/agent/src/runs.ts";
+import { acquireRunLock, createRun, createRunId, releaseRunLock, writeRun } from "../../harness/agent/src/runs.ts";
 
 const inputSchema = z.object({
   logTail: z.number().int().min(1).max(200).default(40),
@@ -66,14 +66,32 @@ export default smithers((ctx) => (
     <Task id="run" output={outputs.agentRun} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
       {async () => {
         const logTail = typeof ctx.input.logTail === "number" ? ctx.input.logTail : 40;
-        const state = createRun();
+        const runId = createRunId();
+        const lock = acquireRunLock(runId, "smithers-agent-run");
+        if (!lock.ok) {
+          return summarize(
+            {
+              run_id: lock.activeRunId,
+              status: "running",
+              published: [],
+              startedAt: Date.now(),
+              error: lock.message,
+              log: [`${new Date().toISOString()} ${lock.message}`],
+            },
+            logTail,
+            ["Another agent run already holds the shared run lock."],
+          );
+        }
+
         const notes = [
           "This Smithers workflow reuses harness/agent/src/runner.ts so the current TinyCloud delegation and skill behavior stay identical to /agent/run.",
-          "Run it only as an operator/dev entry point for now; the HTTP server still serializes its own in-process runs, and this workflow does not yet share a cross-process lock with the server.",
+          "Run it only as an operator/dev entry point for now; it now shares the same cross-process run lock as the HTTP server.",
           "runner.ts now exports createPipelineContext plus listen-read/generate/publish stage helpers; the next migration step is wiring those helpers as separate Smithers tasks for stage-level retry/backpressure.",
         ];
 
+        let state: RunState | null = null;
         try {
+          state = createRun(runId);
           const session = await AgentSession.bootstrap();
           const active = session.getActive();
           if (!active) {
@@ -86,8 +104,25 @@ export default smithers((ctx) => (
           await runPipeline(active, state, writeRun);
           return summarize(state, logTail, notes);
         } catch (err) {
+          if (!state) {
+            return summarize(
+              {
+                run_id: runId,
+                status: "error",
+                published: [],
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+                error: err instanceof Error ? err.message : String(err),
+                log: [`${new Date().toISOString()} ERROR: ${err instanceof Error ? err.message : String(err)}`],
+              },
+              logTail,
+              notes,
+            );
+          }
           markError(state, err);
           return summarize(state, logTail, notes);
+        } finally {
+          releaseRunLock(runId);
         }
       }}
     </Task>
