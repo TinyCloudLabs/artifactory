@@ -40,6 +40,10 @@ function indexName(statement: string): string {
   return statement.match(/INDEX IF NOT EXISTS (\w+)/)?.[1] ?? statement;
 }
 
+function isDuplicateColumn(e: unknown): boolean {
+  return e instanceof TcCliError && /duplicate column name/i.test(e.message);
+}
+
 async function bootstrapDb(
   dbSpec: ArtifactDb,
   space: string | undefined,
@@ -48,6 +52,14 @@ async function bootstrapDb(
   // Tables are required — let TcCliError propagate (hard failure).
   for (const statement of dbSpec.tables) {
     await sqlExecute(statement, { db: dbSpec.db, space });
+  }
+  for (const statement of dbSpec.migrations) {
+    try {
+      await sqlExecute(statement, { db: dbSpec.db, space });
+    } catch (e) {
+      if (isDuplicateColumn(e)) continue;
+      throw e;
+    }
   }
   // Indexes are best-effort: the node's SQLite authorizer rejects CREATE
   // INDEX. Attempt each; on the known "not authorized" rejection, record and

@@ -67,6 +67,7 @@ try {
   );
   if (result.heroKey) console.log(`  hero  → ${result.heroKey}`);
   if (result.audioKey) console.log(`  audio → ${result.audioKey}`);
+  if (result.videoKey) console.log(`  video → ${result.videoKey}`);
   console.log(`  feed row upserted (changes=${result.sqlChanges})`);
 } catch (e) {
   if (e instanceof TcCliError) {

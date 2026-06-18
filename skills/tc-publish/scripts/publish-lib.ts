@@ -5,7 +5,7 @@
 // `applications` space:
 //   1. validateArtifact(raw) must pass (reuse artifact.ts — no re-validation here).
 //   2. render_type = renderTypeFor(raw.type) (§4.2 pure mapping).
-//   3. Media → KV FIRST (Codex non-atomicity fix): base64 the hero/audio bytes,
+//   3. Media → KV FIRST (Codex non-atomicity fix): base64 the hero/audio/video bytes,
 //      kv.put under media/<id>/…, capture key + sha256 + mime.
 //   4. SQL INSERT … ON CONFLICT(id) DO UPDATE into `feed` — typed columns +
 //      raw_artifact; immutable fields (id, generated_at, raw_artifact) excluded
@@ -55,6 +55,9 @@ const MIME_BY_EXT: Record<string, string> = {
   wav: "audio/wav",
   m4a: "audio/mp4",
   ogg: "audio/ogg",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
 };
 
 function mimeForFile(name: string): string {
@@ -86,6 +89,7 @@ export interface PublishResult {
   slug: string;
   heroKey?: string;
   audioKey?: string;
+  videoKey?: string;
   sqlChanges: number;
 }
 
@@ -113,13 +117,15 @@ const UPSERT_SQL = `INSERT INTO artifact (
   id, type, render_type, slug, headline, body_md, quote, attribution,
   tags, source_transcripts,
   hero_image_key, hero_image_sha256, hero_image_mime,
-  audio_key, audio_sha256, audio_mime, video_url,
+  audio_key, audio_sha256, audio_mime,
+  video_key, video_sha256, video_mime, video_url,
   audience, approval_status, platform,
   generation_model, critic_pass, quotes_verified,
   raw_artifact, generated_at, published_at, publisher_did, schema_version
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?,
+  ?, ?, ?,
   ?, ?, ?,
   ?, ?, ?, ?,
   ?, ?, ?,
@@ -142,6 +148,9 @@ ON CONFLICT(id) DO UPDATE SET
   audio_key = excluded.audio_key,
   audio_sha256 = excluded.audio_sha256,
   audio_mime = excluded.audio_mime,
+  video_key = excluded.video_key,
+  video_sha256 = excluded.video_sha256,
+  video_mime = excluded.video_mime,
   video_url = excluded.video_url,
   audience = excluded.audience,
   approval_status = excluded.approval_status,
@@ -182,6 +191,10 @@ export async function publishArtifact(
   if (artifact.audio) {
     audio = await publishMedia(artifactDir, artifact.id, artifact.audio, opts.space);
   }
+  let video: MediaPointer | undefined;
+  if (artifact.video) {
+    video = await publishMedia(artifactDir, artifact.id, artifact.video, opts.space);
+  }
 
   const target: SqlTarget = { db: FEED_DB, space: opts.space };
   const nowIso = new Date().toISOString();
@@ -212,7 +225,10 @@ export async function publishArtifact(
     audio?.key ?? null,
     audio?.sha256 ?? null,
     audio?.mime ?? null,
-    null, // video_url — V1 defers video
+    video?.key ?? null,
+    video?.sha256 ?? null,
+    video?.mime ?? null,
+    artifact.video_url ?? null,
     artifact.audience ?? null,
     PUBLISHED_APPROVAL_STATUS, // §9.1: feed-only V1, no DEFAULT, no gate
     artifact.platform ?? null,
@@ -234,6 +250,7 @@ export async function publishArtifact(
     slug,
     heroKey: hero?.key,
     audioKey: audio?.key,
+    videoKey: video?.key,
     sqlChanges: res.changes,
   };
 }

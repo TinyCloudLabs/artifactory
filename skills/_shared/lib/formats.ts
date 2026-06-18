@@ -15,6 +15,7 @@ export const ARTIFACT_TYPES = [
   "insight-card",
   "article",
   "podcast",
+  "clip",
   // Multi-thread roundup: shorter than an article (~300-500 words), weaves
   // 2-3 related threads from across the corpus. Internal — always publishes.
   "digest",
@@ -69,6 +70,7 @@ export const FORMAT_REGISTRY = {
   "insight-card": { label: "Insight", outward: false, miner: "extract-insights", explorable: true, render: "article" },
   article: { label: "Article", outward: false, miner: "write-article", explorable: true, render: "article" },
   podcast: { label: "Podcast", outward: false, miner: "make-podcast", explorable: true, render: "article" },
+  clip: { label: "Clip", outward: false, miner: "make-clip", explorable: false, render: "video" },
   digest: { label: "Digest", outward: false, miner: "write-digest", explorable: true, render: "article" },
   "social-post": { label: "Social post", outward: true, miner: "banger-extractor", explorable: false, render: "tweet" },
   "investor-update-snippet": { label: "Investor snippet", outward: true, miner: "investor-snippet", explorable: false, render: "tweet" },

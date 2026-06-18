@@ -113,7 +113,8 @@ function run(cmd: string, args: string[], mode: EnvMode = "sandbox"): Promise<Sp
 // The generate child reads untrusted Listen transcripts; a prompt-injected
 // transcript shouldn't be able to exfiltrate env secrets or casually shell out.
 // buildGenerateEnv gives it ONLY what `claude -p` + the skill scripts (run via
-// `bun`) + the optional Gemini hero genuinely need. NOTE: `bun` and `tc` live in
+// `bun`) + optional media providers genuinely need. FAL_KEY is passed only when
+// AGENT_ENABLE_VIDEO=1 because make-clip is slower and spend-bearing. NOTE: `bun` and `tc` live in
 // the SAME dir (~/.bun/bin), so PATH can't drop `tc` without losing `bun`; the
 // real `tc`/arbitrary-Bash guardrail is the claude --allowedTools/--disallowedTools
 // restriction in buildGenerationArgs (no unrestricted Bash). Filesystem reads of
@@ -132,8 +133,8 @@ function generatePath(): string {
 /**
  * The scrubbed env for the generate child. Starts from a small fixed base, then
  * adds ONLY allowlisted passthroughs — never the full process.env. Two groups:
- *  1. model-provider creds the generate step legitimately uses (claude's key +
- *     the optional Gemini key);
+ *  1. model-provider creds the generate step legitimately uses (claude's key,
+ *     the optional Gemini key, and gated FAL video key);
  *  2. the per-user session vars macOS needs for `claude` to reach its login
  *     token in the Keychain (USER/LOGNAME/__CF_USER_TEXT_ENCODING + the real
  *     per-user TMPDIR). Without these, `claude -p` reports "Not logged in"
@@ -156,6 +157,7 @@ function buildGenerateEnv(): Record<string, string> {
     "GOOGLE_AI_API_KEY",
     "GOOGLE_API_KEY",
     "AGENT_GEN_MODEL",
+    "AGENT_ENABLE_VIDEO",
     // (2) macOS keychain-session vars (so claude finds its login token)
     "USER",
     "LOGNAME",
@@ -164,6 +166,9 @@ function buildGenerateEnv(): Record<string, string> {
   for (const k of ALLOW) {
     const v = process.env[k];
     if (typeof v === "string" && v.length > 0) env[k] = v;
+  }
+  if (process.env.AGENT_ENABLE_VIDEO === "1" && process.env.FAL_KEY) {
+    env.FAL_KEY = process.env.FAL_KEY;
   }
   return env;
 }
@@ -287,6 +292,23 @@ function buildGenerationArgs(
   artifactsDir: string,
   transcripts: string[],
 ): string[] {
+  const videoEnabled = process.env.AGENT_ENABLE_VIDEO === "1" && Boolean(process.env.FAL_KEY);
+  const videoStep = videoEnabled
+    ? [
+        "4. OPTIONAL CLIP (make-clip): only if the corpus contains one unusually",
+        "   visual, emotionally legible reversal worth spending video on. Read",
+        "   skills/make-clip/SKILL.md and follow its speculative mode. Produce at",
+        "   most ONE contract-valid `clip` artifact with `video` set to the",
+        "   captioned mp4 file name and `hero_image` set to poster.png. Use",
+        "   --out-dir " + artifactsDir + " when saving. Zero clips is valid and",
+        "   preferred over a mediocre clip.",
+        "5. CRITIC (no human gate): re-read each saved artifact as a skeptical editor",
+      ]
+    : [
+        "4. VIDEO SKIPPED: do NOT run make-clip in this run. It requires",
+        "   AGENT_ENABLE_VIDEO=1 and FAL_KEY because it is slower and spend-bearing.",
+        "5. CRITIC (no human gate): re-read each saved artifact as a skeptical editor",
+      ];
   const system = [
     "You are the distillery agent-run GENERATION agent, invoked headlessly.",
     "Distill the fetched Listen transcripts into feed artifacts. Judgment is",
@@ -315,7 +337,7 @@ function buildGenerationArgs(
     "   local image file you place in the artifact dir (skip illustrate-card if no",
     "   Gemini key) →  bun skills/write-article/scripts/save.ts <artifact.json> " +
       `--out-dir ${artifactsDir}`,
-    "4. CRITIC (no human gate): re-read each saved artifact as a skeptical editor",
+    ...videoStep,
     "   AND a security reviewer — non-obvious value, leak-safe, no AI-slop, every",
     "   claim anchored to a VERIFIED verbatim quote. DELETE (rm -rf its dir under",
     `   ${artifactsDir}) any artifact that fails. Survivors stay.`,
@@ -330,7 +352,8 @@ function buildGenerationArgs(
 
   const user =
     `Distill the ${transcripts.length} transcript(s) in ${corpusDir} into one tweet ` +
-    `and one article, save the survivors under ${artifactsDir} (do NOT publish), ` +
+    `and one article${videoEnabled ? ", plus at most one excellent clip if justified" : ""}, ` +
+    `save the survivors under ${artifactsDir} (do NOT publish), ` +
     `then print a one-line summary.`;
 
   // TOOL POSTURE (defense-in-depth — see the run() "generate" doc for the honest

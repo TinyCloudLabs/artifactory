@@ -61,6 +61,9 @@ export interface Artifact {
   /** Media file names relative to the artifact's own folder. */
   hero_image?: string;
   audio?: string;
+  video?: string;
+  /** Optional externally hosted video fallback; TinyCloud-native clips use video. */
+  video_url?: string;
   generated_at: string; // ISO 8601
   generation_model?: string;
   quality: ArtifactQuality;
@@ -124,7 +127,7 @@ export function validateArtifact(value: unknown): ValidationResult {
     errors.push("source_transcripts: required non-empty array of paths");
   }
 
-  for (const key of ["body", "quote", "attribution", "hero_image", "audio", "generation_model", "platform"]) {
+  for (const key of ["body", "quote", "attribution", "hero_image", "audio", "video", "video_url", "generation_model", "platform"]) {
     optString(key);
   }
 
