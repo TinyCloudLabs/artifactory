@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feed / Artifactory Change Checkpoints</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #171a1d;
+      --line: #2d3338;
+      --text: #f1eee8;
+      --muted: #a8a19a;
+      --accent: #ff4d42;
+      --ok: #33c481;
+      --warn: #f6b44b;
+      --code: #d8d2c8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    main {
+      width: min(1120px, calc(100vw - 48px));
+      margin: 40px auto 72px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    h1, h2, h3 { line-height: 1.1; margin: 0; }
+    h1 {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(40px, 6vw, 76px);
+      letter-spacing: 0;
+    }
+    h2 {
+      margin-top: 36px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      font-size: 22px;
+    }
+    h3 { font-size: 17px; }
+    p { color: var(--muted); max-width: 82ch; }
+    .meta {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 10px 12px;
+    }
+    .pill strong { color: var(--text); }
+    .note {
+      border-left: 3px solid var(--warn);
+      background: #1c1913;
+      padding: 12px 14px;
+      color: var(--text);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      color: var(--code);
+      background: #0c0d0f;
+      border: 1px solid var(--line);
+      padding: 2px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .hash { color: var(--accent); font-weight: 700; }
+    .status-ok { color: var(--ok); }
+    .status-wip { color: var(--warn); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 16px;
+    }
+    .card p { margin: 8px 0 0; }
+    ul { padding-left: 18px; color: var(--muted); }
+    li { margin: 6px 0; }
+    .small { font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="small">Generated from local git state in /Users/hunterhorsfall/Feed Modules</p>
+      <h1>Feed / Artifactory Checkpoints</h1>
+      <p>
+        This report lists the local PR-style checkpoints made while routing the old
+        distillery behavior into the new Artifactory plus Feed development path.
+        No GitHub PRs were opened from this workspace during this pass; these are
+        commits ahead of each repo's <code>origin/main</code>, plus one current WIP file.
+      </p>
+      <div class="meta">
+        <div class="pill"><strong>Artifactory:</strong> 11 commits ahead of origin/main</div>
+        <div class="pill"><strong>Feed:</strong> 3 commits ahead of origin/main</div>
+        <div class="pill"><strong>Latest checkpoint:</strong> staged Smithers workflow</div>
+        <div class="pill"><strong>Validated recently:</strong> tests, TS, Smithers graph</div>
+      </div>
+    </header>
+
+    <section>
+      <h2>Current Shape</h2>
+      <div class="cards">
+        <article class="card">
+          <h3>Feed</h3>
+          <p>HTTPS local UI via Portless, dev env loading from repo root, and agent run progress logs surfaced in the Agents page.</p>
+        </article>
+        <article class="card">
+          <h3>Artifactory Agent</h3>
+          <p>Reads Listen transcripts, generates artifacts, holds approval-gated drafts, publishes safe artifacts, and reconciles stale runs.</p>
+        </article>
+        <article class="card">
+          <h3>Smithers</h3>
+          <p>Dev-mode workflow, agent-run bridge, exported runner stage helpers, and WIP staged workflow for node-level observability.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Artifactory Checkpoints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Commit</th>
+            <th>Title</th>
+            <th>Why It Matters</th>
+            <th>Inspect</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="hash">b8173c7</span></td>
+            <td>Surface Listen read failures in agent runs</td>
+            <td>Stops auth/TinyCloud failures from being misreported as empty Listen data.</td>
+            <td><code>harness/agent/src/listen-read-outcome.ts</code>, <code>runner.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">f13298d</span></td>
+            <td>Read inline Listen transcripts in agent</td>
+            <td>Lets Artifactory read Listen rows that store transcript_json or transcript_text instead of KV blobs.</td>
+            <td><code>skills/tc-listen-read/scripts/listen-read-lib.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">6961fb4</span></td>
+            <td>Hold approval-gated agent drafts</td>
+            <td>Keeps public/investor/outward drafts from being published without the approval surface.</td>
+            <td><code>harness/agent/src/runner.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">ce81b6d</span></td>
+            <td>Expose bounded agent run logs</td>
+            <td>Gives Feed bounded run log tails for progress and debugging.</td>
+            <td><code>harness/agent/src/server.ts</code>, <code>runs.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">de959c3</span></td>
+            <td>Add Smithers dev workflow pack</td>
+            <td>Adds local Smithers workflows and dev-mode checks for Feed plus agent development.</td>
+            <td><code>.smithers/</code>, <code>scripts/artifact-agent-dev-https.sh</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">bbc8056</span></td>
+            <td>Clarify Portless sandbox probe results</td>
+            <td>Classifies sandbox-localhost failures as blocked rather than falsely blaming Portless.</td>
+            <td><code>.smithers/workflows/feed-dev-mode.tsx</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">687234e</span></td>
+            <td>Preflight optional artifact hero media</td>
+            <td>Strips missing/unsafe/non-image hero references before publish and logs the action.</td>
+            <td><code>harness/agent/src/runner.ts</code>, <code>tests/agent-runner.test.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">7299b97</span></td>
+            <td>Add Smithers agent run bridge</td>
+            <td>Adds <code>smithers:agent-run</code>, reusing the current delegated runner inside Smithers.</td>
+            <td><code>.smithers/workflows/agent-run.tsx</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">2559d02</span></td>
+            <td>Expose agent runner stage helpers</td>
+            <td>Carves the runner into reusable preflight/listen/generate/publish helpers for staged orchestration.</td>
+            <td><code>harness/agent/src/runner.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">cfad81b</span></td>
+            <td>Reconcile stale agent runs</td>
+            <td>Converts abandoned queued/running status files to errors after the stale threshold so Feed does not show dead runs forever.</td>
+            <td><code>harness/agent/src/runs.ts</code>, <code>config.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">26fbdf7</span></td>
+            <td>Add staged Smithers agent workflow</td>
+            <td>Adds <code>smithers:agent-run:staged</code>, breaking agent runs into preflight, listen, generate, publish, and cleanup workflow nodes.</td>
+            <td><code>.smithers/workflows/agent-run-staged.tsx</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Feed Checkpoints</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Commit</th>
+            <th>Title</th>
+            <th>Why It Matters</th>
+            <th>Inspect</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="hash">76e86c6</span></td>
+            <td>Document HTTPS local agent development</td>
+            <td>Adds Portless local HTTPS development path and Feed agent config docs.</td>
+            <td><code>README.md</code>, <code>web/src/agentConfig.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">6b3b56b</span></td>
+            <td>Load feed dev env from repo root</td>
+            <td>Makes Vite load <code>.env.local</code> correctly even though the app root is <code>web</code>.</td>
+            <td><code>vite.config.ts</code></td>
+          </tr>
+          <tr>
+            <td><span class="hash">08b46b0</span></td>
+            <td>Show agent run progress in Feed</td>
+            <td>Surfaces run status/log tails/history in the Feed Agents UI and fixes dev DID override behavior.</td>
+            <td><code>web/src/pages/Agents.tsx</code>, <code>web/src/useAgentBuild.ts</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Latest Checkpoint</h2>
+      <p class="note">
+        <span class="status-wip">Newest local checkpoint:</span>
+        <code>artifactory/.smithers/workflows/agent-run-staged.tsx</code>.
+        This is the next Smithers step: separate preflight, Listen-read,
+        generate, publish, and cleanup nodes while reusing the runner helpers.
+      </p>
+    </section>
+
+    <section>
+      <h2>Validation Evidence</h2>
+      <ul>
+        <li><span class="status-ok">Artifactory:</span> <code>bun test tests/agent-runner.test.ts tests/listen-read-lib.test.ts</code></li>
+        <li><span class="status-ok">Artifactory:</span> <code>bunx tsc --noEmit</code></li>
+        <li><span class="status-ok">Smithers:</span> <code>bun run typecheck</code> in <code>.smithers</code></li>
+        <li><span class="status-ok">Stale run cleanup:</span> <code>run-1781811131857-3r6pbz</code> is now <code>error</code>, not <code>running</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Useful Commands</h2>
+      <ul>
+        <li><code>cd artifactory && git log --oneline origin/main..HEAD</code></li>
+        <li><code>cd feed && git log --oneline origin/main..HEAD</code></li>
+        <li><code>cd artifactory && bun run smithers:dev-mode</code></li>
+        <li><code>cd artifactory && bun run smithers:agent-run</code></li>
+        <li><code>cd artifactory && bun run smithers:agent-run:staged</code></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
