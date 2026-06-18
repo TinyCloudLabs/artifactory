@@ -126,8 +126,8 @@
       </p>
       <div class="meta">
         <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>cb9c1ee</code></div>
-        <div class="pill"><strong>Feed:</strong> 8 commits ahead of origin/main through <code>f296ea1</code></div>
-        <div class="pill"><strong>Latest functional checkpoint:</strong> Feed guards invalid locked run attachments</div>
+        <div class="pill"><strong>Feed:</strong> 9 commits ahead of origin/main through <code>13853c5</code></div>
+        <div class="pill"><strong>Latest functional checkpoint:</strong> Feed surfaces run lock fetch failures</div>
         <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS</div>
       </div>
     </header>
@@ -316,6 +316,12 @@
             <td>Prevents Feed from polling malformed or unknown run ids returned by a held backend lock; it surfaces the lock-held error instead.</td>
             <td><code>web/src/agentClient.ts</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">13853c5</span></td>
+            <td>Surface run lock fetch failures</td>
+            <td>Keeps active-run resume compatible with older backends while making the operator-facing Run lock section fail loud on network errors.</td>
+            <td><code>web/src/agentClient.ts</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -324,10 +330,10 @@
       <h2>Latest Checkpoint</h2>
       <p class="note">
         <span class="status-ok">Newest local checkpoint:</span>
-        <code>f296ea1 Guard invalid locked run attachments</code>.
-        Feed attaches to backend <code>run_in_progress</code> responses only when
-        the returned id is a valid server-minted run id; otherwise it surfaces the
-        lock-held error so recovery stays visible.
+        <code>13853c5 Surface run lock fetch failures</code>.
+        Feed still soft-degrades cold-start run detection for older backends, but
+        the operator-facing Run lock section now reports network failures instead
+        of rendering them as no active lock.
       </p>
     </section>
 
@@ -339,6 +345,7 @@
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:list</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:doctor</code></li>
         <li><span class="status-ok">Feed:</span> <code>bun run typecheck</code></li>
+        <li><span class="status-ok">Feed:</span> <code>bun run build</code></li>
         <li><span class="status-ok">Stale run cleanup:</span> <code>run-1781811131857-3r6pbz</code> is now <code>error</code>, not <code>running</code>.</li>
       </ul>
     </section>
