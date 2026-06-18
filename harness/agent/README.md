@@ -173,13 +173,17 @@ connect) — otherwise publish errors with "no such table: artifact".
 
 This repo now carries a local Smithers workflow pack under `.smithers/` for
 durable development workflows, backpressure planning, and run triage. The
-production `/agent/run` endpoint still executes the pipeline directly through
-`runner.ts`; migrating that endpoint onto a bespoke Smithers `agent-run`
-workflow is the next orchestration step. For local development checks, run:
+`agent-run` workflow is a bridge that imports `runner.ts`, restores the
+persisted delegation, and runs the same skill chain as `/agent/run` while
+recording Smithers workflow state. The production `/agent/run` endpoint still
+executes the pipeline directly through `runner.ts`; migrating that endpoint onto
+stage-level Smithers tasks is the next orchestration step. For local development
+checks, run:
 
 ```sh
 bun run smithers:doctor
 bun run smithers:dev-mode
+bun run smithers:agent-run
 ```
 
 ## Runtime state — TWO separate roots, both outside the repo, dir mode `0700`

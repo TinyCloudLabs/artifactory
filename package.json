@@ -17,6 +17,7 @@
     "smithers:doctor": "bunx smithers-orchestrator workflow doctor",
     "smithers:list": "bunx smithers-orchestrator workflow list",
     "smithers:dev-mode": "bunx smithers-orchestrator workflow run feed-dev-mode",
+    "smithers:agent-run": "bunx smithers-orchestrator workflow run agent-run",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },

@@ -9,6 +9,7 @@ Useful commands:
 bun run smithers:doctor
 bun run smithers:list
 bun run smithers:dev-mode
+bun run smithers:agent-run
 ```
 
 `feed-dev-mode` probes the current local development setup:
@@ -28,6 +29,20 @@ Start the two surfaces with:
 cd ../feed && PORTLESS_PORT=1355 bun run dev
 cd ../artifactory && AGENT_API_TOKEN=local-claude-dev PORTLESS_PORT=1355 bun run artifact:agent:dev:https
 ```
+
+`agent-run` is the first workflow bridge for the real transcript-to-artifact
+pipeline. It reuses `harness/agent/src/runner.ts` and the persisted TinyCloud
+delegation, so it executes the same skill chain as `/agent/run`:
+`tc-listen-read → generate via SKILL.md instructions → media preflight →
+tc-publish`. It writes the usual `<AGENT_RUNS_DIR>/<run_id>/status.json` and
+returns a bounded log tail in the Smithers output.
+
+For now, treat `agent-run` as an operator/dev command, not the production HTTP
+control path. The HTTP server still serializes its own in-process runs, and this
+workflow does not yet share a cross-process run lock with the server. The next
+orchestration migration is to split the current runner stages into separate
+Smithers tasks so each stage has independent retry, observability, and
+backpressure.
 
 The generated Smithers pack intentionally keeps secrets out of git. Local API
 keys are a development bridge only; the target home is TinyCloud Secret Manager.
