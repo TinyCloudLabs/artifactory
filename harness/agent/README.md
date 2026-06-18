@@ -98,7 +98,8 @@ Env (all optional):
 The generate step spawns `claude -p`, so `claude` must be on PATH (and logged
 in). An optional Gemini key (`GOOGLE_AI_API_KEY` / `GEMINI_API_KEY` /
 `GOOGLE_API_KEY`) lets the article get an illustrated hero; without one the
-generation agent uses a local image.
+generation agent must leave `hero_image` unset rather than creating a fallback
+placeholder.
 
 ## How the delegation threads into the skills (no skill changes)
 
@@ -147,10 +148,16 @@ delegation, into a per-run scratch dir (`<AGENT_RUNS_DIR>/<id>/`):
    transcripts into the run's corpus. **Empty-Listen-safe:** 0 transcripts →
    the run completes with 0 artifacts (valid), skipping generate + publish.
 2. **generate** — headless `claude -p` distills one tweet (banger-extractor) and
-   one article (write-article + hero) into the run's artifacts dir, with an
-   adversarial critic + verify-quotes gate (no human approval, per §9).
+   one article (write-article, optionally illustrated by Gemini/illustrate-card)
+   into the run's artifacts dir, with an adversarial critic + verify-quotes gate
+   (no human approval, per §9).
 3. **publish** — `tc-publish/publish.ts` upserts each survivor to the user's
    `xyz.tinycloud.artifacts` (KV media + SQL feed row, `approval_status='approved'`).
+
+Before publish, the runner preflights optional `hero_image` references. Empty,
+unsafe, missing, or non-image hero files are stripped from `artifact.json` and
+logged in the run status so the article can still publish without a broken Feed
+image. Audio/video media remain fail-fast in `tc-publish`.
 
 **Publish-only — no schema bootstrap (team decision, 2026-06-14).** The agent's
 delegation is intentionally minimal: Listen `[read]`, `artifacts/feed`

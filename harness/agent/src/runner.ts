@@ -1,7 +1,7 @@
 // runner.ts — the run-under-delegation pipeline (MVP). Executes the artifact
-// pipeline's stages as DIRECT skill-script invocations (Smithers is authored in
-// .smithers/workflows/agent-run.tsx but blocked by a 0.20.4↔0.22.0 React-version
-// skew — see that file), all scoped to the user's delegation:
+// pipeline's stages as direct skill-script invocations. The repo carries
+// Smithers dev workflows, but the production HTTP endpoint still uses this
+// runner until a bespoke Smithers agent-run workflow replaces it.
 //
 //   listen-read → generate → publish        (PUBLISH-ONLY — see below)
 //
@@ -30,8 +30,8 @@
 // Any tc/auth/space failure must surface as an error; masking a 401 as "empty"
 // destroys the operator's ability to fix the delegation.
 
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join } from "node:path";
 import { spawn } from "node:child_process";
 import { config } from "./config.ts";
 import type { ActiveDelegation } from "./session.ts";
@@ -310,6 +310,11 @@ export async function runPipeline(
   const artifactRoutes = await listArtifactRoutes(artifactsDir);
   const publishable = artifactRoutes.filter((route) => route.publish);
   const drafts = artifactRoutes.filter((route) => !route.publish);
+  for (const route of artifactRoutes) {
+    for (const warning of route.mediaWarnings ?? []) {
+      step(`artifact media: ${route.type}/${route.slug}: ${warning}`);
+    }
+  }
   step(
     `publish: ${publishable.length} artifact(s) to the user's space; ` +
       `${drafts.length} draft(s) held for approval`,
@@ -387,9 +392,10 @@ function buildGenerationArgs(
       `--out-dir ${artifactsDir}`,
     "   Aim for one; zero is valid ONLY if no line genuinely clears the bar.",
     "3. ARTICLE (write-article): draft a contract-valid article (non-empty body,",
-    "   >=1 verified quote) → verify-quotes --stamp → set a hero_image to a real",
-    "   local image file you place in the artifact dir (skip illustrate-card if no",
-    "   Gemini key) →  bun skills/write-article/scripts/save.ts <artifact.json> " +
+    "   >=1 verified quote) → verify-quotes --stamp → leave hero_image unset",
+    "   unless you successfully run illustrate-card/Gemini and have a real local",
+    "   image file in the artifact dir. Do not create placeholder/fallback",
+    "   graphics. Then: bun skills/write-article/scripts/save.ts <artifact.json> " +
       `--out-dir ${artifactsDir}`,
     ...videoStep,
     "   AND a security reviewer — non-obvious value, leak-safe, no AI-slop, every",
@@ -535,6 +541,7 @@ interface ArtifactRoute {
   approval_status?: string;
   publish: boolean;
   reason?: string;
+  mediaWarnings?: string[];
 }
 
 function isArtifactType(type: string): type is ArtifactType {
@@ -568,13 +575,14 @@ export function shouldPublishArtifact(input: {
 
 async function readArtifactRoute(dir: string): Promise<ArtifactRoute | null> {
   try {
-    const raw = await readFile(join(dir, "artifact.json"), "utf8");
-    const artifact = JSON.parse(raw) as {
+    const artifact = JSON.parse(await readFile(join(dir, "artifact.json"), "utf8")) as {
       type?: unknown;
       slug?: unknown;
       audience?: unknown;
       approval_status?: unknown;
-    };
+      hero_image?: unknown;
+    } & Record<string, unknown>;
+    const mediaWarnings = await sanitizeArtifactMediaForPublish(dir, artifact);
     const fallback = await readArtifactRef(dir);
     const type =
       typeof artifact.type === "string" ? artifact.type : fallback?.type ?? "unknown";
@@ -595,10 +603,98 @@ async function readArtifactRoute(dir: string): Promise<ArtifactRoute | null> {
       approval_status,
       publish: decision.publish,
       reason: decision.reason,
+      mediaWarnings,
     };
   } catch {
     return null;
   }
+}
+
+export async function sanitizeArtifactMediaForPublish(
+  dir: string,
+  artifact: Record<string, unknown>,
+): Promise<string[]> {
+  const warnings: string[] = [];
+  if (!Object.prototype.hasOwnProperty.call(artifact, "hero_image")) {
+    return warnings;
+  }
+
+  const stripHero = (reason: string) => {
+    delete artifact.hero_image;
+    warnings.push(`hero_image stripped: ${reason}`);
+  };
+
+  const hero = artifact.hero_image;
+  if (typeof hero !== "string" || hero.trim().length === 0) {
+    stripHero("empty or non-string value");
+  } else {
+    const unsafeReason = unsafeMediaFileName(hero);
+    if (unsafeReason) {
+      stripHero(unsafeReason);
+    } else {
+      let bytes: Uint8Array | undefined;
+      try {
+        bytes = new Uint8Array(await readFile(join(dir, hero)));
+      } catch {
+        stripHero(`missing file ${JSON.stringify(hero)}`);
+      }
+      if (bytes && !isSupportedImage(hero, bytes)) {
+        stripHero(`unsupported or invalid image bytes ${JSON.stringify(hero)}`);
+      }
+    }
+  }
+
+  if (warnings.length > 0) {
+    await writeFile(join(dir, "artifact.json"), `${JSON.stringify(artifact, null, 2)}\n`);
+  }
+  return warnings;
+}
+
+function unsafeMediaFileName(name: string): string | null {
+  if (name !== name.trim()) return `unsafe media file name ${JSON.stringify(name)}`;
+  if (
+    isAbsolute(name) ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name === "." ||
+    name === ".." ||
+    basename(name) !== name
+  ) {
+    return `unsafe media file name ${JSON.stringify(name)}`;
+  }
+  return null;
+}
+
+function isSupportedImage(name: string, bytes: Uint8Array): boolean {
+  const ext = name.split(".").pop()?.toLowerCase();
+  if (ext === "png") {
+    return (
+      bytes.length >= 24 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    );
+  }
+  if (ext === "jpg" || ext === "jpeg") {
+    return bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8;
+  }
+  if (ext === "webp") {
+    return (
+      bytes.length >= 12 &&
+      String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+      String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+    );
+  }
+  if (ext === "gif") {
+    const header = String.fromCharCode(...bytes.slice(0, 6));
+    return bytes.length >= 10 && (header === "GIF87a" || header === "GIF89a");
+  }
+  return false;
 }
 
 async function listArtifactRoutes(artifactsDir: string): Promise<ArtifactRoute[]> {
