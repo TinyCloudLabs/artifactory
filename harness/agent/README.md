@@ -164,12 +164,16 @@ writes `interactions`, preserving the §1 reader-write / agent-read split.
 **Precondition:** the feed table must already exist (front-end bootstrap on
 connect) — otherwise publish errors with "no such table: artifact".
 
-The Smithers form of this flow is authored at
-`.smithers/workflows/agent-run.tsx` (phase-2 target). It is **not yet runnable**
-via `smithers up` on this branch: the local `.smithers` orchestrator pins
-`smithers-orchestrator ^0.20.4` while the global CLI is `0.22.0` (a React-version
-skew that blocks `graph`/`run`). Until the versions align, `/agent/run` runs the
-same stages directly (`runner.ts`).
+This repo now carries a local Smithers workflow pack under `.smithers/` for
+durable development workflows, backpressure planning, and run triage. The
+production `/agent/run` endpoint still executes the pipeline directly through
+`runner.ts`; migrating that endpoint onto a bespoke Smithers `agent-run`
+workflow is the next orchestration step. For local development checks, run:
+
+```sh
+bun run smithers:doctor
+bun run smithers:dev-mode
+```
 
 ## Runtime state — TWO separate roots, both outside the repo, dir mode `0700`
 

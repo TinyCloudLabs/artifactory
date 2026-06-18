@@ -1,0 +1,30 @@
+{
+  "name": "smithers-workflows",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "smithers workflow list >/dev/null && smithers graph workflows/feed-dev-mode.tsx >/dev/null",
+    "gateway": "bun ./gateway.ts",
+    "workflow:list": "smithers workflow list",
+    "workflow:run": "smithers workflow run",
+    "workflow:implement": "smithers workflow implement",
+    "workflow:inspect": "smithers workflow inspect",
+    "workflow:skills": "smithers workflow skills"
+  },
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "smithers-orchestrator": "^0.24.2",
+    "zod": "4.4.3"
+  },
+  "overrides": {
+    "@tanstack/db": "0.6.8"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/mdx": "2.0.14",
+    "@types/node": "25.6.0"
+  }
+}

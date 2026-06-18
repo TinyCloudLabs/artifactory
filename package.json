@@ -10,8 +10,13 @@
     "artifact:frontend": "bash scripts/artifact-feed-dev.sh",
     "artifact:frontend:check": "bash scripts/artifact-feed-check.sh",
     "artifact:backend": "bash scripts/artifact-distillery-backend.sh",
+    "artifact:agent:dev:https": "bunx portless run --name agent.feed bash scripts/artifact-agent-dev-https.sh",
+    "artifact:agent:dev:raw": "bash scripts/artifact-agent-dev-https.sh",
     "artifact:backend:smoke": "bash scripts/artifact-backend-smoke.sh",
     "artifact:test": "bash scripts/artifact-check.sh",
+    "smithers:doctor": "bunx smithers-orchestrator workflow doctor",
+    "smithers:list": "bunx smithers-orchestrator workflow list",
+    "smithers:dev-mode": "bunx smithers-orchestrator workflow run feed-dev-mode",
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit"
   },

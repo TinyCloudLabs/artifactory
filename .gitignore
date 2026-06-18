@@ -47,6 +47,10 @@ drafts/
 artifacts-v2/
 .claude/
 
+# Smithers durable runtime DB (workflow state/logs; local and regenerated)
+/smithers.db
+/smithers.db-*
+
 # agent backend runtime state (the agent wallet key → did:pkh, the active
 # user delegation, per-run corpus/artifacts, and the sandboxed tc profile the
 # delegation activates). Identity-bearing — same stance as artifacts/.
