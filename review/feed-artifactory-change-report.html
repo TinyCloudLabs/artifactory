@@ -125,10 +125,10 @@
         commits ahead of each repo's <code>origin/main</code>.
       </p>
       <div class="meta">
-        <div class="pill"><strong>Artifactory:</strong> 13 commits ahead of origin/main through <code>351ec93</code></div>
-        <div class="pill"><strong>Feed:</strong> 3 commits ahead of origin/main</div>
-        <div class="pill"><strong>Latest checkpoint:</strong> shared agent run lock</div>
-        <div class="pill"><strong>Validated recently:</strong> tests, TS, Smithers list/doctor</div>
+        <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>351ec93</code></div>
+        <div class="pill"><strong>Feed:</strong> 4 commits ahead of origin/main through <code>6640126</code></div>
+        <div class="pill"><strong>Latest functional checkpoint:</strong> Feed attaches to locked runs</div>
+        <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS</div>
       </div>
     </header>
 
@@ -274,6 +274,12 @@
             <td>Surfaces run status/log tails/history in the Feed Agents UI and fixes dev DID override behavior.</td>
             <td><code>web/src/pages/Agents.tsx</code>, <code>web/src/useAgentBuild.ts</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">6640126</span></td>
+            <td>Attach to locked agent runs</td>
+            <td>Treats backend <code>409 run_in_progress</code> as an active run to poll, matching Artifactory's shared run lock instead of showing a generic failure.</td>
+            <td><code>web/src/agentClient.ts</code>, <code>web/src/useAgentBuild.ts</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -282,10 +288,10 @@
       <h2>Latest Checkpoint</h2>
       <p class="note">
         <span class="status-ok">Newest local checkpoint:</span>
-        <code>351ec93 Add shared agent run lock</code>.
-        HTTP <code>/agent/run</code>, <code>smithers:agent-run</code>, and
-        <code>smithers:agent-run:staged</code> now share one
-        <code>AGENT_RUNS_DIR/agent-run.lock</code>.
+        <code>6640126 Attach to locked agent runs</code>.
+        Feed now converts Artifactory's <code>run_in_progress</code> response
+        into an attached poll of the active run, so the UI follows backend
+        backpressure instead of surfacing a generic 409.
       </p>
     </section>
 
@@ -296,6 +302,7 @@
         <li><span class="status-ok">Artifactory:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:list</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:doctor</code></li>
+        <li><span class="status-ok">Feed:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Stale run cleanup:</span> <code>run-1781811131857-3r6pbz</code> is now <code>error</code>, not <code>running</code>.</li>
       </ul>
     </section>
