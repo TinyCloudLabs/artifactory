@@ -25,14 +25,17 @@
 // entirely as the delegator. NEVER an owner/cli-test key (hard rule §4).
 //
 // EMPTY-LISTEN-SAFE (§ plan): listen-read exits non-zero with "No non-empty
-// transcripts" when the user has no Listen data — we treat that as a VALID run
-// that publishes 0 artifacts (skip generate + publish), not an error.
+// transcripts" when the user has no Listen data — we treat ONLY that explicit
+// condition as a VALID run that publishes 0 artifacts (skip generate + publish).
+// Any tc/auth/space failure must surface as an error; masking a 401 as "empty"
+// destroys the operator's ability to fix the delegation.
 
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { config } from "./config.ts";
 import type { ActiveDelegation } from "./session.ts";
+import { classifyListenReadResult } from "./listen-read-outcome.ts";
 
 export type RunStatus = "queued" | "running" | "done" | "error";
 
@@ -232,7 +235,18 @@ export async function runPipeline(
   ]);
 
   const transcripts = await listCorpus(corpusDir);
+  const readOutcome = classifyListenReadResult(read);
+  if (readOutcome.kind === "error") {
+    const code = readOutcome.code ? `${readOutcome.code}: ` : "";
+    step(`listen-read: failed (${code}${readOutcome.message})`);
+    throw new Error(`listen-read failed (${code}${readOutcome.message})`);
+  }
   if (transcripts.length === 0) {
+    if (readOutcome.kind === "ok") {
+      const detail = "listen-read exited 0 but wrote no transcript files";
+      step(`listen-read: failed (${detail})`);
+      throw new Error(`listen-read failed (${detail})`);
+    }
     step(
       `listen-read: 0 transcripts (empty-Listen path) — read exit=${read.code}. ` +
         `Completing with 0 artifacts (valid).`,
