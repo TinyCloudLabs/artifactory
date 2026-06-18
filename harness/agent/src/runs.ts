@@ -9,7 +9,9 @@ import { join } from "node:path";
 import { config } from "./config.ts";
 import type { RunState, RunStatus, PublishedRef } from "./runner.ts";
 
-/** A light per-run summary for GET /agent/runs (drops the heavy `log` array). */
+const RUN_SUMMARY_LOG_TAIL = 8;
+
+/** A light per-run summary for GET /agent/runs (keeps only a bounded log tail). */
 export interface RunSummary {
   run_id: string;
   status: RunStatus;
@@ -17,6 +19,7 @@ export interface RunSummary {
   finishedAt?: number;
   published?: PublishedRef[];
   error?: string;
+  log?: string[];
 }
 
 function runDir(runId: string): string {
@@ -75,10 +78,11 @@ const RUN_STATUSES: readonly RunStatus[] = ["queued", "running", "done", "error"
  * an arbitrary value.
  */
 function toSummary(state: RunState): RunSummary | null {
-  const { run_id, status, startedAt, finishedAt, published, error } = state;
+  const { run_id, status, startedAt, finishedAt, published, error, log } = state;
   if (typeof run_id !== "string" || !RUN_STATUSES.includes(status)) return null;
   if (typeof startedAt !== "number") return null;
   const published_ = Array.isArray(published) && published.length > 0 ? published : undefined;
+  const log_ = Array.isArray(log) ? log.slice(-RUN_SUMMARY_LOG_TAIL) : [];
   return {
     run_id,
     status,
@@ -86,13 +90,14 @@ function toSummary(state: RunState): RunSummary | null {
     ...(typeof finishedAt === "number" ? { finishedAt } : {}),
     ...(published_ ? { published: published_ } : {}),
     ...(typeof error === "string" && error ? { error } : {}),
+    ...(log_.length > 0 ? { log: log_ } : {}),
   };
 }
 
 /**
  * Recent runs (newest first, capped) for GET /agent/runs — so a client can
- * detect an in-progress build. Each entry drops the heavy `log` to keep the
- * list light. RESILIENT: a run dir with a missing/corrupt/structurally-bad
+ * detect an in-progress build. Each entry keeps only a small `log` tail to keep
+ * the list light. RESILIENT: a run dir with a missing/corrupt/structurally-bad
  * status.json is skipped (readRun/toSummary returns null), never throwing the
  * whole list. If runsDir doesn't exist yet (no run has ever started), returns [].
  *

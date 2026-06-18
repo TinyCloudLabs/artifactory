@@ -23,6 +23,8 @@ import { createRun, isValidRunId, listRuns, readRun, writeRun } from "./runs.ts"
 import { PERMISSIONS } from "./permissions.ts";
 import { ensureApiToken, tokenMatches } from "./api-token.ts";
 
+const RUN_LOG_TAIL = 20;
+
 // ── AUTH + CORS ───────────────────────────────────────────────────────────
 // This is a credential-holding service: POST /agent/delegation and POST
 // /agent/run mutate state / publish under the active delegation, so they REQUIRE
@@ -180,11 +182,14 @@ function handleGetRun(req: Request, runId: string): Response {
   if (!state) {
     return json(req, 404, { error: { code: "not_found", message: `Unknown run ${runId}.` } });
   }
-  // The API contract response (drop internal fields: startedAt/log/etc.).
+  const log = Array.isArray(state.log) ? state.log.slice(-RUN_LOG_TAIL) : [];
   return json(req, 200, {
     run_id: state.run_id,
     status: state.status,
     published: state.published,
+    startedAt: state.startedAt,
+    ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),
+    ...(log.length > 0 ? { log } : {}),
     ...(state.error ? { error: state.error } : {}),
   });
 }
