@@ -127,14 +127,19 @@ describe("agent runner generation prompt", () => {
     const systemPrompt = String(args[args.indexOf("--system-prompt") + 1]);
     const userPrompt = String(args[args.indexOf("-p") + 1]);
 
-    const articleIndex = systemPrompt.indexOf("PUBLISHABLE FEED ARTIFACT FIRST");
+    const articleIndex = systemPrompt.indexOf("PUBLISHABLE FEED ARTIFACTS FIRST");
     const draftIndex = systemPrompt.indexOf("OPTIONAL OUTWARD DRAFT");
 
     expect(articleIndex).toBeGreaterThan(-1);
     expect(draftIndex).toBeGreaterThan(-1);
     expect(articleIndex).toBeLessThan(draftIndex);
+    expect(systemPrompt).toContain("target publishable Feed artifacts: 3");
+    expect(systemPrompt).toContain("PUBLISHABLE FEED ARTIFACTS FIRST: aim for up to 3");
+    expect(systemPrompt).toContain("write-article");
+    expect(systemPrompt).toContain("extract-insights");
+    expect(systemPrompt).toContain("person-brief");
     expect(systemPrompt).toContain("Social posts are held for approval and will not fill Feed");
-    expect(userPrompt).toContain("one publishable article for the Feed");
+    expect(userPrompt).toContain("up to 3 publishable internal artifacts for the Feed");
     expect(userPrompt).toContain("optionally one approval-held social-post draft");
   });
 });

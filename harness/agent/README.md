@@ -107,6 +107,7 @@ Env (all optional):
 | `AGENT_TC_PROFILE` | `delegated` | sandbox tc profile the delegation activates |
 | `AGENT_NAME` | `Distillery Agent` | advertised in `/agent/info` |
 | `AGENT_TRANSCRIPT_COUNT` | `5` | Listen transcripts pulled per run |
+| `AGENT_TARGET_ARTIFACTS` | `3` | target number of publishable, Feed-visible artifacts per run; quality can produce fewer |
 | `AGENT_GEN_MODEL` | `opus` | model for the headless `claude -p` generate step |
 | `AGENT_GENERATE_PATH` | `~/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` | PATH for the scrubbed-env generate child (needs `bun` + `claude`) |
 | `NODE_SDK_DIST` | (built js-sdk checkout) | override the `@tinycloud/node-sdk` dist path |
@@ -173,12 +174,14 @@ run scratch.
 1. **listen-read** — `tc-listen-read/listen-read.ts` pulls the user's Listen
    transcripts into the run's corpus. **Empty-Listen-safe:** 0 transcripts →
    the run completes with 0 artifacts (valid), skipping generate + publish.
-2. **generate** — headless `claude -p` distills one publishable Feed article
-   first (write-article, optionally illustrated by Gemini/illustrate-card), then
-   may create one approval-held social-post draft (banger-extractor) if the
-   material earns it. This ordering is load-bearing: held outward drafts do not
-   fill the Feed, so the visible Feed artifact comes first. Survivors stay in
-   the run's artifacts dir with an adversarial critic + verify-quotes gate.
+2. **generate** — headless `claude -p` aims for up to
+   `AGENT_TARGET_ARTIFACTS` publishable Feed artifacts first (article,
+   insight-card, person-brief where earned), then may create one approval-held
+   social-post draft (banger-extractor) if the material earns it. This ordering
+   is load-bearing: held outward drafts do not fill the Feed. The target is a
+   cap, not a quota; fewer artifacts is correct when the material does not clear
+   the quality bar. Survivors stay in the run's artifacts dir with an
+   adversarial critic + verify-quotes gate.
 3. **publish** — `tc-publish/publish.ts` upserts each survivor to the user's
    `xyz.tinycloud.artifacts` (KV media + SQL feed row, `approval_status='approved'`).
 

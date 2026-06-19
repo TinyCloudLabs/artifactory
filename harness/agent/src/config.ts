@@ -139,6 +139,14 @@ assertSafeLayout(agentStateDir, runsDir, repoRoot);
 mkdirSecure(agentStateDir);
 mkdirSecure(runsDir);
 
+function positiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) return fallback;
+  return Math.floor(value);
+}
+
 export const config = {
   /** The distillery checkout the skills run from (cwd of every skill spawn). */
   repoRoot,
@@ -184,6 +192,8 @@ export const config = {
   delegationExpiry: process.env.AGENT_DELEGATION_EXPIRY ?? "7d",
   /** How many Listen transcripts a run pulls. */
   transcriptCount: Number(process.env.AGENT_TRANSCRIPT_COUNT ?? 5),
+  /** Target number of publishable, Feed-visible artifacts per run. */
+  targetArtifacts: positiveIntegerEnv("AGENT_TARGET_ARTIFACTS", 3),
   /** Generation model for the headless `claude -p` step. */
   genModel: process.env.AGENT_GEN_MODEL ?? "opus",
   /** How often long-running child stages append progress logs. */

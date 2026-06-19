@@ -427,6 +427,7 @@ export function buildGenerationArgs(
   artifactsDir: string,
   transcripts: string[],
 ): string[] {
+  const targetArtifacts = config.targetArtifacts;
   const videoEnabled = process.env.AGENT_ENABLE_VIDEO === "1" && Boolean(process.env.FAL_KEY);
   const videoStep = videoEnabled
     ? [
@@ -453,6 +454,7 @@ export function buildGenerationArgs(
     `- repo root:      ${config.repoRoot}`,
     `- corpus dir:     ${corpusDir}`,
     `- artifacts to:   ${artifactsDir}`,
+    `- target publishable Feed artifacts: ${targetArtifacts}`,
     "- transcripts:",
     ...transcripts.map((t) => `    ${t}`),
     "",
@@ -461,17 +463,27 @@ export function buildGenerationArgs(
     "the harness publishes ONLY what lands under that dir — a save without that",
     "flag goes to the repo default and is NOT published).",
     "1. Read the transcript files listed above.",
-    "2. PUBLISHABLE FEED ARTIFACT FIRST (write-article): draft a contract-valid",
-    "   article (non-empty body, >=1 verified quote) → verify-quotes --stamp →",
-    "   leave hero_image unset unless you successfully run illustrate-card/Gemini",
-    "   and have a real local image file in the artifact dir. Do not create",
-    "   placeholder/fallback graphics. Then: ",
+    `2. PUBLISHABLE FEED ARTIFACTS FIRST: aim for up to ${targetArtifacts}`,
+    "   publishable internal artifacts before any outward draft. Quality is the",
+    "   gate: fewer than the target is correct when the material does not earn",
+    "   more. Prefer distinct signals over format variety. Use these skills:",
+    "   - write-article for the strongest through-line or narrative.",
+    "   - extract-insights for compact non-obvious claims/decisions.",
+    "   - person-brief only when a recurring person is salient and every claim is",
+    "     grounded. Skip it if identity/role evidence is thin.",
+    "   Every publishable artifact must be internal/feed-safe, contract-valid,",
+    "   have verified quotes where the type requires them, and save under the",
+    "   artifacts dir. Leave hero_image unset unless you successfully run",
+    "   illustrate-card/Gemini and have a real local image file in the artifact",
+    "   dir. Do not create placeholder/fallback graphics. Example article save:",
     "   bun skills/write-article/scripts/save.ts <artifact.json> " +
       `--out-dir ${artifactsDir}`,
-    "   This is the primary deliverable because the Feed only shows publishable",
-    "   internal artifacts; do not spend the run only on approval-held drafts.",
+    "   This step is the primary deliverable because the Feed only shows",
+    "   publishable internal artifacts; do not spend the run only on",
+    "   approval-held drafts.",
     "3. OPTIONAL OUTWARD DRAFT (banger-extractor → social-post): only after the",
-    "   article exists, run survey.ts on the transcripts → pick the single most",
+    `   publishable set is complete or clearly capped below ${targetArtifacts} by`,
+    "   quality, run survey.ts on the transcripts → pick the single most",
     "   non-obvious EARNED SECRET actually said → climb the abstraction ladder +",
     "   4-question safety test → scrub-check → verify-quotes --stamp →",
     "   bun skills/banger-extractor/scripts/save.ts <artifact.json> " +
@@ -491,8 +503,9 @@ export function buildGenerationArgs(
   ].join("\n");
 
   const user =
-    `Distill the ${transcripts.length} transcript(s) in ${corpusDir} into one publishable article ` +
-    `for the Feed, then optionally one approval-held social-post draft` +
+    `Distill the ${transcripts.length} transcript(s) in ${corpusDir} into up to ` +
+    `${targetArtifacts} publishable internal artifacts for the Feed, then optionally one ` +
+    `approval-held social-post draft` +
     `${videoEnabled ? ", plus at most one excellent clip if justified" : ""}, ` +
     `save the survivors under ${artifactsDir} (do NOT publish), ` +
     `then print a one-line summary.`;

@@ -98,6 +98,11 @@ async function handleInfo(req: Request): Promise<Response> {
     did: session.agentDid,
     name: config.name,
     permissions: PERMISSIONS,
+    generation: {
+      transcriptCount: config.transcriptCount,
+      targetArtifacts: config.targetArtifacts,
+      model: config.genModel,
+    },
     // No challenge in the MVP — the front end delegates straight to did:pkh.
   });
 }

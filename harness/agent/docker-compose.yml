@@ -15,7 +15,8 @@
 #   ANTHROPIC_API_KEY        OR  CLAUDE_CODE_OAUTH_TOKEN  (claude -p auth in TEE)
 #   AGENT_ALLOWED_ORIGIN     the deployed feed origin (CORS; no wildcard)
 # Optional: AGENT_GEN_MODEL, TINYCLOUD_HOST, AGENT_CHAIN_ID, AGENT_NAME,
-#           AGENT_TRANSCRIPT_COUNT, GOOGLE_AI_API_KEY (illustrated hero).
+#           AGENT_TRANSCRIPT_COUNT, AGENT_TARGET_ARTIFACTS,
+#           GOOGLE_AI_API_KEY (illustrated hero).
 
 services:
   agent:
@@ -43,6 +44,7 @@ services:
       AGENT_CHAIN_ID: ${AGENT_CHAIN_ID:-1}
       AGENT_NAME: ${AGENT_NAME:-Distillery Agent}
       AGENT_TRANSCRIPT_COUNT: ${AGENT_TRANSCRIPT_COUNT:-5}
+      AGENT_TARGET_ARTIFACTS: ${AGENT_TARGET_ARTIFACTS:-3}
     volumes:
       # Persist the agent state (stable agent-key.json → stable did:pkh, the
       # api-token, and the live delegation) across restarts/updates. Without this
