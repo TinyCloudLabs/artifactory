@@ -125,9 +125,9 @@
         commits ahead of each repo's <code>origin/main</code>.
       </p>
       <div class="meta">
-        <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>ca9fd7a</code></div>
+        <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>624a369</code></div>
         <div class="pill"><strong>Feed:</strong> 10 commits ahead of origin/main through <code>2065564</code></div>
-        <div class="pill"><strong>Latest functional checkpoint:</strong> Artifactory warns on Feed submodule drift</div>
+        <div class="pill"><strong>Latest functional checkpoint:</strong> Smithers reports Feed submodule drift</div>
         <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS/build</div>
       </div>
     </header>
@@ -258,6 +258,12 @@
             <td>Surfaces when Artifactory dev/check scripts are using a vendored Feed commit that differs from the sibling Feed checkout, with strict mode for CI/backpressure.</td>
             <td><code>scripts/artifact-lib.sh</code>, <code>scripts/artifact-feed-check.sh</code>, <code>README.md</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">624a369</span></td>
+            <td>Surface Feed drift in Smithers dev mode</td>
+            <td>Adds the same submodule-vs-sibling Feed readiness check to <code>feed-dev-mode</code> and emits explicit Smithers log lines for each probe result.</td>
+            <td><code>.smithers/workflows/feed-dev-mode.tsx</code>, <code>.smithers/README.md</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -342,11 +348,11 @@
       <h2>Latest Checkpoint</h2>
       <p class="note">
         <span class="status-ok">Newest local checkpoint:</span>
-        <code>ca9fd7a Warn on Feed submodule drift</code>.
-        Artifactory currently runs its vendored Feed submodule at
+        <code>624a369 Surface Feed drift in Smithers dev mode</code>.
+        Manual Artifactory dev checks and the Smithers <code>feed-dev-mode</code>
+        workflow now both report that the vendored Feed submodule is at
         <code>2bda175</code>, while the sibling Feed repo is at
-        <code>2065564</code>. The dev scripts now report that mismatch so
-        local Feed work is not mistaken for embedded Artifactory/Feed behavior.
+        <code>2065564</code>.
       </p>
     </section>
 
@@ -357,6 +363,8 @@
         <li><span class="status-ok">Artifactory:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:list</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:doctor</code></li>
+        <li><span class="status-ok">Smithers:</span> <code>cd .smithers &amp;&amp; bun run typecheck</code></li>
+        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:dev-mode</code> logs <code>FAIL feed submodule drift</code> for submodule <code>2bda175</code> versus sibling <code>2065564</code>, and marks localhost probes <code>BLOCKED</code> under the current sandbox.</li>
         <li><span class="status-ok">Feed:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Feed:</span> <code>bun run build</code></li>
         <li><span class="status-ok">Artifactory embedded Feed:</span> <code>bun run artifact:frontend:check</code> passed and warned that submodule <code>2bda175</code> differs from sibling <code>2065564</code>.</li>
