@@ -135,6 +135,7 @@ describe("agent runner generation prompt", () => {
     expect(articleIndex).toBeLessThan(draftIndex);
     expect(systemPrompt).toContain("target publishable Feed artifacts: 3");
     expect(systemPrompt).toContain("PUBLISHABLE FEED ARTIFACTS FIRST: aim for up to 3");
+    expect(systemPrompt).toContain("hot-take");
     expect(systemPrompt).toContain("write-article");
     expect(systemPrompt).toContain("extract-insights");
     expect(systemPrompt).toContain("person-brief");

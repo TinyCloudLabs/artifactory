@@ -82,6 +82,9 @@ No script in any artifact skill calls a model — judgment lives in the agent.
 - **extract-insights** — surprising claims, decisions, recurring topics, and
   asymmetric (single-voice) knowledge as `insight-card` artifacts. The
   template skill all others follow.
+- **hot-take** — compact, quote-anchored internal takes saved as
+  `insight-card` artifacts; faster than articles and designed to fill the Feed
+  with small, sharp artifacts.
 - **write-article** — an editorial `article` (headline, dek, ~400–900-word
   body, anchored pull-quotes) from one transcript or a collection.
 - **make-podcast** — a 2–5 minute micro-`podcast` (script + synthesized

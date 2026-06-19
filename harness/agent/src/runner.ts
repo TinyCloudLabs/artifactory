@@ -467,6 +467,8 @@ export function buildGenerationArgs(
     "   publishable internal artifacts before any outward draft. Quality is the",
     "   gate: fewer than the target is correct when the material does not earn",
     "   more. Prefer distinct signals over format variety. Use these skills:",
+    "   - hot-take for compact, quote-anchored internal takes that can fill the",
+    "     Feed quickly. Save with skills/hot-take/scripts/save.ts.",
     "   - write-article for the strongest through-line or narrative.",
     "   - extract-insights for compact non-obvious claims/decisions.",
     "   - person-brief only when a recurring person is salient and every claim is",
