@@ -95,8 +95,10 @@ describe("buildClaudeInvocation (the reference_claude_cli_headless recipe)", () 
   test("the system prompt instructs: read brief, run skills, critic, cap, save, ledger", () => {
     const sp = buildSystemPrompt(invInput({ cap: 3 }));
     expect(sp).toContain("/abs/runs/2026-06-11T14-00-00Z/run-brief.md"); // brief path
+    expect(sp).toContain("hot-take");
     expect(sp).toContain("extract-insights");
     expect(sp).toContain("write-article");
+    expect(sp).toContain("write-digest");
     expect(sp).toContain("make-podcast");
     expect(sp).toContain("adversarial"); // the novelty critic
     expect(sp).toContain("novelty");

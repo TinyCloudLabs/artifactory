@@ -9,11 +9,12 @@
 //
 // JUDGMENT-VS-PLUMBING (base SPEC, NON-NEGOTIABLE): this orchestrator makes NO
 // model calls. It runs deterministic scripts and assembles a markdown brief.
-// GENERATION (extract-insights / write-article / make-podcast + illustrate-card)
-// is AGENT judgment that happens AFTER the brief — the orchestrator documents
-// that handoff and `--dry-run` stops here, having produced the brief. The
-// generate/critic/publish steps are agent-driven per the existing generation
-// skills; see harness/feed-run/SKILL.md for the agent's runbook.
+// GENERATION (hot-take / extract-insights / write-article / write-digest /
+// make-podcast + illustrate-card) is AGENT judgment that happens AFTER the
+// brief — the orchestrator documents that handoff and `--dry-run` stops here,
+// having produced the brief. The generate/critic/publish steps are agent-driven
+// per the existing generation skills; see harness/feed-run/SKILL.md for the
+// agent's runbook.
 //
 // Usage:
 //   bun harness/feed-run/scripts/feed-run.ts \

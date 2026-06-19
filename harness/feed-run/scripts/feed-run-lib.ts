@@ -6,10 +6,11 @@
 //
 // CRITICAL judgment-vs-plumbing boundary (base SPEC): the recipe orchestrator
 // shells the skill scripts and assembles a markdown brief — it makes NO model
-// calls. Generation (extract-insights / write-article / make-podcast +
-// illustrate-card) is AGENT judgment that happens AFTER the brief, driven by
-// the generation skills' own SKILL.md + their baked-in novelty/critic. The
-// orchestrator stops at the brief; `--dry-run` makes that explicit.
+// calls. Generation (hot-take / extract-insights / write-article /
+// write-digest / make-podcast + illustrate-card) is AGENT judgment that happens
+// AFTER the brief, driven by the generation skills' own SKILL.md + their
+// baked-in novelty/critic. The orchestrator stops at the brief; `--dry-run`
+// makes that explicit.
 //
 // Everything testable (step ordering, brief render, deep-dive ranking, the
 // run-log shape, the --since resolution) lives here, imported by both the CLI
@@ -409,6 +410,7 @@ export function renderBrief(b: BriefInput): string {
   const minerRoster = INTERNAL_FEED_FORMATS.map((f) => FORMAT_REGISTRY[f].miner)
     .filter(Boolean)
     .join(" / ");
+  const compactMiner = "hot-take";
   const out: string[] = [];
   out.push(`# Feed-run brief — ${b.runId}`);
   out.push("");
@@ -425,8 +427,9 @@ export function renderBrief(b: BriefInput): string {
   out.push(
     "This brief is plumbing. It tells you WHERE to look; you do the looking" +
       " and judging. For the transcripts below, run the existing generation" +
-      ` skills (${minerRoster} +` +
-      " illustrate-card), each with its own novelty-scan + adversarial critic." +
+      ` skills (${compactMiner} + ${minerRoster} +` +
+      " illustrate-card), each with its own quote verification / novelty-scan" +
+      " + adversarial critic as applicable." +
       ` Publish at most **${b.cap}** survivors. Zero artifacts is a valid run` +
       " — quality beats quantity.",
   );
@@ -434,7 +437,7 @@ export function renderBrief(b: BriefInput): string {
   out.push("## Miners you may run this brief (pick the format the material EARNS)");
   out.push("");
   out.push(
-    `Beyond the internal feed miners (${minerRoster}), this run may ALSO` +
+    `Beyond the compact/internal feed miners (${compactMiner} + ${minerRoster}), this run may ALSO` +
       " produce — only when the material genuinely warrants it:",
   );
   out.push("");

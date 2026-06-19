@@ -114,9 +114,10 @@ export function buildSystemPrompt(input: GenInvocationInput): string {
     "2. Read the ACTUAL transcript files at the paths in the brief (the brief",
     "   surfaced paths only — never bodies).",
     "3. For each transcript, run the artifact skills appropriate to the material:",
-    "   extract-insights (insight cards), write-article (longform), make-podcast",
-    "   (micro-podcasts). Pick the format the material earns; not every",
-    "   transcript yields an artifact.",
+    "   hot-take (compact quote-anchored insight-card), extract-insights (full",
+    "   insight cards), write-article (longform), write-digest (roundups), and",
+    "   make-podcast (micro-podcasts). Pick the format the material earns; not",
+    "   every transcript yields an artifact.",
     "3b. OUTWARD DRAFTS (banger-extractor → social-post, investor-snippet →",
     "    investor-update-snippet) — OPTIONAL, HIGHER BAR, RARER than cards. Over the",
     "    selected transcripts you MAY also draft AT MOST ONE banger and/or ONE",
@@ -276,8 +277,9 @@ export function diffCreated(before: ArtifactRef[], after: ArtifactRef[]): Artifa
 // The skills STAMP audience/approval_status; the harness ROUTES on it. An
 // artifact the feed-run agent creates is one of two things:
 //   - PUBLISHED — it goes live in the feed and COUNTS against MAX_ARTIFACTS_PER_RUN.
-//     These are the internal-audience artifacts: insight-card / article / podcast
-//     (no audience field, pure-internal) and person-brief (audience:"internal").
+//     These are the internal-audience artifacts: insight-card / article / digest /
+//     podcast (no audience field, pure-internal) and person-brief
+//     (audience:"internal").
 //   - DRAFT — an OUTWARD artifact born approval_status:"pending" that the harness
 //     does NOT publish (it routes to the approvals tray). These are the outward
 //     comms drafts: social-post (audience:"public") and investor-update-snippet
@@ -437,9 +439,10 @@ export async function readNovelty(artifactDir: string): Promise<number | string 
 // ---------------------------------------------------------------------------
 //
 // THE PROBLEM: the generation agent runs multiple artifact-format passes
-// (extract-insights, write-article, make-podcast) inside ONE headless run. They
-// can't see each other's output, so two passes can land on the SAME underlying
-// signal — observed: a card AND a podcast both on the "$2M→100k fundraise drift".
+// (hot-take, extract-insights, write-article, write-digest, make-podcast) inside
+// ONE headless run. They can't see each other's output, so two passes can land on
+// the SAME underlying signal — observed: a card AND a podcast both on the
+// "$2M→100k fundraise drift".
 // One run should ship at most ONE artifact per underlying signal.
 //
 // APPROACH (option b, post-generation pass) — chosen because the runner spawns a

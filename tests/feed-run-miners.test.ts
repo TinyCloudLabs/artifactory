@@ -378,8 +378,10 @@ describe("generation system prompt references the new miners", () => {
   });
 
   test("still references the internal feed miners + the critic + cap (no regression)", () => {
+    expect(sp).toContain("hot-take");
     expect(sp).toContain("extract-insights");
     expect(sp).toContain("write-article");
+    expect(sp).toContain("write-digest");
     expect(sp).toContain("make-podcast");
     expect(sp).toContain("adversarial");
     expect(sp).toMatch(/cap.*3|3.*cap|MAX_ARTIFACTS_PER_RUN.*3/);
@@ -401,6 +403,7 @@ describe("run-brief references the new miners + lists salient people", () => {
       salientPeople: [{ name: "Ada Lovelace", slug: "ada-lovelace", transcriptCount: 4, turnCount: 20 }],
     });
     // Outward drafts referenced + flagged pending/not-published.
+    expect(md).toContain("hot-take");
     expect(md).toContain("banger-extractor");
     expect(md).toContain("investor-snippet");
     expect(md).toContain("approval_status");

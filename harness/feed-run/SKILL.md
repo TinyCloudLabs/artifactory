@@ -192,7 +192,7 @@ the run-log records.
 1. **Read the actual transcripts** at the paths in the brief (the orchestrator
    only surfaced paths). The recency set is "what's new"; the deep-dive is one
    older thread the cursor rotated to.
-2. **Generate** with the existing skills — `extract-insights`,
+2. **Generate** with the existing skills — `hot-take`, `extract-insights`,
    `write-article`, `write-digest`, `make-podcast`, `illustrate-card` — each
    running its own
    `novelty-scan` + the **mandatory adversarial-novelty critic** baked into
@@ -252,13 +252,20 @@ the run-log records.
    await writeLedger("index/surfaced.json", ledger);
    ```
 
-## The miners this run drives (Phase 1b — outward drafts + person-brief on salience)
+## The miners this run drives (Phase 1b — compact cards + outward drafts + person-brief on salience)
 
-Beyond the four internal feed miners (`extract-insights`, `write-article`,
-`write-digest`, `make-podcast`), the recipe now invokes two more classes of
-miner. The seam is
+Beyond the internal feed miners (`hot-take`, `extract-insights`,
+`write-article`, `write-digest`, `make-podcast`), the recipe also invokes two
+more classes of miner. The seam is
 the artifact metadata: **the skills STAMP `audience`/`approval_status`; the
 harness ROUTES on it.**
+
+### Compact miner — `hot-take` (INTERNAL — publishes)
+
+Use `hot-take` when the material earns a sharp, quote-anchored point but not a
+full article or digest. It saves as an `insight-card`, publishes internally, and
+counts against the cap. It is the fast path for small useful Feed artifacts, not
+a public social-post draft.
 
 ### Outward miners — `banger-extractor` + `investor-snippet` (DRAFTS, not published)
 
