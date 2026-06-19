@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  conversationListSql,
+  mapConversationColumns,
   transcriptTurnsFromInline,
   type ConversationMeta,
 } from "../skills/tc-listen-read/scripts/listen-read-lib.ts";
@@ -65,5 +67,34 @@ describe("tc-listen-read inline SQL transcripts", () => {
         text: "Plain transcript body",
       },
     ]);
+  });
+});
+
+describe("tc-listen-read SQL backpressure", () => {
+  test("lists conversation metadata without selecting inline transcript payloads", () => {
+    const columns = mapConversationColumns([
+      "id",
+      "title",
+      "started_at",
+      "transcript_json",
+      "transcript_text",
+    ]);
+    const sql = conversationListSql(columns);
+
+    expect(sql).toContain(`"id" AS id`);
+    expect(sql).toContain(`"title" AS title`);
+    expect(sql).toContain(`"started_at" AS started_at`);
+    expect(sql).toContain("has_inline_transcript");
+    expect(sql).toContain("LIMIT ? OFFSET ?");
+    expect(sql).not.toContain(`"transcript_json" AS transcript_json`);
+    expect(sql).not.toContain(`"transcript_text" AS transcript_text`);
+  });
+
+  test("rejects unsafe reflected SQL column names", () => {
+    expect(() =>
+      conversationListSql({
+        id: "id; DROP TABLE conversation",
+      }),
+    ).toThrow("unsafe SQL column name");
   });
 });

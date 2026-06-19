@@ -62,6 +62,8 @@ export interface ConversationMeta {
   title: string;
   /** ISO-ish start time if the row carries one (display only). */
   started_at?: string;
+  /** True when the row appears to carry an inline SQL transcript payload. */
+  has_inline_transcript?: boolean;
   /** Inline transcript JSON used by the Listen app for some synced sources. */
   transcript_json?: string;
   /** Plain transcript text fallback used by the Listen app for some sources. */
@@ -85,6 +87,13 @@ function optionalString(row: unknown[], columnIndex: number | undefined): string
   if (value == null) return undefined;
   const text = String(value).trim();
   return text.length > 0 ? text : undefined;
+}
+
+function optionalBool(row: unknown[], columnIndex: number | undefined): boolean | undefined {
+  if (columnIndex === undefined) return undefined;
+  const value = row[columnIndex];
+  if (value == null) return undefined;
+  return value === true || value === 1 || value === "1";
 }
 
 function asTranscriptTurn(value: unknown, index: number): TranscriptTurn | undefined {
@@ -176,6 +185,87 @@ export function transcriptTurnsFromInline(meta: ConversationMeta): TranscriptTur
   return [];
 }
 
+const TITLE_COLUMNS = ["title", "name", "subject", "summary"] as const;
+const START_COLUMNS = ["started_at", "start_time", "date", "created_at"] as const;
+const INLINE_JSON_COLUMNS = ["transcript_json", "transcript", "segments_json", "utterances_json"] as const;
+const INLINE_TEXT_COLUMNS = ["transcript_text", "transcript_plaintext"] as const;
+
+export interface ConversationColumnMap {
+  id: string;
+  title?: string;
+  startedAt?: string;
+  transcriptJson?: string;
+  transcriptText?: string;
+}
+
+function sqlIdent(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`unsafe SQL column name: ${name}`);
+  }
+  return `"${name}"`;
+}
+
+function pickColumn(columns: readonly string[], candidates: readonly string[]): string | undefined {
+  return candidates.find((name) => columns.includes(name));
+}
+
+export function mapConversationColumns(columns: readonly string[]): ConversationColumnMap {
+  if (!columns.includes("id")) {
+    throw new Error(`conversation table has no 'id' column (columns: ${columns.join(", ")})`);
+  }
+  return {
+    id: "id",
+    title: pickColumn(columns, TITLE_COLUMNS),
+    startedAt: pickColumn(columns, START_COLUMNS),
+    transcriptJson: pickColumn(columns, INLINE_JSON_COLUMNS),
+    transcriptText: pickColumn(columns, INLINE_TEXT_COLUMNS),
+  };
+}
+
+async function conversationColumns(
+  target: ListenTarget,
+  opts: TcRunOptions,
+): Promise<ConversationColumnMap> {
+  const res = await sqlQuery(
+    "PRAGMA table_info(conversation)",
+    { db: LISTEN_CONVERSATIONS_DB, space: target.space },
+    undefined,
+    opts,
+  );
+  const nameCol = res.columns.indexOf("name");
+  if (nameCol < 0) {
+    throw new Error(`PRAGMA table_info(conversation) returned no name column`);
+  }
+  return mapConversationColumns(
+    res.rows
+      .map((row) => optionalString(row, nameCol))
+      .filter((name): name is string => Boolean(name)),
+  );
+}
+
+export function conversationListSql(columns: ConversationColumnMap): string {
+  const id = sqlIdent(columns.id);
+  const selected = [
+    `${id} AS id`,
+    columns.title ? `${sqlIdent(columns.title)} AS title` : `${id} AS title`,
+    columns.startedAt ? `${sqlIdent(columns.startedAt)} AS started_at` : "NULL AS started_at",
+  ];
+  const inlineChecks = [
+    columns.transcriptJson
+      ? `(CASE WHEN ${sqlIdent(columns.transcriptJson)} IS NOT NULL AND length(${sqlIdent(columns.transcriptJson)}) > 0 THEN 1 ELSE 0 END)`
+      : null,
+    columns.transcriptText
+      ? `(CASE WHEN ${sqlIdent(columns.transcriptText)} IS NOT NULL AND length(${sqlIdent(columns.transcriptText)}) > 0 THEN 1 ELSE 0 END)`
+      : null,
+  ].filter(Boolean);
+  selected.push(
+    inlineChecks.length > 0
+      ? `(${inlineChecks.join(" OR ")}) AS has_inline_transcript`
+      : "0 AS has_inline_transcript",
+  );
+  return `SELECT ${selected.join(", ")} FROM conversation ORDER BY rowid DESC LIMIT ? OFFSET ?`;
+}
+
 /**
  * List recent conversations, most-recent first. Selects a resilient column set:
  * `id`, a title-ish column, and a start-time-ish column if present. The Listen
@@ -185,33 +275,20 @@ export async function listConversations(
   limit: number,
   target: ListenTarget,
   opts: TcRunOptions = {},
+  offset = 0,
 ): Promise<ConversationMeta[]> {
+  const columns = await conversationColumns(target, opts);
   const res = await sqlQuery(
-    `SELECT * FROM conversation ORDER BY rowid DESC LIMIT ?`,
+    conversationListSql(columns),
     { db: LISTEN_CONVERSATIONS_DB, space: target.space },
-    [limit],
+    [limit, offset],
     opts,
   );
   const col = (name: string) => res.columns.indexOf(name);
   const idCol = col("id");
-  // Title may be under several names depending on importer.
-  const titleCol = ["title", "name", "subject", "summary"]
-    .map(col)
-    .find((c) => c >= 0);
-  const startCol = ["started_at", "start_time", "date", "created_at"]
-    .map(col)
-    .find((c) => c >= 0);
-  const transcriptJsonCol = [
-    "transcript_json",
-    "transcript",
-    "segments_json",
-    "utterances_json",
-  ]
-    .map(col)
-    .find((c) => c >= 0);
-  const transcriptTextCol = ["transcript_text", "transcript_plaintext"]
-    .map(col)
-    .find((c) => c >= 0);
+  const titleCol = col("title");
+  const startCol = col("started_at");
+  const inlineCol = col("has_inline_transcript");
   if (idCol < 0) {
     throw new Error(
       `conversation table has no 'id' column (columns: ${res.columns.join(", ")})`,
@@ -221,9 +298,36 @@ export async function listConversations(
     id: String(row[idCol]),
     title: optionalString(row, titleCol) ?? String(row[idCol]),
     started_at: optionalString(row, startCol),
+    has_inline_transcript: optionalBool(row, inlineCol) ?? false,
+  }));
+}
+
+export async function fetchInlineTranscript(
+  meta: ConversationMeta,
+  target: ListenTarget,
+  opts: TcRunOptions = {},
+): Promise<ConversationMeta> {
+  const columns = await conversationColumns(target, opts);
+  if (!columns.transcriptJson && !columns.transcriptText) return meta;
+  const selected = [
+    columns.transcriptJson ? `${sqlIdent(columns.transcriptJson)} AS transcript_json` : "NULL AS transcript_json",
+    columns.transcriptText ? `${sqlIdent(columns.transcriptText)} AS transcript_text` : "NULL AS transcript_text",
+  ];
+  const res = await sqlQuery(
+    `SELECT ${selected.join(", ")} FROM conversation WHERE ${sqlIdent(columns.id)} = ? LIMIT 1`,
+    { db: LISTEN_CONVERSATIONS_DB, space: target.space },
+    [meta.id],
+    opts,
+  );
+  const row = res.rows[0];
+  if (!row) return meta;
+  const transcriptJsonCol = res.columns.indexOf("transcript_json");
+  const transcriptTextCol = res.columns.indexOf("transcript_text");
+  return {
+    ...meta,
     transcript_json: optionalString(row, transcriptJsonCol),
     transcript_text: optionalString(row, transcriptTextCol),
-  }));
+  };
 }
 
 /**
@@ -301,40 +405,54 @@ export async function dumpCorpus(
   const transcriptIds = new Set(
     keyList.keys.map((k) => k.slice(`${TRANSCRIPT_PREFIX}/`.length)),
   );
-  // Scan a generous window of recent conversations (well above the current
-  // table size) so the recency-first transcript-backed rows are all reachable
-  // even as the conversation table grows; the intersection below is what bounds
-  // the work, not this limit.
+  // Page metadata only; do not pull inline transcript payloads in the list
+  // query. Some Listen rows carry multi-MB Fireflies transcript_json blobs, and
+  // SELECT * across a broad scan exceeds TinyCloud's SQL response cap before the
+  // pipeline gets a chance to apply backpressure.
+  const CONVERSATION_PAGE_SIZE = 100;
   const CONVERSATION_SCAN_LIMIT = 10_000;
-  const conversations = await listConversations(CONVERSATION_SCAN_LIMIT, target, opts);
   const written: WrittenTranscript[] = [];
-  for (const meta of conversations) {
-    if (written.length >= count) break;
-    let turns: TranscriptTurn[];
-    if (transcriptIds.has(meta.id)) {
-      try {
-        turns = await fetchTranscript(meta.id, target, opts);
-      } catch (e) {
-        // A conversation whose transcript key vanished between list and get is
-        // the same "nothing to distill" case as an empty transcript — skip it.
-        // Any other tc error (auth, unhosted, malformed) still throws loudly.
-        if (e instanceof TcCliError && e.code === "NOT_FOUND") continue;
-        throw e;
+  for (let offset = 0; offset < CONVERSATION_SCAN_LIMIT && written.length < count; offset += CONVERSATION_PAGE_SIZE) {
+    const conversations = await listConversations(CONVERSATION_PAGE_SIZE, target, opts, offset);
+    if (conversations.length === 0) break;
+    for (const meta of conversations) {
+      if (written.length >= count) break;
+      let turns: TranscriptTurn[];
+      if (transcriptIds.has(meta.id)) {
+        try {
+          turns = await fetchTranscript(meta.id, target, opts);
+        } catch (e) {
+          // A conversation whose transcript key vanished between list and get is
+          // the same "nothing to distill" case as an empty transcript — skip it.
+          // Any other tc error (auth, unhosted, malformed) still throws loudly.
+          if (e instanceof TcCliError && e.code === "NOT_FOUND") continue;
+          throw e;
+        }
+      } else if (meta.has_inline_transcript) {
+        try {
+          turns = transcriptTurnsFromInline(await fetchInlineTranscript(meta, target, opts));
+        } catch (e) {
+          // A single huge inline transcript can still exceed the SQL response cap.
+          // Skip that row and continue paging so one meeting cannot block the
+          // whole feed run from finding smaller transcript-backed conversations.
+          if (e instanceof TcCliError && e.code === "SQL_RESPONSE_TOO_LARGE") continue;
+          throw e;
+        }
+      } else {
+        turns = [];
       }
-    } else {
-      turns = transcriptTurnsFromInline(meta);
+      if (turns.length === 0) continue; // empty transcript — nothing to distill
+      const md = renderTranscriptMarkdown(meta, turns);
+      const fileName = `${slugify(meta.title)}-${meta.id.slice(0, 8)}.md`;
+      const path = join(corpusDir, fileName);
+      await writeFile(path, md);
+      written.push({
+        conversationId: meta.id,
+        title: meta.title,
+        path,
+        turnCount: turns.length,
+      });
     }
-    if (turns.length === 0) continue; // empty transcript — nothing to distill
-    const md = renderTranscriptMarkdown(meta, turns);
-    const fileName = `${slugify(meta.title)}-${meta.id.slice(0, 8)}.md`;
-    const path = join(corpusDir, fileName);
-    await writeFile(path, md);
-    written.push({
-      conversationId: meta.id,
-      title: meta.title,
-      path,
-      turnCount: turns.length,
-    });
   }
   return written;
 }
