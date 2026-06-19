@@ -6,7 +6,7 @@
 //   GET  /agent/info            → { did, name, permissions[], challenge? }
 //   POST /agent/delegation      { serialized } → { ok, agentDid, delegationCid, spaceId, expiresAt }
 //   POST /agent/run             {} → { run_id, status:"queued" }
-//   GET  /agent/run/:run_id     → { run_id, status, published?[], error? }
+//   GET  /agent/run/:run_id     → { run_id, status, published?[], held?[], error? }
 //   GET  /agent/runs            → { runs: RunSummary[], lock? }  (recent runs + shared lock)
 //
 // Run from the distillery repo root:  bun harness/agent/src/server.ts
@@ -229,6 +229,7 @@ function handleGetRun(req: Request, runId: string): Response {
     run_id: state.run_id,
     status: state.status,
     published: state.published,
+    held: state.held ?? [],
     media: summarizePublishedMedia(state.published),
     startedAt: state.startedAt,
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),

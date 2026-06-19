@@ -59,8 +59,9 @@ pipeline. It reuses `harness/agent/src/runner.ts` and the persisted TinyCloud
 delegation, so it executes the same skill chain as `/agent/run`:
 `tc-listen-read → generate via SKILL.md instructions → media preflight →
 tc-publish`. It writes the usual `<AGENT_RUNS_DIR>/<run_id>/status.json` and
-returns a bounded log tail plus published media flags and aggregate
-`{ heroImages, audio, video }` counts in the Smithers output.
+returns a bounded log tail, `held[]` reasons for generated artifacts that did
+not publish, plus published media flags and aggregate `{ heroImages, audio,
+video }` counts in the Smithers output.
 
 For now, treat `agent-run` as an operator/dev command, not the production HTTP
 control path. The HTTP server and Smithers workflows now share a disk-backed
@@ -77,9 +78,10 @@ operator/dev entry point, but it breaks a run into Smithers nodes:
 helpers as `/agent/run`, so behavior stays aligned while Smithers gains
 stage-level logs and retry/replay boundaries. A cold graph initially shows only
 `preflight`; downstream nodes are rendered as prior task outputs exist. The
-`publish` and `cleanup` node outputs preserve the same per-artifact media flags
-and aggregate media counts as the HTTP run API, so Smithers can prove images,
-podcasts, and clips without reopening TinyCloud rows by hand.
+`publish` and `cleanup` node outputs preserve the same `published[]`, `held[]`,
+per-artifact media flags, and aggregate media counts as the HTTP run API, so
+Smithers can prove images, podcasts, clips, and held reasons without reopening
+TinyCloud rows by hand.
 
 The generated Smithers pack intentionally keeps secrets out of git. Local API
 keys are a development bridge only; the target home is TinyCloud Secret Manager.

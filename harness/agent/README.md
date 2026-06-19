@@ -16,11 +16,14 @@ see `DEPLOY.md` for the live coordinates and the deploy/redeploy runbook.
 GET  /agent/info             → { did, name, permissions: PermissionEntry[] }            (public)
 POST /agent/delegation       { serialized } → { ok, agentDid, delegationCid, spaceId, expiresAt }   (AUTH)
 POST /agent/run              {} (uses the stored delegation) → { run_id, status:"queued" }           (AUTH)
-GET  /agent/run/:run_id      → { run_id, status:"queued"|"running"|"done"|"error", startedAt, finishedAt?, published?: PublishedArtifact[], media?: RunMediaSummary, log?:string[], error? }
-GET  /agent/runs             → { runs: [{ run_id, status, startedAt, finishedAt?, published?: PublishedArtifact[], media?: RunMediaSummary, log?:string[], error? }], lock?: { run_id, owner, pid, acquiredAt, ageMs, reclaimable } }   (public)
+GET  /agent/run/:run_id      → { run_id, status:"queued"|"running"|"done"|"error", startedAt, finishedAt?, published?: PublishedArtifact[], held?: HeldArtifact[], media?: RunMediaSummary, log?:string[], error? }
+GET  /agent/runs             → { runs: [{ run_id, status, startedAt, finishedAt?, published?: PublishedArtifact[], held?: HeldArtifact[], media?: RunMediaSummary, log?:string[], error? }], lock?: { run_id, owner, pid, acquiredAt, ageMs, reclaimable } }   (public)
 ```
 
 `PublishedArtifact` is `{ type, slug, media?: { heroImage, audio, video } }`.
+`HeldArtifact` is `{ type, slug, reason }` for generated artifacts that were not
+published, including approval-held outward drafts and rich-media artifacts held
+by media preflight.
 `RunMediaSummary` is `{ heroImages, audio, video }`.
 
 `GET /agent/run/:run_id` includes a bounded tail of recent stage log lines, and
@@ -34,6 +37,8 @@ Publish media reporting is sourced from `tc-publish --json`, not from a later
 best-effort reread of the run scratch directory. That means the API media counts
 reflect what the publisher actually wrote to TinyCloud (`heroKey`, `audioKey`,
 `videoKey`) and Feed can show accurate run-history badges such as `3 images`.
+Generated-but-held artifacts are structured in `held[]` as well as logged, so
+Feed and Smithers can show why a podcast/clip/draft did not become a durable row.
 
 Queued/running records are reconciled on read: if the last recorded progress log
 is older than `AGENT_RUN_STALE_MS` (default 20 minutes), the server rewrites the

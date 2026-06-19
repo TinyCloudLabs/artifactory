@@ -34,6 +34,12 @@ const publishedSchema = z.object({
     .optional(),
 });
 
+const heldSchema = z.object({
+  type: z.string(),
+  slug: z.string(),
+  reason: z.string(),
+});
+
 const mediaSummarySchema = z.object({
   heroImages: z.number().int().nonnegative(),
   audio: z.number().int().nonnegative(),
@@ -47,6 +53,7 @@ const agentRunSchema = z.object({
   startedAt: z.number(),
   finishedAt: z.number().optional(),
   published: z.array(publishedSchema),
+  held: z.array(heldSchema),
   media: mediaSummarySchema,
   error: z.string().optional(),
   log: z.array(z.string()),
@@ -67,6 +74,7 @@ function summarize(state: RunState, logTail: number, notes: string[] = []) {
     startedAt: state.startedAt,
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),
     published: state.published,
+    held: state.held ?? [],
     media: summarizePublishedMedia(state.published),
     ...(state.error ? { error: state.error } : {}),
     log: Array.isArray(state.log) ? state.log.slice(-logTail) : [],

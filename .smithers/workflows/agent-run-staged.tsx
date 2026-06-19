@@ -43,6 +43,12 @@ const publishedSchema = z.object({
     .optional(),
 });
 
+const heldSchema = z.object({
+  type: z.string(),
+  slug: z.string(),
+  reason: z.string(),
+});
+
 const mediaSummarySchema = z.object({
   heroImages: z.number().int().nonnegative(),
   audio: z.number().int().nonnegative(),
@@ -83,12 +89,14 @@ const generateSchema = stageBaseSchema.extend({
 const publishSchema = stageBaseSchema.extend({
   skipped: z.boolean(),
   published: z.array(publishedSchema),
+  held: z.array(heldSchema),
   media: mediaSummarySchema,
 });
 
 const cleanupSchema = stageBaseSchema.extend({
   cleaned: z.boolean(),
   published: z.array(publishedSchema),
+  held: z.array(heldSchema),
   media: mediaSummarySchema,
 });
 
@@ -325,6 +333,7 @@ export default smithers((ctx) => {
                   ...base("publish", state, logTailMax, true),
                   skipped: false,
                   published: state.published,
+                  held: state.held ?? [],
                   media: summarizePublishedMedia(state.published),
                 };
               } catch (err) {
@@ -333,6 +342,7 @@ export default smithers((ctx) => {
                   ...base("publish", state, logTailMax, false),
                   skipped: false,
                   published: state.published,
+                  held: state.held ?? [],
                   media: summarizePublishedMedia(state.published),
                 };
               }
@@ -361,6 +371,7 @@ export default smithers((ctx) => {
                 ...base("cleanup", state, logTailMax, state.status !== "error"),
                 cleaned: true,
                 published: state.published,
+                held: state.held ?? [],
                 media: summarizePublishedMedia(state.published),
               };
             }}

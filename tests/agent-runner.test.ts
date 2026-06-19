@@ -20,8 +20,10 @@ import {
   formatMediaSummary,
   preflightArtifactMediaForPublish,
   publishedRefFromPublishStdout,
+  runPublishStage,
   sanitizeArtifactMediaForPublish,
   shouldPublishArtifact,
+  type PipelineContext,
   summarizeArtifactTree,
   summarizeArtifactRoutes,
   type RunState,
@@ -559,5 +561,51 @@ describe("agent runner artifact media preflight", () => {
     expect(result.blockReason).toBe('video required for clip but missing file "missing.mp4"');
     expect(result.warnings).toEqual(['video invalid: missing file "missing.mp4"']);
     expect((await readArtifact(dir)).video).toBe("missing.mp4");
+  });
+
+  test("publish stage records held rich-media artifacts structurally", async () => {
+    const root = await mkdtemp(join(tmpdir(), "distillery-agent-held-"));
+    dirs.push(root);
+    const artifactDir = join(root, "podcast", "fake-podcast");
+    await mkdir(artifactDir, { recursive: true });
+    await writeFile(
+      join(artifactDir, "artifact.json"),
+      `${JSON.stringify({
+        type: "podcast",
+        slug: "fake-podcast",
+        headline: "Fake Podcast",
+        audio: "missing.m4a",
+      })}\n`,
+    );
+    const state: RunState = {
+      run_id: "run-1781811131857-held01",
+      status: "running",
+      published: [],
+      startedAt: Date.now(),
+      log: [],
+    };
+    const ctx: PipelineContext = {
+      active: { spaceId: "applications" } as unknown as ActiveDelegation,
+      state,
+      onProgress: () => {},
+      space: "applications",
+      corpusDir: join(root, "corpus"),
+      artifactsDir: root,
+      step: (msg) => {
+        state.log.push(`2026-06-18T19:39:56.704Z ${msg}`);
+      },
+    };
+
+    await runPublishStage(ctx);
+
+    expect(state.published).toEqual([]);
+    expect(state.held).toEqual([
+      {
+        type: "podcast",
+        slug: "fake-podcast",
+        reason: 'audio required for podcast but missing file "missing.m4a"',
+      },
+    ]);
+    expect(state.log.join("\n")).toContain("1 draft(s) held");
   });
 });

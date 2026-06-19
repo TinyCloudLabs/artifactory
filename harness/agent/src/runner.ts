@@ -50,6 +50,12 @@ export interface PublishedRef {
   };
 }
 
+export interface HeldArtifactRef {
+  type: string;
+  slug: string;
+  reason: string;
+}
+
 export interface RunMediaSummary {
   heroImages: number;
   audio: number;
@@ -60,6 +66,7 @@ export interface RunState {
   run_id: string;
   status: RunStatus;
   published: PublishedRef[];
+  held?: HeldArtifactRef[];
   media?: RunMediaSummary;
   error?: string;
   startedAt: number;
@@ -417,6 +424,11 @@ export async function runPublishStage(ctx: PipelineContext): Promise<void> {
   const artifactRoutes = await listArtifactRoutes(ctx.artifactsDir, { preflightMedia: true });
   const publishable = artifactRoutes.filter((route) => route.publish);
   const drafts = artifactRoutes.filter((route) => !route.publish);
+  ctx.state.held = drafts.map((draft) => ({
+    type: draft.type,
+    slug: draft.slug,
+    reason: draft.reason ?? "not publishable",
+  }));
   for (const route of artifactRoutes) {
     for (const warning of route.mediaWarnings ?? []) {
       ctx.step(`artifact media: ${route.type}/${route.slug}: ${warning}`);

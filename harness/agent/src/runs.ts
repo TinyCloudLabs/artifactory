@@ -17,7 +17,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.ts";
-import type { RunMediaSummary, RunState, RunStatus, PublishedRef } from "./runner.ts";
+import type {
+  HeldArtifactRef,
+  RunMediaSummary,
+  RunState,
+  RunStatus,
+  PublishedRef,
+} from "./runner.ts";
 
 const RUN_SUMMARY_LOG_TAIL = 8;
 
@@ -28,6 +34,7 @@ export interface RunSummary {
   startedAt: number;
   finishedAt?: number;
   published?: PublishedRef[];
+  held?: HeldArtifactRef[];
   media?: RunMediaSummary;
   error?: string;
   log?: string[];
@@ -279,10 +286,11 @@ function lastRunProgressAt(state: RunState): number {
  * an arbitrary value.
  */
 function toSummary(state: RunState): RunSummary | null {
-  const { run_id, status, startedAt, finishedAt, published, error, log } = state;
+  const { run_id, status, startedAt, finishedAt, published, held, error, log } = state;
   if (typeof run_id !== "string" || !RUN_STATUSES.includes(status)) return null;
   if (typeof startedAt !== "number") return null;
   const published_ = Array.isArray(published) && published.length > 0 ? published : undefined;
+  const held_ = Array.isArray(held) && held.length > 0 ? held : undefined;
   const log_ = Array.isArray(log) ? log.slice(-RUN_SUMMARY_LOG_TAIL) : [];
   return {
     run_id,
@@ -290,6 +298,7 @@ function toSummary(state: RunState): RunSummary | null {
     startedAt,
     ...(typeof finishedAt === "number" ? { finishedAt } : {}),
     ...(published_ ? { published: published_ } : {}),
+    ...(held_ ? { held: held_ } : {}),
     ...(published_ ? { media: summarizePublishedMedia(published_) } : {}),
     ...(typeof error === "string" && error ? { error } : {}),
     ...(log_.length > 0 ? { log: log_ } : {}),
