@@ -23,6 +23,7 @@ import {
   createRunId,
   readRun,
   releaseRunLock,
+  summarizePublishedMedia,
   writeRun,
 } from "../../harness/agent/src/runs.ts";
 
@@ -33,6 +34,19 @@ const inputSchema = z.object({
 const publishedSchema = z.object({
   type: z.string(),
   slug: z.string(),
+  media: z
+    .object({
+      heroImage: z.boolean(),
+      audio: z.boolean(),
+      video: z.boolean(),
+    })
+    .optional(),
+});
+
+const mediaSummarySchema = z.object({
+  heroImages: z.number().int().nonnegative(),
+  audio: z.number().int().nonnegative(),
+  video: z.number().int().nonnegative(),
 });
 
 const runStatusSchema = z.enum(["queued", "running", "done", "error"]);
@@ -69,11 +83,13 @@ const generateSchema = stageBaseSchema.extend({
 const publishSchema = stageBaseSchema.extend({
   skipped: z.boolean(),
   published: z.array(publishedSchema),
+  media: mediaSummarySchema,
 });
 
 const cleanupSchema = stageBaseSchema.extend({
   cleaned: z.boolean(),
   published: z.array(publishedSchema),
+  media: mediaSummarySchema,
 });
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
@@ -305,10 +321,20 @@ export default smithers((ctx) => {
                 state.status = "done";
                 state.finishedAt = Date.now();
                 writeRun(state);
-                return { ...base("publish", state, logTailMax, true), skipped: false, published: state.published };
+                return {
+                  ...base("publish", state, logTailMax, true),
+                  skipped: false,
+                  published: state.published,
+                  media: summarizePublishedMedia(state.published),
+                };
               } catch (err) {
                 state = markError(state ?? missingRunState(runId), err);
-                return { ...base("publish", state, logTailMax, false), skipped: false, published: state.published };
+                return {
+                  ...base("publish", state, logTailMax, false),
+                  skipped: false,
+                  published: state.published,
+                  media: summarizePublishedMedia(state.published),
+                };
               }
             }}
           </Task>
@@ -331,7 +357,12 @@ export default smithers((ctx) => {
               } finally {
                 releaseRunLock(runId);
               }
-              return { ...base("cleanup", state, logTailMax, state.status !== "error"), cleaned: true, published: state.published };
+              return {
+                ...base("cleanup", state, logTailMax, state.status !== "error"),
+                cleaned: true,
+                published: state.published,
+                media: summarizePublishedMedia(state.published),
+              };
             }}
           </Task>
         ) : null}

@@ -9,7 +9,14 @@ import { z } from "zod/v4";
 import { config } from "../../harness/agent/src/config.ts";
 import { AgentSession } from "../../harness/agent/src/session.ts";
 import { runPipeline, type RunState } from "../../harness/agent/src/runner.ts";
-import { acquireRunLock, createRun, createRunId, releaseRunLock, writeRun } from "../../harness/agent/src/runs.ts";
+import {
+  acquireRunLock,
+  createRun,
+  createRunId,
+  releaseRunLock,
+  summarizePublishedMedia,
+  writeRun,
+} from "../../harness/agent/src/runs.ts";
 
 const inputSchema = z.object({
   logTail: z.number().int().min(1).max(200).default(40),
@@ -18,6 +25,19 @@ const inputSchema = z.object({
 const publishedSchema = z.object({
   type: z.string(),
   slug: z.string(),
+  media: z
+    .object({
+      heroImage: z.boolean(),
+      audio: z.boolean(),
+      video: z.boolean(),
+    })
+    .optional(),
+});
+
+const mediaSummarySchema = z.object({
+  heroImages: z.number().int().nonnegative(),
+  audio: z.number().int().nonnegative(),
+  video: z.number().int().nonnegative(),
 });
 
 const agentRunSchema = z.object({
@@ -27,6 +47,7 @@ const agentRunSchema = z.object({
   startedAt: z.number(),
   finishedAt: z.number().optional(),
   published: z.array(publishedSchema),
+  media: mediaSummarySchema,
   error: z.string().optional(),
   log: z.array(z.string()),
   statusFile: z.string(),
@@ -46,6 +67,7 @@ function summarize(state: RunState, logTail: number, notes: string[] = []) {
     startedAt: state.startedAt,
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),
     published: state.published,
+    media: summarizePublishedMedia(state.published),
     ...(state.error ? { error: state.error } : {}),
     log: Array.isArray(state.log) ? state.log.slice(-logTail) : [],
     statusFile: `${config.runsDir}/${state.run_id}/status.json`,
@@ -86,7 +108,7 @@ export default smithers((ctx) => (
         const notes = [
           "This Smithers workflow reuses harness/agent/src/runner.ts so the current TinyCloud delegation and skill behavior stay identical to /agent/run.",
           "Run it only as an operator/dev entry point for now; it now shares the same cross-process run lock as the HTTP server.",
-          "runner.ts now exports createPipelineContext plus listen-read/generate/publish stage helpers; the next migration step is wiring those helpers as separate Smithers tasks for stage-level retry/backpressure.",
+          "For stage-level retry/backpressure and per-stage logs, use the agent-run-staged workflow.",
         ];
 
         let state: RunState | null = null;
