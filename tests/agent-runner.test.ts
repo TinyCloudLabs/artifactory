@@ -8,6 +8,7 @@ import {
   boundedProcessOutput,
   buildGenerationArgs,
   createPipelineContext,
+  formatMediaSummary,
   sanitizeArtifactMediaForPublish,
   shouldPublishArtifact,
   summarizeArtifactRoutes,
@@ -191,6 +192,24 @@ describe("agent runner generation visibility", () => {
         { type: "social-post", slug: "held", publish: false },
       ]),
     ).toBe("2 artifact(s) 1 publishable [article/visible] 1 held [social-post/held]");
+  });
+
+  test("summarizes published media presence for run logs and clients", () => {
+    expect(
+      formatMediaSummary({
+        type: "podcast",
+        slug: "episode",
+        media: { heroImage: true, audio: true, video: false },
+      }),
+    ).toBe(" (image, audio)");
+    expect(
+      formatMediaSummary({
+        type: "article",
+        slug: "plain",
+        media: { heroImage: false, audio: false, video: false },
+      }),
+    ).toBe(" (no media)");
+    expect(formatMediaSummary({ type: "article", slug: "old-shape" })).toBe("");
   });
 
   test("bounds child process output tails for run logs", () => {

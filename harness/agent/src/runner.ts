@@ -43,6 +43,11 @@ export type RunStatus = "queued" | "running" | "done" | "error";
 export interface PublishedRef {
   type: string;
   slug: string;
+  media?: {
+    heroImage: boolean;
+    audio: boolean;
+    video: boolean;
+  };
 }
 
 export interface RunState {
@@ -417,7 +422,7 @@ export async function runPublishStage(ctx: PipelineContext): Promise<void> {
     }
     const ref = await readArtifactRef(artifact.dir);
     if (ref) ctx.state.published.push(ref);
-    ctx.step(`publish: ${ref ? `${ref.type}/${ref.slug}` : label} published`);
+    ctx.step(`publish: ${ref ? `${ref.type}/${ref.slug}${formatMediaSummary(ref)}` : label} published`);
   }
 }
 
@@ -861,13 +866,38 @@ async function listArtifactRoutes(
   return routes;
 }
 
-/** Read { type, slug } off an artifact dir for the published[] response. */
+export function formatMediaSummary(ref: PublishedRef): string {
+  const media = ref.media;
+  if (!media) return "";
+  const parts = [
+    media.heroImage ? "image" : null,
+    media.audio ? "audio" : null,
+    media.video ? "video" : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? ` (${parts.join(", ")})` : " (no media)";
+}
+
+/** Read artifact identity + media presence off an artifact dir for published[]. */
 async function readArtifactRef(dir: string): Promise<PublishedRef | null> {
   try {
     const raw = await readFile(join(dir, "artifact.json"), "utf8");
-    const a = JSON.parse(raw) as { type?: string; slug?: string };
+    const a = JSON.parse(raw) as {
+      type?: string;
+      slug?: string;
+      hero_image?: unknown;
+      audio?: unknown;
+      video?: unknown;
+    };
     if (typeof a.type === "string" && typeof a.slug === "string") {
-      return { type: a.type, slug: a.slug };
+      return {
+        type: a.type,
+        slug: a.slug,
+        media: {
+          heroImage: typeof a.hero_image === "string" && a.hero_image.trim().length > 0,
+          audio: typeof a.audio === "string" && a.audio.trim().length > 0,
+          video: typeof a.video === "string" && a.video.trim().length > 0,
+        },
+      };
     }
   } catch {
     // fall through
