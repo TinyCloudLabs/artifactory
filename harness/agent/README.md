@@ -154,7 +154,8 @@ env). The tc CLI's config dir is `os.homedir()/.tinycloud` with no env override
    tools (curl/wget/nc/ssh/scp) + keychain/env readers (security/env/printenv) +
    WebFetch/WebSearch + a path-scoped Read/Glob/Grep deny of `AGENT_STATE_DIR`,
    `--no-session-persistence` keeps the untrusted transcript out of `~/.claude`
-   history, and `--add-dir` is scoped to ONLY `skills/` + the run's corpus +
+   history, `--strict-mcp-config --mcp-config '{}'` prevents user/project MCP
+   servers from starting inside the headless run, and `--add-dir` is scoped to ONLY `skills/` + the run's corpus +
    artifacts — **never `repoRoot`**, and the state dir lives outside the repo so
    the agent credentials are not under cwd or any `--add-dir` (see "Credential
    placement"). `$HOME` stays the **real** home —

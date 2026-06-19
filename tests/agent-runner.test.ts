@@ -178,6 +178,9 @@ describe("agent runner generation prompt", () => {
     expect(systemPrompt).toContain("Social posts are held for approval and will not fill Feed");
     expect(userPrompt).toContain("up to 3 publishable internal artifacts for the Feed");
     expect(userPrompt).toContain("optionally one approval-held social-post draft");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).toContain("--mcp-config");
+    expect(args).toContain("{}");
   });
 
   test("asks for real hero images and podcasts only when a Gemini provider is configured", () => {
