@@ -126,7 +126,7 @@
       </p>
       <div class="meta">
         <div class="pill"><strong>Artifactory:</strong> functional checkpoints through <code>386b1a9</code></div>
-        <div class="pill"><strong>Feed:</strong> 10 commits ahead of origin/main through <code>2065564</code></div>
+        <div class="pill"><strong>Feed:</strong> 11 commits ahead of origin/main through <code>edc9967</code></div>
         <div class="pill"><strong>Latest functional checkpoint:</strong> Smithers feed-run sees hot-take</div>
         <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS/build</div>
       </div>
@@ -376,6 +376,12 @@
             <td>Keeps cold-start run resume tolerant of old backends while making the operator-facing Run lock section report a missing <code>/agent/runs</code> endpoint.</td>
             <td><code>web/src/agentClient.ts</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">edc9967</span></td>
+            <td>Show agent generation settings</td>
+            <td>Renders optional <code>/agent/info</code> generation metadata in Agents details: target artifact cap, transcript window, and model.</td>
+            <td><code>web/src/agentClient.ts</code>, <code>web/src/pages/Agents.tsx</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -404,10 +410,11 @@
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:list</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:doctor</code></li>
         <li><span class="status-ok">Smithers:</span> <code>cd .smithers &amp;&amp; bun run typecheck</code></li>
-        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:dev-mode</code> logs <code>FAIL feed submodule drift</code> for submodule <code>2bda175</code> versus sibling <code>2065564</code>, and marks localhost probes <code>BLOCKED</code> under the current sandbox.</li>
+        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:dev-mode</code> logs <code>FAIL feed submodule drift</code> for submodule <code>2bda175</code> versus sibling <code>edc9967</code>, and marks localhost probes <code>BLOCKED</code> under the current sandbox.</li>
         <li><span class="status-ok">Feed:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Feed:</span> <code>bun run build</code></li>
-        <li><span class="status-ok">Artifactory embedded Feed:</span> <code>bun run artifact:frontend:check</code> passed and warned that submodule <code>2bda175</code> differs from sibling <code>2065564</code>.</li>
+        <li><span class="status-ok">Feed:</span> <code>edc9967</code> consumes Artifactory's optional <code>/agent/info.generation</code> block and surfaces target artifacts, transcript count, and model in Agents details.</li>
+        <li><span class="status-ok">Artifactory embedded Feed:</span> <code>bun run artifact:frontend:check</code> passed and warned that submodule <code>2bda175</code> differs from sibling <code>edc9967</code>.</li>
         <li><span class="status-ok">Artifactory embedded Feed:</span> <code>ARTIFACT_FEED_DRIFT=strict bash scripts/artifact-feed-check.sh</code> failed before build, as intended.</li>
         <li><span class="status-ok">Staged agent run:</span> <code>bun run smithers:agent-run:staged</code> completed in 8m59s and published <code>article/it-built-it-didn-t-ship-and-nobody-could-see-why</code>; it held <code>social-post/enqueue-time-timeout-kills-the-tail-of-your-queue</code> for approval.</li>
         <li><span class="status-ok">Staged agent run:</span> <code>run-1781835553692-2cjnp6</code> completed in 6m26s with target 3 and published <code>article/the-demo-house-nobody-can-move-into</code>, <code>insight-card/desperation-is-the-real-dilution-the-runway-first-fundraising-sp</code>, and <code>insight-card/the-permission-slip-is-public-only-the-key-is-secret</code>.</li>
