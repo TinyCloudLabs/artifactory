@@ -5,7 +5,7 @@
 // smithers-tags: dev, feed, observability
 /** @jsxImportSource smithers-orchestrator */
 import { W_OK } from "node:constants";
-import { accessSync, existsSync } from "node:fs";
+import { accessSync, existsSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -95,11 +95,72 @@ function writablePath(path: string): { ok: boolean; detail: string } {
   }
 }
 
+function readDevEnv(path: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (!existsSync(path)) return env;
+  try {
+    const text = readFileSync(path, "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const key = match[1]!;
+      let value = match[2]!.trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (value.length > 0) env[key] = value;
+    }
+  } catch {
+    return env;
+  }
+  return env;
+}
+
+function envPresent(env: Record<string, string>, ...keys: string[]): boolean {
+  return keys.some((key) => Boolean(process.env[key]?.trim() || env[key]?.trim()));
+}
+
+function mediaConfigDetail(devEnv: Record<string, string>): { ok: boolean; detail: string } {
+  const image = envPresent(devEnv, "GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY");
+  const fal = envPresent(devEnv, "FAL_KEY");
+  const videoFlag = (process.env.AGENT_ENABLE_VIDEO ?? devEnv.AGENT_ENABLE_VIDEO) === "1";
+  const parts = [
+    `hero images: ${image ? "enabled (Gemini provider present)" : "disabled (no Gemini provider)"}`,
+    `video clips: ${fal && videoFlag ? "enabled" : fal ? "disabled (FAL_KEY present, AGENT_ENABLE_VIDEO=1 missing)" : "disabled (no FAL_KEY)"}`,
+    `podcast audio: available when Gemini provider is present`,
+  ];
+  return { ok: image, detail: parts.join("; ") };
+}
+
+function summarizeHttpBody(body: string): string {
+  const title = body.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
+  if (title) return title;
+  return body.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
 async function curlOk(url: string): Promise<{ status: "pass" | "fail" | "blocked"; ok: boolean; detail: string }> {
   try {
-    const res = await execFileAsync("curl", ["-k", "-sS", "-m", "4", url], { timeout: 5_000 });
-    const text = toDetail(res.stdout, res.stderr);
-    return { status: "pass", ok: true, detail: text.slice(0, 240) };
+    const res = await execFileAsync("curl", ["-k", "-sS", "-m", "4", "-w", "\n%{http_code}", url], {
+      timeout: 5_000,
+    });
+    const combined = `${res.stdout ?? ""}${res.stderr ?? ""}`.trim();
+    const lines = combined.split("\n");
+    const statusCode = Number(lines.pop());
+    const body = summarizeHttpBody(lines.join("\n").trim());
+    const statusOk = Number.isFinite(statusCode) && statusCode >= 200 && statusCode < 400;
+    if (statusOk) {
+      return { status: "pass", ok: true, detail: `HTTP ${statusCode}: ${body}`.slice(0, 240) };
+    }
+    return {
+      status: "fail",
+      ok: false,
+      detail: `HTTP ${Number.isFinite(statusCode) ? statusCode : "unknown"}: ${body}`.slice(0, 600),
+    };
   } catch (err) {
     const record = err as { stdout?: string; stderr?: string; code?: number; message?: string };
     const text = toDetail(record.stdout, record.stderr) || record.message || `exit ${record.code ?? "unknown"}`;
@@ -183,6 +244,9 @@ export default smithers((ctx) => (
           "scripts/artifact-agent-dev-https.sh",
         );
         addBool("local Gemini env", existsSync(devEnv), `${devEnv} (${existsSync(devEnv) ? "present" : "missing"})`);
+        const devEnvValues = readDevEnv(devEnv);
+        const media = mediaConfigDetail(devEnvValues);
+        add("media generation config", media.ok ? "pass" : "fail", media.detail);
         const portlessDirWritable = writablePath(portlessDir);
         const portlessLogWritable = existsSync(portlessLog) ? writablePath(portlessLog) : portlessDirWritable;
         add(
@@ -269,6 +333,8 @@ export default smithers((ctx) => (
             "`bun run artifact:dev:https` is the preferred one-command local setup: embedded Feed + local agent behind Portless with a shared token.",
             "Feed reads VITE_AGENT_CONFIG_OVERRIDE=1, VITE_AGENT_HOST, and VITE_AGENT_TOKEN from the dev process environment.",
             "The agent launcher sources DEV_DISTILLERY_ENV or ~/development.nosync/distillery/.env for GEMINI_API_KEY without copying secrets into this repo.",
+            "Media readiness is non-secret: Smithers reports provider presence and AGENT_ENABLE_VIDEO, never key values.",
+            "Video remains opt-in even when FAL_KEY exists; set AGENT_ENABLE_VIDEO=1 only for runs where clip spend is intended.",
             "If Portless reports `EPERM` for ~/.portless/proxy.log, run the launcher outside the sandbox or approve the unsandboxed local dev-server command.",
             "If local listeners are present but Portless routes or endpoint fetches are blocked/failing, the probe may be running inside a restricted sandbox; rerun it outside the sandbox before treating Portless as broken.",
             "Smithers dev mode serves the sibling Feed checkout, while Artifactory package scripts serve submodules/feed; keep those commits aligned before trusting end-to-end behavior.",

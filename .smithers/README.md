@@ -20,6 +20,10 @@ bun run smithers:agent-run:staged
 - Local Artifactory agent at `https://agent.feed.localhost:1355`
 - Local Gemini development env, sourced from `DEV_DISTILLERY_ENV` or
   `~/development.nosync/distillery/.env`
+- Media generation readiness, without printing secrets: whether a Gemini image
+  provider is present for hero images / podcast audio, whether `FAL_KEY` is
+  present for clips, and whether `AGENT_ENABLE_VIDEO=1` has explicitly enabled
+  video spend.
 - Embedded Feed submodule alignment against the sibling `../feed` checkout.
   This is a readiness check because Smithers dev mode serves `../feed`, while
   Artifactory package scripts serve `submodules/feed`.
