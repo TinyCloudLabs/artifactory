@@ -125,9 +125,9 @@
         checkpoints have been pushed to each repo's <code>origin/main</code>.
       </p>
       <div class="meta">
-        <div class="pill"><strong>Artifactory:</strong> pushed through <code>e5a60b6</code></div>
+        <div class="pill"><strong>Artifactory:</strong> pushed through <code>1fb771d</code></div>
         <div class="pill"><strong>Feed:</strong> pushed through <code>edc9967</code></div>
-        <div class="pill"><strong>Latest functional checkpoint:</strong> Smithers feed-run sees hot-take</div>
+        <div class="pill"><strong>Latest functional checkpoint:</strong> Smithers stale-run triage documented</div>
         <div class="pill"><strong>Validated recently:</strong> Artifactory tests/TS/Smithers + Feed TS/build</div>
       </div>
     </header>
@@ -306,6 +306,12 @@
             <td>Advances <code>submodules/feed</code> from <code>2bda175</code> to <code>edc9967</code>, so Artifactory dev/check uses the same Feed code as the sibling repo.</td>
             <td><code>submodules/feed</code></td>
           </tr>
+          <tr>
+            <td><span class="hash">1fb771d</span></td>
+            <td>Document Smithers stale run triage</td>
+            <td>Adds package scripts and docs for <code>smithers:ps</code>, <code>smithers:why</code>, and stale-run cancellation before launching more agent work.</td>
+            <td><code>package.json</code>, <code>.smithers/README.md</code>, <code>harness/agent/README.md</code></td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -396,11 +402,10 @@
       <h2>Latest Checkpoint</h2>
       <p class="note">
         <span class="status-ok">Newest local checkpoint:</span>
-        <code>submodules/feed → edc9967</code>.
-        The embedded Feed used by Artifactory dev/check now matches the sibling
-        Feed checkout, so the Agents UI generation-settings work is visible in
-        both development paths. Feed <code>edc9967</code> and Artifactory
-        <code>e5a60b6</code> have both been pushed to <code>origin/main</code>.
+        <code>1fb771d Document Smithers stale run triage</code>.
+        Smithers now has repo-level operator commands and docs for listing,
+        explaining, and cancelling stale local workflow runs before more agent
+        work starts.
       </p>
     </section>
 
@@ -416,7 +421,8 @@
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:list</code></li>
         <li><span class="status-ok">Smithers:</span> <code>bun run smithers:doctor</code></li>
         <li><span class="status-ok">Smithers:</span> <code>cd .smithers &amp;&amp; bun run typecheck</code></li>
-        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:dev-mode</code> logs <code>PASS feed submodule drift</code>: both Feed checkouts are at <code>edc9967</code>; localhost probes remain <code>BLOCKED</code> under the current sandbox.</li>
+        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:dev-mode</code> logs <code>PASS feed submodule drift</code>: both Feed checkouts are at <code>edc9967</code>; current Portless route and HTTPS endpoint checks fail because no active routes are registered.</li>
+        <li><span class="status-ok">Smithers:</span> <code>bun run smithers:ps -- --format json</code> now shows stale run <code>6534b699-2b60-43cc-966b-b3d711dd81eb</code> as <code>cancelled</code>, after <code>smithers:why</code> identified retries exhausted on <code>agent-run.lock</code> plus a stale heartbeat.</li>
         <li><span class="status-ok">Feed:</span> <code>bun run typecheck</code></li>
         <li><span class="status-ok">Feed:</span> <code>bun run build</code></li>
         <li><span class="status-ok">Feed:</span> <code>edc9967</code> consumes Artifactory's optional <code>/agent/info.generation</code> block and surfaces target artifacts, transcript count, and model in Agents details.</li>
