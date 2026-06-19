@@ -257,6 +257,14 @@ bun run artifact:inflate
 That initializes `submodules/feed`, installs the root distillery dependencies,
 and installs the feed dependencies.
 
+The Artifactory dev scripts run the vendored submodule, not the sibling
+`../feed` checkout. If both repos are present and their HEAD commits differ,
+`artifact:dev` and `artifact:frontend:check` print a drift warning with both
+hashes. Use it as a reminder that standalone Feed changes are not available to
+the Artifactory/Feed combo until they are pushed and the submodule pointer is
+updated. Set `ARTIFACT_FEED_DRIFT=strict` to make that drift fail the frontend
+check.
+
 ### Run frontend + distillery backend
 
 Run both sides together:

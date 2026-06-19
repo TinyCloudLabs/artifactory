@@ -6,6 +6,7 @@ source "$ROOT/scripts/artifact-lib.sh"
 
 ensure_bun
 ensure_feed_deps "$ROOT"
+check_feed_submodule_drift "$ROOT"
 
 cd "$ROOT/submodules/feed"
 exec bun run dev "$@"
