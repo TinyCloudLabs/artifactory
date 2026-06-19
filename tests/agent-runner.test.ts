@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { classifyListenReadResult } from "../harness/agent/src/listen-read-outcome.ts";
 import { canReclaimRunLock, reconcileStaleRun, summarizeRunLock } from "../harness/agent/src/runs.ts";
 import {
+  boundedProcessOutput,
   buildGenerationArgs,
   createPipelineContext,
   sanitizeArtifactMediaForPublish,
   shouldPublishArtifact,
+  summarizeArtifactRoutes,
   type RunState,
 } from "../harness/agent/src/runner.ts";
 import type { ActiveDelegation } from "../harness/agent/src/session.ts";
@@ -137,6 +139,22 @@ describe("agent runner generation prompt", () => {
   });
 });
 
+describe("agent runner generation visibility", () => {
+  test("summarizes publishable and held artifact routes for progress logs", () => {
+    expect(
+      summarizeArtifactRoutes([
+        { type: "article", slug: "visible", publish: true },
+        { type: "social-post", slug: "held", publish: false },
+      ]),
+    ).toBe("2 artifact(s) 1 publishable [article/visible] 1 held [social-post/held]");
+  });
+
+  test("bounds child process output tails for run logs", () => {
+    expect(boundedProcessOutput("stdout", "")).toBeNull();
+    expect(boundedProcessOutput("stdout", "abcdef", 3)).toBe("stdout tail: ...def");
+  });
+});
+
 describe("agent run stale-state reconciliation", () => {
   function runState(overrides: Partial<RunState> = {}): RunState {
     return {
@@ -166,7 +184,7 @@ describe("agent run stale-state reconciliation", () => {
       runState({
         log: [
           "2026-06-18T19:32:16.704Z generate: distilling publishable feed artifact from the corpus",
-          "2026-06-18T19:39:56.704Z generate: still running (1 artifact dir(s) currently on disk)",
+          "2026-06-18T19:39:56.704Z generate: still running (1 artifact(s) 1 publishable [article/demo] 0 held)",
         ],
       }),
       now,

@@ -164,6 +164,12 @@ Each external child stage writes heartbeat progress at
 `AGENT_STAGE_HEARTBEAT_MS`, so Feed can distinguish a live long-running stage
 from a genuinely stale run.
 
+During generation, heartbeats classify the artifacts already on disk as
+publishable vs. held drafts, e.g. `1 publishable [article/foo] 1 held
+[social-post/bar]`. When the child exits, the runner records a bounded stdout /
+stderr tail so operators can see the final agent summary without opening the
+run scratch.
+
 1. **listen-read** — `tc-listen-read/listen-read.ts` pulls the user's Listen
    transcripts into the run's corpus. **Empty-Listen-safe:** 0 transcripts →
    the run completes with 0 artifacts (valid), skipping generate + publish.

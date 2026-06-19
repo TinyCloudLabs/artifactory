@@ -362,20 +362,26 @@ export async function runGenerateStage(
     {
       heartbeatMs: config.stageHeartbeatMs,
       onHeartbeat: async () => {
-        const count = (await listArtifactDirs(ctx.artifactsDir)).length;
-        ctx.step(`generate: still running (${count} artifact dir(s) currently on disk)`);
+        const routes = await listArtifactRoutes(ctx.artifactsDir);
+        ctx.step(`generate: still running (${summarizeArtifactRoutes(routes)})`);
       },
     },
   );
   if (gen.code !== 0) {
     throw new Error(`generate failed (exit ${gen.code}): ${gen.stderr.slice(-800) || gen.stdout.slice(-800)}`);
   }
+  const routes = await listArtifactRoutes(ctx.artifactsDir);
+  ctx.step(`generate: completed (${summarizeArtifactRoutes(routes)})`);
+  const stdoutTail = boundedProcessOutput("stdout", gen.stdout);
+  if (stdoutTail) ctx.step(`generate: ${stdoutTail}`);
+  const stderrTail = boundedProcessOutput("stderr", gen.stderr);
+  if (stderrTail) ctx.step(`generate: ${stderrTail}`);
 }
 
 export async function runPublishStage(ctx: PipelineContext): Promise<void> {
   // PUBLISH — each generated artifact to the user's xyz.tinycloud.artifacts
   // (KV media + SQL feed row, approval_status='approved'), under delegation.
-  const artifactRoutes = await listArtifactRoutes(ctx.artifactsDir);
+  const artifactRoutes = await listArtifactRoutes(ctx.artifactsDir, { preflightMedia: true });
   const publishable = artifactRoutes.filter((route) => route.publish);
   const drafts = artifactRoutes.filter((route) => !route.publish);
   for (const route of artifactRoutes) {
@@ -619,6 +625,10 @@ interface ArtifactRoute {
   mediaWarnings?: string[];
 }
 
+interface ReadArtifactRouteOptions {
+  preflightMedia?: boolean;
+}
+
 function isArtifactType(type: string): type is ArtifactType {
   return (ARTIFACT_TYPES as readonly string[]).includes(type);
 }
@@ -648,7 +658,34 @@ export function shouldPublishArtifact(input: {
   return { publish: true };
 }
 
-async function readArtifactRoute(dir: string): Promise<ArtifactRoute | null> {
+export function summarizeArtifactRoutes(routes: Pick<ArtifactRoute, "type" | "slug" | "publish">[]): string {
+  if (routes.length === 0) return "0 artifact(s)";
+  const publishable = routes.filter((route) => route.publish);
+  const held = routes.filter((route) => !route.publish);
+  const labels = (items: Pick<ArtifactRoute, "type" | "slug">[]) =>
+    items
+      .slice(0, 4)
+      .map((route) => `${route.type}/${route.slug}`)
+      .join(", ");
+  const parts = [`${routes.length} artifact(s)`, `${publishable.length} publishable`];
+  if (publishable.length > 0) parts.push(`[${labels(publishable)}${publishable.length > 4 ? ", ..." : ""}]`);
+  parts.push(`${held.length} held`);
+  if (held.length > 0) parts.push(`[${labels(held)}${held.length > 4 ? ", ..." : ""}]`);
+  return parts.join(" ");
+}
+
+export function boundedProcessOutput(label: "stdout" | "stderr", text: string, maxChars = 900): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const lines = trimmed.split(/\r?\n/).slice(-8).join("\n").trim();
+  const tail = lines.length > maxChars ? `...${lines.slice(-maxChars)}` : lines;
+  return `${label} tail: ${tail}`;
+}
+
+async function readArtifactRoute(
+  dir: string,
+  options: ReadArtifactRouteOptions = {},
+): Promise<ArtifactRoute | null> {
   try {
     const artifact = JSON.parse(await readFile(join(dir, "artifact.json"), "utf8")) as {
       type?: unknown;
@@ -657,7 +694,9 @@ async function readArtifactRoute(dir: string): Promise<ArtifactRoute | null> {
       approval_status?: unknown;
       hero_image?: unknown;
     } & Record<string, unknown>;
-    const mediaWarnings = await sanitizeArtifactMediaForPublish(dir, artifact);
+    const mediaWarnings = options.preflightMedia
+      ? await sanitizeArtifactMediaForPublish(dir, artifact)
+      : [];
     const fallback = await readArtifactRef(dir);
     const type =
       typeof artifact.type === "string" ? artifact.type : fallback?.type ?? "unknown";
@@ -772,11 +811,14 @@ function isSupportedImage(name: string, bytes: Uint8Array): boolean {
   return false;
 }
 
-async function listArtifactRoutes(artifactsDir: string): Promise<ArtifactRoute[]> {
+async function listArtifactRoutes(
+  artifactsDir: string,
+  options: ReadArtifactRouteOptions = {},
+): Promise<ArtifactRoute[]> {
   const dirs = await listArtifactDirs(artifactsDir);
   const routes: ArtifactRoute[] = [];
   for (const dir of dirs) {
-    const route = await readArtifactRoute(dir);
+    const route = await readArtifactRoute(dir, options);
     if (route) routes.push(route);
   }
   return routes;
