@@ -30,8 +30,8 @@
 // Any tc/auth/space failure must surface as an error; masking a 401 as "empty"
 // destroys the operator's ability to fix the delegation.
 
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import { config } from "./config.ts";
 import type { ActiveDelegation } from "./session.ts";
@@ -76,9 +76,17 @@ interface SpawnResult {
 
 type EnvMode = "sandbox" | "generate";
 
+interface RunHeartbeatInfo {
+  pid?: number;
+  startedAt: number;
+  elapsedMs: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+}
+
 interface RunHooks {
   heartbeatMs?: number;
-  onHeartbeat?: () => void | Promise<void>;
+  onHeartbeat?: (info: RunHeartbeatInfo) => void | Promise<void>;
 }
 
 export interface PipelineContext {
@@ -136,6 +144,9 @@ function run(
       : buildGenerateEnv();
   return new Promise((resolve, reject) => {
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const startedAt = Date.now();
+    let stdout = "";
+    let stderr = "";
     const child = spawn(cmd, args, {
       cwd: config.repoRoot,
       env,
@@ -143,13 +154,19 @@ function run(
     });
     if (hooks.onHeartbeat) {
       heartbeat = setInterval(() => {
-        Promise.resolve(hooks.onHeartbeat?.()).catch(() => {
+        Promise.resolve(
+          hooks.onHeartbeat?.({
+            pid: child.pid,
+            startedAt,
+            elapsedMs: Date.now() - startedAt,
+            stdoutBytes: Buffer.byteLength(stdout),
+            stderrBytes: Buffer.byteLength(stderr),
+          }),
+        ).catch(() => {
           // Best-effort status visibility; never fail the child for log writes.
         });
       }, hooks.heartbeatMs ?? 30_000);
     }
-    let stdout = "";
-    let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => {
@@ -373,9 +390,13 @@ export async function runGenerateStage(
     "generate",
     {
       heartbeatMs: config.stageHeartbeatMs,
-      onHeartbeat: async () => {
+      onHeartbeat: async (info) => {
         const routes = await listArtifactRoutes(ctx.artifactsDir);
-        ctx.step(`generate: still running (${summarizeArtifactRoutes(routes)})`);
+        const tree = await summarizeArtifactTree(ctx.artifactsDir);
+        ctx.step(
+          `generate: still running (${summarizeArtifactRoutes(routes)}; ` +
+            `${formatHeartbeatInfo(info)}; ${tree})`,
+        );
       },
     },
   );
@@ -739,6 +760,75 @@ export function summarizeArtifactRoutes(routes: Pick<ArtifactRoute, "type" | "sl
   parts.push(`${held.length} held`);
   if (held.length > 0) parts.push(`[${labels(held)}${held.length > 4 ? ", ..." : ""}]`);
   return parts.join(" ");
+}
+
+export interface ArtifactTreeSummary {
+  fileCount: number;
+  totalBytes: number;
+  latestPath?: string;
+  latestMtimeMs?: number;
+}
+
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+}
+
+export function formatHeartbeatInfo(info: RunHeartbeatInfo): string {
+  const pid = info.pid ? `pid=${info.pid}` : "pid=unknown";
+  return `${pid} elapsed=${formatDuration(info.elapsedMs)} stdout=${info.stdoutBytes}B stderr=${info.stderrBytes}B`;
+}
+
+export function formatArtifactTreeSummary(summary: ArtifactTreeSummary, nowMs = Date.now()): string {
+  if (summary.fileCount === 0) return "files=0";
+  const latest = summary.latestPath ? ` latest=${summary.latestPath}` : "";
+  const age =
+    typeof summary.latestMtimeMs === "number"
+      ? ` latest_age=${formatDuration(Math.max(0, nowMs - summary.latestMtimeMs))}`
+      : "";
+  return `files=${summary.fileCount} bytes=${summary.totalBytes}${latest}${age}`;
+}
+
+export async function summarizeArtifactTree(root: string, nowMs = Date.now()): Promise<string> {
+  const summary: ArtifactTreeSummary = {
+    fileCount: 0,
+    totalBytes: 0,
+  };
+
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      let s;
+      try {
+        s = await stat(path);
+      } catch {
+        continue;
+      }
+      summary.fileCount += 1;
+      summary.totalBytes += s.size;
+      if (summary.latestMtimeMs === undefined || s.mtimeMs > summary.latestMtimeMs) {
+        summary.latestMtimeMs = s.mtimeMs;
+        summary.latestPath = relative(root, path) || entry.name;
+      }
+    }
+  }
+
+  await walk(root);
+  return formatArtifactTreeSummary(summary, nowMs);
 }
 
 export function boundedProcessOutput(label: "stdout" | "stderr", text: string, maxChars = 900): string | null {

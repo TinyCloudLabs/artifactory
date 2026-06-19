@@ -171,7 +171,12 @@ delegation, into a per-run scratch dir (`<AGENT_RUNS_DIR>/<id>/`):
 
 Each external child stage writes heartbeat progress at
 `AGENT_STAGE_HEARTBEAT_MS`, so Feed can distinguish a live long-running stage
-from a genuinely stale run.
+from a genuinely stale run. Generate-stage heartbeats include child-process
+diagnostics (`pid`, elapsed time, stdout/stderr byte counts) plus an artifact
+directory snapshot (`files`, total bytes, latest changed file, latest age). This
+is intentionally visible in `GET /agent/run/:id` because a long Claude/media
+step is healthy when files are still changing and suspicious when both process
+output and artifact files stay flat.
 
 During generation, heartbeats classify the artifacts already on disk as
 publishable vs. held drafts, e.g. `1 publishable [article/foo] 1 held

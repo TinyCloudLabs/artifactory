@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyListenReadResult } from "../harness/agent/src/listen-read-outcome.ts";
@@ -13,10 +13,14 @@ import {
   boundedProcessOutput,
   buildGenerationArgs,
   createPipelineContext,
+  formatArtifactTreeSummary,
+  formatDuration,
+  formatHeartbeatInfo,
   formatMediaSummary,
   publishedRefFromPublishStdout,
   sanitizeArtifactMediaForPublish,
   shouldPublishArtifact,
+  summarizeArtifactTree,
   summarizeArtifactRoutes,
   type RunState,
 } from "../harness/agent/src/runner.ts";
@@ -272,6 +276,44 @@ describe("agent runner generation visibility", () => {
   test("bounds child process output tails for run logs", () => {
     expect(boundedProcessOutput("stdout", "")).toBeNull();
     expect(boundedProcessOutput("stdout", "abcdef", 3)).toBe("stdout tail: ...def");
+  });
+
+  test("formats generate heartbeat process diagnostics", () => {
+    expect(formatDuration(0)).toBe("0s");
+    expect(formatDuration(65_000)).toBe("1m05s");
+    expect(
+      formatHeartbeatInfo({
+        pid: 1234,
+        startedAt: 1_000,
+        elapsedMs: 125_000,
+        stdoutBytes: 42,
+        stderrBytes: 7,
+      }),
+    ).toBe("pid=1234 elapsed=2m05s stdout=42B stderr=7B");
+  });
+
+  test("summarizes artifact file progress for generate heartbeats", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "distillery-agent-tree-"));
+    try {
+      await mkdir(join(dir, "article", "demo"), { recursive: true });
+      await writeFile(join(dir, "article", "demo", "artifact.json"), "{}");
+      await writeFile(join(dir, "article", "demo", "hero.png"), "fake-image");
+
+      const summary = await summarizeArtifactTree(dir, Date.now());
+      expect(summary).toContain("files=2");
+      expect(summary).toContain("bytes=12");
+      expect(summary).toContain("latest=");
+      expect(summary).toContain("latest_age=");
+
+      expect(
+        formatArtifactTreeSummary({
+          fileCount: 0,
+          totalBytes: 0,
+        }),
+      ).toBe("files=0");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
