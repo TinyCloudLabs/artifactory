@@ -280,6 +280,21 @@ bunx smithers-orchestrator workflow run artifact-type-smoke --input '{"artifactT
 bun run smithers:composition
 ```
 
+Live Smithers agent runs can also request a target artifact type:
+
+```sh
+bunx smithers-orchestrator workflow run agent-run-staged --input '{"artifactType":"digest"}'
+bunx smithers-orchestrator workflow run agent-run --input '{"artifactType":"podcast"}'
+```
+
+`artifactType` defaults to `"auto"` and may be any value in the artifact
+registry. This is deliberately a quality-gated bias, not a quota: the runner
+adds target-specific instructions to the generation prompt, but it still tells
+the agent to skip weak, duplicate, or prerequisite-missing artifacts. Use the
+smoke workflow first when testing routing for every type; use a live targeted
+run only when you are ready to spend model/media budget and publish under the
+active TinyCloud delegation.
+
 For the local HTTPS browser loop, prefer the one-command Portless launcher:
 
 ```sh

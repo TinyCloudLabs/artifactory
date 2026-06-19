@@ -196,7 +196,9 @@ skills continuously and decides what happens to their output. It is the
   smoke` sits above individual skills: it verifies ordering/freshness
   backpressure, format diversity, published cap behavior, draft isolation, and
   same-signal dedup so a run remains a good feed rather than a pile of valid
-  artifacts.
+  artifacts. The live `agent-run` and `agent-run-staged` workflows also accept
+  `{"artifactType":"..."}` (`auto` by default) as a quality-gated generation
+  bias for development runs; it nudges skill choice without forcing weak output.
 - **The delegated Feed agent** (`harness/agent/`) — the HTTPS/browser path used
   by TinyFeed. It runs `listen-read → generate → publish` under the user's
   TinyCloud delegation, logs heartbeats for long child stages, and reports

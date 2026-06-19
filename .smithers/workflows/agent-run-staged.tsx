@@ -17,6 +17,7 @@ import {
   runPublishStage,
   type RunState,
 } from "../../harness/agent/src/runner.ts";
+import { ARTIFACT_TYPES, type ArtifactType } from "../../skills/_shared/lib/formats.ts";
 import {
   acquireRunLock,
   createRun,
@@ -27,8 +28,11 @@ import {
   writeRun,
 } from "../../harness/agent/src/runs.ts";
 
+const artifactTargetValues = ["auto", ...ARTIFACT_TYPES] as const;
+
 const inputSchema = z.object({
   logTail: z.number().int().min(1).max(200).default(40),
+  artifactType: z.enum(artifactTargetValues).default("auto"),
 });
 
 const publishedSchema = z.object({
@@ -150,7 +154,11 @@ function missingRunState(runId: string): RunState {
   };
 }
 
-async function restoreContext(agentRunId: string): Promise<{
+function targetFromInput(value: (typeof artifactTargetValues)[number]): ArtifactType | undefined {
+  return value === "auto" ? undefined : value;
+}
+
+async function restoreContext(agentRunId: string, targetArtifactType?: ArtifactType): Promise<{
   active: ActiveDelegation;
   state: RunState;
   ctx: ReturnType<typeof createPipelineContext>;
@@ -167,12 +175,13 @@ async function restoreContext(agentRunId: string): Promise<{
   return {
     active,
     state,
-    ctx: createPipelineContext(active, state, writeRun),
+    ctx: createPipelineContext(active, state, writeRun, { targetArtifactType }),
   };
 }
 
 export default smithers((ctx) => {
   const logTailMax = typeof ctx.input.logTail === "number" ? ctx.input.logTail : 40;
+  const targetArtifactType = targetFromInput(ctx.input.artifactType ?? "auto");
   const preflight = ctx.outputMaybe("preflight", { nodeId: "preflight" });
   const listen = ctx.outputMaybe("listen", { nodeId: "listen" });
   const generate = ctx.outputMaybe("generate", { nodeId: "generate" });
@@ -230,9 +239,13 @@ export default smithers((ctx) => {
                 );
                 return { ...base("preflight", state, logTailMax, false), hasDelegation: false, hasLock: true, notes };
               }
-              const pipe = createPipelineContext(active, state, writeRun);
+              const pipe = createPipelineContext(active, state, writeRun, { targetArtifactType });
               state.status = "running";
-              pipe.step("run started");
+              pipe.step(
+                targetArtifactType
+                  ? `run started (target artifact type: ${targetArtifactType})`
+                  : "run started",
+              );
               await prepareRunScratch(pipe);
               return { ...base("preflight", state, logTailMax, true), hasDelegation: true, hasLock: true, notes };
             } catch (err) {
@@ -261,7 +274,7 @@ export default smithers((ctx) => {
               const runId = preflight.agentRunId;
               let state = readRun(runId);
               try {
-                const restored = await restoreContext(runId);
+                const restored = await restoreContext(runId, targetArtifactType);
                 state = restored.state;
                 const result = await runListenReadStage(restored.ctx);
                 if (result.kind === "empty") {
@@ -297,7 +310,7 @@ export default smithers((ctx) => {
               const runId = listen.agentRunId;
               let state = readRun(runId);
               try {
-                const restored = await restoreContext(runId);
+                const restored = await restoreContext(runId, targetArtifactType);
                 state = restored.state;
                 await runGenerateStage(restored.ctx, listen.transcripts);
                 return {
@@ -323,7 +336,7 @@ export default smithers((ctx) => {
               const runId = generate.agentRunId;
               let state = readRun(runId);
               try {
-                const restored = await restoreContext(runId);
+                const restored = await restoreContext(runId, targetArtifactType);
                 state = restored.state;
                 await runPublishStage(restored.ctx);
                 state.status = "done";

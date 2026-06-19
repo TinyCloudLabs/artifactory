@@ -9,6 +9,7 @@ import { z } from "zod/v4";
 import { config } from "../../harness/agent/src/config.ts";
 import { AgentSession } from "../../harness/agent/src/session.ts";
 import { runPipeline, type RunState } from "../../harness/agent/src/runner.ts";
+import { ARTIFACT_TYPES, type ArtifactType } from "../../skills/_shared/lib/formats.ts";
 import {
   acquireRunLock,
   createRun,
@@ -18,8 +19,11 @@ import {
   writeRun,
 } from "../../harness/agent/src/runs.ts";
 
+const artifactTargetValues = ["auto", ...ARTIFACT_TYPES] as const;
+
 const inputSchema = z.object({
   logTail: z.number().int().min(1).max(200).default(40),
+  artifactType: z.enum(artifactTargetValues).default("auto"),
 });
 
 const publishedSchema = z.object({
@@ -91,11 +95,16 @@ function markError(state: RunState, err: unknown): void {
   writeRun(state);
 }
 
+function targetFromInput(value: (typeof artifactTargetValues)[number]): ArtifactType | undefined {
+  return value === "auto" ? undefined : value;
+}
+
 export default smithers((ctx) => (
   <Workflow name="agent-run">
     <Task id="run" output={outputs.agentRun} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
       {async () => {
         const logTail = typeof ctx.input.logTail === "number" ? ctx.input.logTail : 40;
+        const targetArtifactType = targetFromInput(ctx.input.artifactType ?? "auto");
         const runId = createRunId();
         const lock = acquireRunLock(runId, "smithers-agent-run");
         if (!lock.ok) {
@@ -131,7 +140,7 @@ export default smithers((ctx) => (
             );
             return summarize(state, logTail, notes);
           }
-          await runPipeline(active, state, writeRun);
+          await runPipeline(active, state, writeRun, { targetArtifactType });
           return summarize(state, logTail, notes);
         } catch (err) {
           if (!state) {

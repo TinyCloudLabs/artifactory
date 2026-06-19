@@ -13,6 +13,7 @@ import {
   boundedProcessOutput,
   buildGenerationArgs,
   buildMediaFocusStep,
+  buildTargetArtifactTypeStep,
   createPipelineContext,
   formatArtifactTreeSummary,
   formatDuration,
@@ -223,6 +224,34 @@ describe("agent runner generation prompt", () => {
       .toContain("FAL_KEY and AGENT_ENABLE_VIDEO=1");
     expect(buildMediaFocusStep("balanced", { geminiEnabled: true, videoEnabled: true }).join("\n"))
       .toContain("Pick the best formats");
+  });
+
+  test("can target one artifact type without turning it into a quota", () => {
+    const podcast = buildTargetArtifactTypeStep("podcast").join("\n");
+    expect(podcast).toContain("ARTIFACT TARGET: podcast");
+    expect(podcast).toContain("quality still wins");
+    expect(podcast).toContain("do NOT create a weak");
+    expect(podcast).toContain("Try `make-podcast` first");
+
+    const social = buildTargetArtifactTypeStep("social-post").join("\n");
+    expect(social).toContain("approval-held outward draft");
+    expect(social).toMatch(/First satisfy the publishable feed\s+set/);
+
+    const quote = buildTargetArtifactTypeStep("quote-card").join("\n");
+    expect(quote).toContain("already-approved artifact");
+    expect(quote).toContain("do not fabricate one");
+  });
+
+  test("threads target artifact type into the generation prompt", () => {
+    const args = withMediaEnv({ GEMINI_API_KEY: "test-key" }, () =>
+      buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"], {
+        targetArtifactType: "digest",
+      }),
+    );
+    const systemPrompt = String(args[args.indexOf("--system-prompt") + 1]);
+    expect(systemPrompt).toContain("ARTIFACT TARGET: digest");
+    expect(systemPrompt).toContain("Try `write-digest` first");
+    expect(systemPrompt).toContain("quality still wins");
   });
 });
 

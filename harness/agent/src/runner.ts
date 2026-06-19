@@ -103,7 +103,17 @@ export interface PipelineContext {
   space: string;
   corpusDir: string;
   artifactsDir: string;
+  targetArtifactType?: ArtifactType;
   step: (msg: string) => void;
+}
+
+export interface PipelineOptions {
+  /**
+   * Optional live-generation nudge for Smithers/operator runs. This is never a
+   * quota or force flag: the generator must still skip the target when the
+   * corpus does not earn it or prerequisites are missing.
+   */
+  targetArtifactType?: ArtifactType;
 }
 
 export type ListenReadStageResult =
@@ -272,11 +282,16 @@ export async function runPipeline(
   active: ActiveDelegation,
   state: RunState,
   onProgress: (s: RunState) => void,
+  options: PipelineOptions = {},
 ): Promise<void> {
-  const ctx = createPipelineContext(active, state, onProgress);
+  const ctx = createPipelineContext(active, state, onProgress, options);
 
   state.status = "running";
-  ctx.step("run started");
+  ctx.step(
+    ctx.targetArtifactType
+      ? `run started (target artifact type: ${ctx.targetArtifactType})`
+      : "run started",
+  );
 
   await prepareRunScratch(ctx);
 
@@ -308,6 +323,7 @@ export function createPipelineContext(
   active: ActiveDelegation,
   state: RunState,
   onProgress: (s: RunState) => void,
+  options: PipelineOptions = {},
 ): PipelineContext {
   const corpusDir = join(config.runsDir, state.run_id, "corpus");
   const artifactsDir = join(config.runsDir, state.run_id, "artifacts");
@@ -318,6 +334,7 @@ export function createPipelineContext(
     space: active.spaceId,
     corpusDir,
     artifactsDir,
+    ...(options.targetArtifactType ? { targetArtifactType: options.targetArtifactType } : {}),
     step: (msg: string) => {
       state.log.push(`${new Date().toISOString()} ${msg}`);
       onProgress(state);
@@ -393,7 +410,9 @@ export async function runGenerateStage(
   // transcript can't reach ~/.tinycloud, the agent state, env secrets, or `tc`.
   const gen = await run(
     "claude",
-    buildGenerationArgs(ctx.corpusDir, ctx.artifactsDir, transcripts),
+    buildGenerationArgs(ctx.corpusDir, ctx.artifactsDir, transcripts, {
+      targetArtifactType: ctx.targetArtifactType,
+    }),
     "generate",
     {
       heartbeatMs: config.stageHeartbeatMs,
@@ -513,11 +532,89 @@ export function buildMediaFocusStep(
   ];
 }
 
+export function buildTargetArtifactTypeStep(target?: ArtifactType): string[] {
+  if (!target) {
+    return [
+      "ARTIFACT TARGET: auto. Use the strongest format the material earns.",
+    ];
+  }
+
+  const common = [
+    `ARTIFACT TARGET: ${target}. This run is deliberately testing the ${target}`,
+    "path, but quality still wins: do NOT create a weak, duplicate, or",
+    "prerequisite-missing artifact just to satisfy the target. If the corpus",
+    "does not earn this type, say why in the final summary and use the best",
+    "publishable format instead.",
+  ];
+
+  switch (target) {
+    case "insight-card":
+      return [
+        ...common,
+        "Try `hot-take` or `extract-insights` first for a compact, quote-anchored",
+        "internal artifact. Prefer one sharp operating lesson over a generic recap.",
+      ];
+    case "article":
+      return [
+        ...common,
+        "Try `write-article` first when one transcript thread has enough narrative",
+        "development for a longform internal piece.",
+      ];
+    case "podcast":
+      return [
+        ...common,
+        "Try `make-podcast` first only when there is a sustained through-line with",
+        "temporal development and real Gemini TTS is available.",
+      ];
+    case "clip":
+      return [
+        ...common,
+        "Try `make-clip` first only when AGENT_ENABLE_VIDEO=1 + FAL_KEY are",
+        "available and the material contains a genuinely visual reversal worth",
+        "video spend.",
+      ];
+    case "digest":
+      return [
+        ...common,
+        "Try `write-digest` first when 2-3 related threads deserve a compact",
+        "roundup rather than one long article.",
+      ];
+    case "social-post":
+      return [
+        ...common,
+        "This is an approval-held outward draft. First satisfy the publishable feed",
+        "set if the material earns it, then try `banger-extractor` for one public",
+        "social-post draft.",
+      ];
+    case "investor-update-snippet":
+      return [
+        ...common,
+        "This is an approval-held outward draft. First satisfy the publishable feed",
+        "set if the material earns it, then try `investor-snippet` only for an",
+        "investor-safe update grounded in verified transcript evidence.",
+      ];
+    case "quote-card":
+      return [
+        ...common,
+        "`quote-card` packages an already-approved artifact. In a fresh run it may",
+        "be blocked by that prerequisite; if so, say so and do not fabricate one.",
+      ];
+    case "person-brief":
+      return [
+        ...common,
+        "Try `person-brief` only when the corpus has a recurring, identity-grounded",
+        "person worth briefing. Every claim needs evidence; skip if role/name",
+        "confidence is thin.",
+      ];
+  }
+}
+
 /** Build the `claude -p` argv for the generation step (feed-run recipe, scoped). */
 export function buildGenerationArgs(
   corpusDir: string,
   artifactsDir: string,
   transcripts: string[],
+  options: { targetArtifactType?: ArtifactType } = {},
 ): string[] {
   const targetArtifacts = config.targetArtifacts;
   const geminiEnabled = Boolean(
@@ -528,6 +625,7 @@ export function buildGenerationArgs(
     geminiEnabled,
     videoEnabled,
   });
+  const targetArtifactTypeStep = buildTargetArtifactTypeStep(options.targetArtifactType);
   const podcastStep = geminiEnabled
     ? [
         "   - make-podcast for a sustained through-line that benefits from a short",
@@ -593,6 +691,8 @@ export function buildGenerationArgs(
     ...transcripts.map((t) => `    ${t}`),
     "",
     ...mediaFocusStep,
+    "",
+    ...targetArtifactTypeStep,
     "",
     "DO, in order, from the repo root. Read each skill's SKILL.md first.",
     "Every save MUST use the flag  --out-dir " + artifactsDir + "  (load-bearing:",
