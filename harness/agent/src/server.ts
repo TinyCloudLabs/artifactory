@@ -93,7 +93,14 @@ function isAuthorized(req: Request): boolean {
 
 const session = await AgentSession.bootstrap();
 
+function providerEnabled(...names: string[]): boolean {
+  return names.some((name) => Boolean(process.env[name]?.trim()));
+}
+
 async function handleInfo(req: Request): Promise<Response> {
+  const imageEnabled = providerEnabled("GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY");
+  const videoProviderConfigured = providerEnabled("FAL_KEY");
+  const videoFlagEnabled = process.env.AGENT_ENABLE_VIDEO === "1";
   return json(req, 200, {
     did: session.agentDid,
     name: config.name,
@@ -102,6 +109,20 @@ async function handleInfo(req: Request): Promise<Response> {
       transcriptCount: config.transcriptCount,
       targetArtifacts: config.targetArtifacts,
       model: config.genModel,
+      media: {
+        images: {
+          enabled: imageEnabled,
+          reason: imageEnabled ? "image provider configured" : "image provider not configured",
+        },
+        video: {
+          enabled: videoProviderConfigured && videoFlagEnabled,
+          reason: videoProviderConfigured
+            ? videoFlagEnabled
+              ? "video provider configured and enabled"
+              : "video provider configured, but AGENT_ENABLE_VIDEO is not enabled"
+            : "video provider not configured",
+        },
+      },
     },
     // No challenge in the MVP — the front end delegates straight to did:pkh.
   });

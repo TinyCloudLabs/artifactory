@@ -122,8 +122,28 @@ describe("agent runner pipeline context", () => {
 });
 
 describe("agent runner generation prompt", () => {
+  function withMediaEnv<T>(env: Record<string, string | undefined>, fn: () => T): T {
+    const keys = ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "FAL_KEY", "AGENT_ENABLE_VIDEO"];
+    const previous = new Map(keys.map((key) => [key, process.env[key]]));
+    for (const key of keys) delete process.env[key];
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    try {
+      return fn();
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
   test("prioritizes a publishable Feed artifact before approval-held drafts", () => {
-    const args = buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"]);
+    const args = withMediaEnv({}, () =>
+      buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"]),
+    );
     const systemPrompt = String(args[args.indexOf("--system-prompt") + 1]);
     const userPrompt = String(args[args.indexOf("-p") + 1]);
 
@@ -137,11 +157,29 @@ describe("agent runner generation prompt", () => {
     expect(systemPrompt).toContain("PUBLISHABLE FEED ARTIFACTS FIRST: aim for up to 3");
     expect(systemPrompt).toContain("hot-take");
     expect(systemPrompt).toContain("write-article");
+    expect(systemPrompt).toContain("make-podcast");
     expect(systemPrompt).toContain("extract-insights");
     expect(systemPrompt).toContain("person-brief");
+    expect(systemPrompt).toContain("HERO IMAGES SKIPPED");
     expect(systemPrompt).toContain("Social posts are held for approval and will not fill Feed");
     expect(userPrompt).toContain("up to 3 publishable internal artifacts for the Feed");
     expect(userPrompt).toContain("optionally one approval-held social-post draft");
+  });
+
+  test("asks for real hero images only when a Gemini image provider is configured", () => {
+    const skippedArgs = withMediaEnv({}, () =>
+      buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"]),
+    );
+    const skipped = String(skippedArgs[skippedArgs.indexOf("--system-prompt") + 1]);
+    expect(skipped).toContain("HERO IMAGES SKIPPED");
+
+    const enabledArgs = withMediaEnv({ GEMINI_API_KEY: "test-key" }, () =>
+      buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"]),
+    );
+    const enabled = String(enabledArgs[enabledArgs.indexOf("--system-prompt") + 1]);
+    expect(enabled).toContain("HERO IMAGES");
+    expect(enabled).toContain("skills/illustrate-card/SKILL.md");
+    expect(enabled).toContain("skills/illustrate-card/scripts/illustrate.ts");
   });
 });
 

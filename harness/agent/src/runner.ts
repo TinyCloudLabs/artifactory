@@ -428,7 +428,27 @@ export function buildGenerationArgs(
   transcripts: string[],
 ): string[] {
   const targetArtifacts = config.targetArtifacts;
+  const imageEnabled = Boolean(
+    process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+  );
   const videoEnabled = process.env.AGENT_ENABLE_VIDEO === "1" && Boolean(process.env.FAL_KEY);
+  const imageStep = imageEnabled
+    ? [
+        "   HERO IMAGES: after saving each publishable artifact, try to add a",
+        "   real hero image with skills/illustrate-card when the artifact has a",
+        "   concrete visual metaphor. Read skills/illustrate-card/SKILL.md, craft",
+        "   a literal no-text editorial prompt, then run:",
+        "   bun skills/illustrate-card/scripts/illustrate.ts --artifact-dir",
+        "   <artifact-dir> --prompt \"...\" --skip-existing",
+        "   Aim for one real hero image per published artifact, but keep quality",
+        "   higher than coverage: if illustration fails, is abstract, contains text,",
+        "   or is a placeholder, delete/strip it and leave hero_image unset.",
+      ]
+    : [
+        "   HERO IMAGES SKIPPED: no Gemini image provider is configured in this",
+        "   generate environment. Leave hero_image unset; do not create placeholder",
+        "   or fallback graphics.",
+      ];
   const videoStep = videoEnabled
     ? [
         "4. OPTIONAL CLIP (make-clip): only if the corpus contains one unusually",
@@ -470,16 +490,18 @@ export function buildGenerationArgs(
     "   - hot-take for compact, quote-anchored internal takes that can fill the",
     "     Feed quickly. Save with skills/hot-take/scripts/save.ts.",
     "   - write-article for the strongest through-line or narrative.",
+    "   - make-podcast for a sustained through-line that benefits from a short",
+    "     narrated audio artifact. Save with skills/make-podcast/scripts/save.ts",
+    "     so the artifact carries an `audio` file next to artifact.json.",
     "   - extract-insights for compact non-obvious claims/decisions.",
     "   - person-brief only when a recurring person is salient and every claim is",
     "     grounded. Skip it if identity/role evidence is thin.",
     "   Every publishable artifact must be internal/feed-safe, contract-valid,",
     "   have verified quotes where the type requires them, and save under the",
-    "   artifacts dir. Leave hero_image unset unless you successfully run",
-    "   illustrate-card/Gemini and have a real local image file in the artifact",
-    "   dir. Do not create placeholder/fallback graphics. Example article save:",
+    "   artifacts dir. Example article save:",
     "   bun skills/write-article/scripts/save.ts <artifact.json> " +
       `--out-dir ${artifactsDir}`,
+    ...imageStep,
     "   This step is the primary deliverable because the Feed only shows",
     "   publishable internal artifacts; do not spend the run only on",
     "   approval-held drafts.",
