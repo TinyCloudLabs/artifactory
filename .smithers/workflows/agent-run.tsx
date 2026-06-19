@@ -101,7 +101,13 @@ function targetFromInput(value: (typeof artifactTargetValues)[number]): Artifact
 
 export default smithers((ctx) => (
   <Workflow name="agent-run">
-    <Task id="run" output={outputs.agentRun} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+    <Task
+      id="run"
+      output={outputs.agentRun}
+      timeoutMs={90 * 60_000}
+      heartbeatTimeoutMs={45 * 60_000}
+      maxAttempts={1}
+    >
       {async () => {
         const logTail = typeof ctx.input.logTail === "number" ? ctx.input.logTail : 40;
         const targetArtifactType = targetFromInput(ctx.input.artifactType ?? "auto");

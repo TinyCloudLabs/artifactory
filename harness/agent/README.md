@@ -300,6 +300,13 @@ bunx smithers-orchestrator workflow run agent-run-staged --input '{"artifactType
 bunx smithers-orchestrator workflow run agent-run --input '{"artifactType":"podcast"}'
 ```
 
+For `artifactType:"clip"`, `agent-run-staged` is a proof run, not a soft
+preference: it checks the generated artifact directory before publish and fails
+without writing to TinyCloud unless there is a publishable `clip` artifact with a
+valid video file. The generate stage also gets a longer Smithers heartbeat window
+and a single attempt, so long video work is not retried halfway through and
+duplicated.
+
 `artifactType` defaults to `"auto"` and may be any value in the artifact
 registry. This is deliberately a quality-gated bias, not a quota: the runner
 adds target-specific instructions to the generation prompt, but it still tells

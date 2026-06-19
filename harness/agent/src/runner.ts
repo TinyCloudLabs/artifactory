@@ -807,9 +807,12 @@ export function buildTargetArtifactTypeStep(target?: ArtifactType): string[] {
     case "clip":
       return [
         ...common,
-        "Try `make-clip` first only when AGENT_ENABLE_VIDEO=1 + FAL_KEY are",
-        "available and the material contains a genuinely visual reversal worth",
-        "video spend.",
+        "Try `make-clip` before text-only artifacts when AGENT_ENABLE_VIDEO=1 +",
+        "FAL_KEY are available and the material contains a genuinely visual",
+        "reversal worth video spend. For a clip-targeted operator proof, do not",
+        "fill the run with text-only artifacts as a substitute for a missing",
+        "clip; if no clip clears the bar, say why and leave the proof to fail",
+        "explicitly before publish.",
       ];
     case "digest":
       return [
@@ -1517,7 +1520,7 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
   return String.fromCharCode(...bytes.slice(start, end));
 }
 
-async function listArtifactRoutes(
+export async function listArtifactRoutes(
   artifactsDir: string,
   options: ReadArtifactRouteOptions = {},
 ): Promise<ArtifactRoute[]> {

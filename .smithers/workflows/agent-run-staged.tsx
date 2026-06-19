@@ -11,6 +11,7 @@ import { AgentSession, type ActiveDelegation } from "../../harness/agent/src/ses
 import {
   cleanupRunScratch,
   createPipelineContext,
+  listArtifactRoutes,
   prepareRunScratch,
   runGenerateStage,
   runListenReadStage,
@@ -156,6 +157,25 @@ function missingRunState(runId: string): RunState {
 
 function targetFromInput(value: (typeof artifactTargetValues)[number]): ArtifactType | undefined {
   return value === "auto" ? undefined : value;
+}
+
+async function assertTargetProofBeforePublish(
+  targetArtifactType: ArtifactType | undefined,
+  artifactsDir: string,
+): Promise<void> {
+  if (targetArtifactType !== "clip") return;
+  const routes = await listArtifactRoutes(artifactsDir, { preflightMedia: true });
+  const clips = routes.filter((route) => route.type === "clip");
+  const publishableClip = clips.find((route) => route.publish);
+  if (publishableClip) return;
+  const reasons = clips
+    .map((route) => `${route.type}/${route.slug}: ${route.reason ?? "not publishable"}`)
+    .join("; ");
+  throw new Error(
+    reasons
+      ? `Clip proof failed before publish: no publishable video clip (${reasons}).`
+      : "Clip proof failed before publish: generation produced no clip artifact.",
+  );
 }
 
 async function restoreContext(agentRunId: string, targetArtifactType?: ArtifactType): Promise<{
@@ -305,7 +325,13 @@ export default smithers((ctx) => {
         ) : null}
 
         {shouldGenerate ? (
-          <Task id="generate" output={outputs.generate} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="generate"
+            output={outputs.generate}
+            timeoutMs={90 * 60_000}
+            heartbeatTimeoutMs={45 * 60_000}
+            maxAttempts={1}
+          >
             {async () => {
               const runId = listen.agentRunId;
               let state = readRun(runId);
@@ -338,6 +364,7 @@ export default smithers((ctx) => {
               try {
                 const restored = await restoreContext(runId, targetArtifactType);
                 state = restored.state;
+                await assertTargetProofBeforePublish(targetArtifactType, restored.ctx.artifactsDir);
                 await runPublishStage(restored.ctx);
                 state.status = "done";
                 state.finishedAt = Date.now();
