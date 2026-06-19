@@ -205,42 +205,22 @@ function sqlIdent(name: string): string {
   return `"${name}"`;
 }
 
-function pickColumn(columns: readonly string[], candidates: readonly string[]): string | undefined {
-  return candidates.find((name) => columns.includes(name));
-}
-
 export function mapConversationColumns(columns: readonly string[]): ConversationColumnMap {
   if (!columns.includes("id")) {
     throw new Error(`conversation table has no 'id' column (columns: ${columns.join(", ")})`);
   }
   return {
     id: "id",
-    title: pickColumn(columns, TITLE_COLUMNS),
-    startedAt: pickColumn(columns, START_COLUMNS),
-    transcriptJson: pickColumn(columns, INLINE_JSON_COLUMNS),
-    transcriptText: pickColumn(columns, INLINE_TEXT_COLUMNS),
+    title: TITLE_COLUMNS.find((name) => columns.includes(name)),
+    startedAt: START_COLUMNS.find((name) => columns.includes(name)),
+    transcriptJson: INLINE_JSON_COLUMNS.find((name) => columns.includes(name)),
+    transcriptText: INLINE_TEXT_COLUMNS.find((name) => columns.includes(name)),
   };
 }
 
-async function conversationColumns(
-  target: ListenTarget,
-  opts: TcRunOptions,
-): Promise<ConversationColumnMap> {
-  const res = await sqlQuery(
-    "PRAGMA table_info(conversation)",
-    { db: LISTEN_CONVERSATIONS_DB, space: target.space },
-    undefined,
-    opts,
-  );
-  const nameCol = res.columns.indexOf("name");
-  if (nameCol < 0) {
-    throw new Error(`PRAGMA table_info(conversation) returned no name column`);
-  }
-  return mapConversationColumns(
-    res.rows
-      .map((row) => optionalString(row, nameCol))
-      .filter((name): name is string => Boolean(name)),
-  );
+function missingColumn(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : String(e);
+  return /no such column|unknown column/i.test(message);
 }
 
 export function conversationListSql(columns: ConversationColumnMap): string {
@@ -277,13 +257,29 @@ export async function listConversations(
   opts: TcRunOptions = {},
   offset = 0,
 ): Promise<ConversationMeta[]> {
-  const columns = await conversationColumns(target, opts);
-  const res = await sqlQuery(
-    conversationListSql(columns),
-    { db: LISTEN_CONVERSATIONS_DB, space: target.space },
-    [limit, offset],
-    opts,
-  );
+  const candidates = [
+    mapConversationColumns(["id", "title", "started_at", "transcript_json", "transcript_text"]),
+    mapConversationColumns(["id", "title", "started_at"]),
+    mapConversationColumns(["id", "title"]),
+    mapConversationColumns(["id"]),
+  ];
+  let res: Awaited<ReturnType<typeof sqlQuery>> | undefined;
+  let lastMissingColumn: unknown;
+  for (const columns of candidates) {
+    try {
+      res = await sqlQuery(
+        conversationListSql(columns),
+        { db: LISTEN_CONVERSATIONS_DB, space: target.space },
+        [limit, offset],
+        opts,
+      );
+      break;
+    } catch (e) {
+      if (!missingColumn(e)) throw e;
+      lastMissingColumn = e;
+    }
+  }
+  if (!res) throw lastMissingColumn;
   const col = (name: string) => res.columns.indexOf(name);
   const idCol = col("id");
   const titleCol = col("title");
@@ -307,18 +303,26 @@ export async function fetchInlineTranscript(
   target: ListenTarget,
   opts: TcRunOptions = {},
 ): Promise<ConversationMeta> {
-  const columns = await conversationColumns(target, opts);
-  if (!columns.transcriptJson && !columns.transcriptText) return meta;
-  const selected = [
-    columns.transcriptJson ? `${sqlIdent(columns.transcriptJson)} AS transcript_json` : "NULL AS transcript_json",
-    columns.transcriptText ? `${sqlIdent(columns.transcriptText)} AS transcript_text` : "NULL AS transcript_text",
+  const attempts = [
+    `SELECT transcript_json AS transcript_json, transcript_text AS transcript_text FROM conversation WHERE id = ? LIMIT 1`,
+    `SELECT transcript_json AS transcript_json, NULL AS transcript_text FROM conversation WHERE id = ? LIMIT 1`,
+    `SELECT NULL AS transcript_json, transcript_text AS transcript_text FROM conversation WHERE id = ? LIMIT 1`,
   ];
-  const res = await sqlQuery(
-    `SELECT ${selected.join(", ")} FROM conversation WHERE ${sqlIdent(columns.id)} = ? LIMIT 1`,
-    { db: LISTEN_CONVERSATIONS_DB, space: target.space },
-    [meta.id],
-    opts,
-  );
+  let res: Awaited<ReturnType<typeof sqlQuery>> | undefined;
+  for (const statement of attempts) {
+    try {
+      res = await sqlQuery(
+        statement,
+        { db: LISTEN_CONVERSATIONS_DB, space: target.space },
+        [meta.id],
+        opts,
+      );
+      break;
+    } catch (e) {
+      if (!missingColumn(e)) throw e;
+    }
+  }
+  if (!res) return meta;
   const row = res.rows[0];
   if (!row) return meta;
   const transcriptJsonCol = res.columns.indexOf("transcript_json");

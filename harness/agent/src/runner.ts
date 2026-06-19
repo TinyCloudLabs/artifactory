@@ -30,6 +30,7 @@
 // Any tc/auth/space failure must surface as an error; masking a 401 as "empty"
 // destroys the operator's ability to fix the delegation.
 
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
@@ -236,6 +237,90 @@ function generatePath(): string {
   return [`${home}/.bun/bin`, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].join(":");
 }
 
+function expandHome(path: string): string {
+  const home = process.env.HOME;
+  if (!home) return path;
+  return path === "~" ? home : path.replace(/^~\//, `${home}/`);
+}
+
+function developmentEnvPaths(): string[] {
+  const configured = process.env.DEV_DISTILLERY_ENV?.trim();
+  if (configured) return [expandHome(configured)];
+  return [expandHome("~/development.nosync/distillery/.env")];
+}
+
+function parseEnvText(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!match) continue;
+    const key = match[1];
+    if (!key) continue;
+    let value = (match[2] ?? "").trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function readDevelopmentEnv(): Record<string, string> {
+  for (const path of developmentEnvPaths()) {
+    if (!existsSync(path)) continue;
+    try {
+      return parseEnvText(readFileSync(path, "utf8"));
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function devOrProcessEnv(devEnv: Record<string, string>, key: string): string | undefined {
+  const processValue = process.env[key];
+  if (typeof processValue === "string" && processValue.length > 0) return processValue;
+  const devValue = devEnv[key];
+  return typeof devValue === "string" && devValue.length > 0 ? devValue : undefined;
+}
+
+function buildGenerationProviderEnv(devEnv = readDevelopmentEnv()): Record<string, string> {
+  const env: Record<string, string> = {};
+  const ALLOW = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "GEMINI_API_KEY",
+    "GOOGLE_AI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AGENT_GEN_MODEL",
+    "AGENT_ENABLE_VIDEO",
+  ];
+  for (const key of ALLOW) {
+    const value = devOrProcessEnv(devEnv, key);
+    if (value) env[key] = value;
+  }
+  if (devOrProcessEnv(devEnv, "AGENT_ENABLE_VIDEO") === "1") {
+    const fal = devOrProcessEnv(devEnv, "FAL_KEY");
+    if (fal) env.FAL_KEY = fal;
+  }
+  return env;
+}
+
+function generationProviderAvailability(): { geminiEnabled: boolean; videoEnabled: boolean } {
+  const providerEnv = buildGenerationProviderEnv();
+  return {
+    geminiEnabled: Boolean(
+      providerEnv.GOOGLE_AI_API_KEY || providerEnv.GEMINI_API_KEY || providerEnv.GOOGLE_API_KEY,
+    ),
+    videoEnabled: providerEnv.AGENT_ENABLE_VIDEO === "1" && Boolean(providerEnv.FAL_KEY),
+  };
+}
+
 /**
  * The scrubbed env for the generate child. Starts from a small fixed base, then
  * adds ONLY allowlisted passthroughs — never the full process.env. Two groups:
@@ -248,23 +333,17 @@ function generatePath(): string {
  *     is intentionally DROPPED.
  */
 function buildGenerateEnv(): Record<string, string> {
+  const providerEnv = buildGenerationProviderEnv();
   const env: Record<string, string> = {
     HOME: process.env.HOME ?? "", // real home — claude's keychain auth needs it
     PATH: generatePath(),
     LANG: process.env.LANG ?? "en_US.UTF-8",
     TERM: process.env.TERM ?? "xterm-256color",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
+    ...providerEnv,
   };
   const ALLOW = [
-    // (1) model-provider creds
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "GEMINI_API_KEY",
-    "GOOGLE_AI_API_KEY",
-    "GOOGLE_API_KEY",
-    "AGENT_GEN_MODEL",
-    "AGENT_ENABLE_VIDEO",
-    // (2) macOS keychain-session vars (so claude finds its login token)
+    // macOS keychain-session vars (so claude finds its login token)
     "USER",
     "LOGNAME",
     "__CF_USER_TEXT_ENCODING",
@@ -272,9 +351,6 @@ function buildGenerateEnv(): Record<string, string> {
   for (const k of ALLOW) {
     const v = process.env[k];
     if (typeof v === "string" && v.length > 0) env[k] = v;
-  }
-  if (process.env.AGENT_ENABLE_VIDEO === "1" && process.env.FAL_KEY) {
-    env.FAL_KEY = process.env.FAL_KEY;
   }
   return env;
 }
@@ -811,10 +887,7 @@ export function buildGenerationArgs(
   } = {},
 ): string[] {
   const targetArtifacts = config.targetArtifacts;
-  const geminiEnabled = Boolean(
-    process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
-  );
-  const videoEnabled = process.env.AGENT_ENABLE_VIDEO === "1" && Boolean(process.env.FAL_KEY);
+  const { geminiEnabled, videoEnabled } = generationProviderAvailability();
   const mediaFocusStep = buildMediaFocusStep(config.mediaFocus, {
     geminiEnabled,
     videoEnabled,
@@ -1012,7 +1085,7 @@ export function buildGenerationArgs(
     "--no-session-persistence",
     "--strict-mcp-config",
     "--mcp-config",
-    "{}",
+    '{"mcpServers":{}}',
     "--add-dir",
     skillsDir,
     "--add-dir",

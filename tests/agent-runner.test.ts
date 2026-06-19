@@ -142,9 +142,17 @@ describe("agent runner pipeline context", () => {
 
 describe("agent runner generation prompt", () => {
   function withMediaEnv<T>(env: Record<string, string | undefined>, fn: () => T): T {
-    const keys = ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "FAL_KEY", "AGENT_ENABLE_VIDEO"];
+    const keys = [
+      "GOOGLE_AI_API_KEY",
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "FAL_KEY",
+      "AGENT_ENABLE_VIDEO",
+      "DEV_DISTILLERY_ENV",
+    ];
     const previous = new Map(keys.map((key) => [key, process.env[key]]));
     for (const key of keys) delete process.env[key];
+    process.env.DEV_DISTILLERY_ENV = "/tmp/distillery-agent-runner-test-missing.env";
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -187,7 +195,7 @@ describe("agent runner generation prompt", () => {
     expect(userPrompt).toContain("optionally one approval-held social-post draft");
     expect(args).toContain("--strict-mcp-config");
     expect(args).toContain("--mcp-config");
-    expect(args).toContain("{}");
+    expect(args).toContain('{"mcpServers":{}}');
   });
 
   test("asks for real hero images and podcasts only when a Gemini provider is configured", () => {
@@ -209,6 +217,31 @@ describe("agent runner generation prompt", () => {
     expect(enabled).toContain("make-podcast");
     expect(enabled).toContain("skills/make-podcast/SKILL.md");
     expect(enabled).toContain("synthesize.ts");
+  });
+
+  test("reads allowlisted media provider keys from the development env file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "distillery-agent-env-"));
+    const envPath = join(dir, ".env");
+    await writeFile(
+      envPath,
+      [
+        "GEMINI_API_KEY=gemini-from-dev-env",
+        "FAL_KEY=fal-from-dev-env",
+        "AGENT_ENABLE_VIDEO=1",
+        "TC_SECRET_SHOULD_NOT_LEAK=forbidden",
+      ].join("\n"),
+    );
+    try {
+      const args = withMediaEnv({ DEV_DISTILLERY_ENV: envPath }, () =>
+        buildGenerationArgs("/tmp/corpus", "/tmp/artifacts", ["/tmp/corpus/demo.md"]),
+      );
+      const systemPrompt = String(args[args.indexOf("--system-prompt") + 1]);
+      expect(systemPrompt).toContain("HERO IMAGES");
+      expect(systemPrompt).toContain("OPTIONAL CLIP");
+      expect(systemPrompt).not.toContain("VIDEO SKIPPED");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("can bias a development run toward proving podcast media", () => {
