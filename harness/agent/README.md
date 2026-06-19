@@ -228,13 +228,15 @@ This repo now carries a local Smithers workflow pack under `.smithers/` for
 durable development workflows, backpressure planning, and run triage. The
 `agent-run` workflow is a bridge that imports `runner.ts`, restores the
 persisted delegation, and runs the same skill chain as `/agent/run` while
-recording Smithers workflow state. The production `/agent/run` endpoint still
-executes the pipeline directly through `runner.ts`; migrating that endpoint onto
-stage-level Smithers tasks is the next orchestration step. `runner.ts` exports
-the stage helpers (`createPipelineContext`, `runListenReadStage`,
-`runGenerateStage`, `runPublishStage`) so the Smithers workflow can reuse the
-same implementation rather than growing a parallel pipeline. For local
-development checks, run:
+recording Smithers workflow state. Its output preserves the same
+`published[].media` flags and `{ heroImages, audio, video }` aggregate counts as
+the HTTP run API, so Smithers runs can prove media publication directly. The
+production `/agent/run` endpoint still executes the pipeline directly through
+`runner.ts`; migrating that endpoint onto stage-level Smithers tasks is the next
+orchestration step. `runner.ts` exports the stage helpers
+(`createPipelineContext`, `runListenReadStage`, `runGenerateStage`,
+`runPublishStage`) so the Smithers workflow can reuse the same implementation
+rather than growing a parallel pipeline. For local development checks, run:
 
 ```sh
 bun run smithers:doctor
@@ -263,7 +265,9 @@ approve the unsandboxed local dev-server command, then rerun
 `smithers:agent-run:staged` is the first stage-level orchestration path:
 `preflight → listen → generate → publish → cleanup`. It remains an operator/dev
 entry point until the HTTP endpoint delegates to Smithers task execution safely;
-it already shares the same cross-process run lock as `/agent/run`.
+it already shares the same cross-process run lock as `/agent/run`, and its
+`publish` / `cleanup` nodes report the same per-artifact and aggregate media
+evidence.
 
 If Smithers reports a stale `running` workflow, inspect before launching more
 agent work:
