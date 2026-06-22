@@ -18,6 +18,7 @@ import {
   runPublishStage,
   type RunState,
 } from "../../harness/agent/src/runner.ts";
+import { verifyAgentRunProof } from "../../harness/agent/src/run-proof.ts";
 import { ARTIFACT_TYPES, type ArtifactType } from "../../skills/_shared/lib/formats.ts";
 import {
   acquireRunLock,
@@ -60,6 +61,12 @@ const mediaSummarySchema = z.object({
   video: z.number().int().nonnegative(),
 });
 
+const proofSchema = z.object({
+  ok: z.boolean(),
+  targetArtifactType: z.enum(ARTIFACT_TYPES).optional(),
+  checks: z.array(z.object({ name: z.string(), ok: z.boolean(), detail: z.string() })),
+});
+
 const runStatusSchema = z.enum(["queued", "running", "done", "error"]);
 
 const stageBaseSchema = z.object({
@@ -96,6 +103,7 @@ const publishSchema = stageBaseSchema.extend({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  proof: proofSchema,
 });
 
 const cleanupSchema = stageBaseSchema.extend({
@@ -103,6 +111,7 @@ const cleanupSchema = stageBaseSchema.extend({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  proof: proofSchema,
 });
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
@@ -157,6 +166,19 @@ function missingRunState(runId: string): RunState {
 
 function targetFromInput(value: (typeof artifactTargetValues)[number]): ArtifactType | undefined {
   return value === "auto" ? undefined : value;
+}
+
+function proofFor(state: RunState, targetArtifactType?: ArtifactType) {
+  const media = summarizePublishedMedia(state.published);
+  return {
+    media,
+    proof: verifyAgentRunProof({
+      targetArtifactType,
+      published: state.published,
+      held: state.held ?? [],
+      media,
+    }),
+  };
 }
 
 async function assertTargetProofBeforePublish(
@@ -369,21 +391,25 @@ export default smithers((ctx) => {
                 state.status = "done";
                 state.finishedAt = Date.now();
                 writeRun(state);
+                const { media, proof } = proofFor(state, targetArtifactType);
                 return {
                   ...base("publish", state, logTailMax, true),
                   skipped: false,
                   published: state.published,
                   held: state.held ?? [],
-                  media: summarizePublishedMedia(state.published),
+                  media,
+                  proof,
                 };
               } catch (err) {
                 state = markError(state ?? missingRunState(runId), err);
+                const { media, proof } = proofFor(state, targetArtifactType);
                 return {
                   ...base("publish", state, logTailMax, false),
                   skipped: false,
                   published: state.published,
                   held: state.held ?? [],
-                  media: summarizePublishedMedia(state.published),
+                  media,
+                  proof,
                 };
               }
             }}
@@ -407,12 +433,14 @@ export default smithers((ctx) => {
               } finally {
                 releaseRunLock(runId);
               }
+              const { media, proof } = proofFor(state, targetArtifactType);
               return {
                 ...base("cleanup", state, logTailMax, state.status !== "error"),
                 cleaned: true,
                 published: state.published,
                 held: state.held ?? [],
-                media: summarizePublishedMedia(state.published),
+                media,
+                proof,
               };
             }}
           </Task>

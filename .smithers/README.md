@@ -110,6 +110,18 @@ returns a bounded log tail, `held[]` reasons for generated artifacts that did
 not publish, plus published media flags and aggregate `{ heroImages, audio,
 video }` counts in the Smithers output.
 
+Use `artifactType` when you want a transcript-driven proof for a specific Feed
+format. Both `agent-run` and `agent-run-staged` return a `proof` block that says
+whether the requested target actually published, including media requirements
+for the rich targets (`clip` needs video, `podcast` needs audio, `article` needs
+a hero image):
+
+```sh
+bun run smithers:agent-run:staged -- --input '{"artifactType":"clip","logTail":80}'
+bun run smithers:agent-run:staged -- --input '{"artifactType":"podcast","logTail":80}'
+bun run smithers:agent-run:staged -- --input '{"artifactType":"article","logTail":80}'
+```
+
 For now, treat `agent-run` as an operator/dev command, not the production HTTP
 control path. The HTTP server and Smithers workflows now share a disk-backed
 run lock in `AGENT_RUNS_DIR`, so only one delegated pipeline can use the mutable

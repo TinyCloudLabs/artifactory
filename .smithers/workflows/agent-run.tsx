@@ -9,6 +9,7 @@ import { z } from "zod/v4";
 import { config } from "../../harness/agent/src/config.ts";
 import { AgentSession } from "../../harness/agent/src/session.ts";
 import { runPipeline, type RunState } from "../../harness/agent/src/runner.ts";
+import { verifyAgentRunProof } from "../../harness/agent/src/run-proof.ts";
 import { ARTIFACT_TYPES, type ArtifactType } from "../../skills/_shared/lib/formats.ts";
 import {
   acquireRunLock,
@@ -50,6 +51,12 @@ const mediaSummarySchema = z.object({
   video: z.number().int().nonnegative(),
 });
 
+const proofSchema = z.object({
+  ok: z.boolean(),
+  targetArtifactType: z.enum(ARTIFACT_TYPES).optional(),
+  checks: z.array(z.object({ name: z.string(), ok: z.boolean(), detail: z.string() })),
+});
+
 const agentRunSchema = z.object({
   ok: z.boolean(),
   agentRunId: z.string(),
@@ -59,6 +66,7 @@ const agentRunSchema = z.object({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  proof: proofSchema,
   error: z.string().optional(),
   log: z.array(z.string()),
   statusFile: z.string(),
@@ -70,7 +78,13 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   agentRun: agentRunSchema,
 });
 
-function summarize(state: RunState, logTail: number, notes: string[] = []) {
+function summarize(
+  state: RunState,
+  logTail: number,
+  notes: string[] = [],
+  targetArtifactType?: ArtifactType,
+) {
+  const media = summarizePublishedMedia(state.published);
   return {
     ok: state.status === "done",
     agentRunId: state.run_id,
@@ -79,7 +93,13 @@ function summarize(state: RunState, logTail: number, notes: string[] = []) {
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),
     published: state.published,
     held: state.held ?? [],
-    media: summarizePublishedMedia(state.published),
+    media,
+    proof: verifyAgentRunProof({
+      targetArtifactType,
+      published: state.published,
+      held: state.held ?? [],
+      media,
+    }),
     ...(state.error ? { error: state.error } : {}),
     log: Array.isArray(state.log) ? state.log.slice(-logTail) : [],
     statusFile: `${config.runsDir}/${state.run_id}/status.json`,
@@ -125,6 +145,7 @@ export default smithers((ctx) => (
             },
             logTail,
             ["Another agent run already holds the shared run lock."],
+            targetArtifactType,
           );
         }
 
@@ -144,10 +165,10 @@ export default smithers((ctx) => (
               state,
               new Error("No active delegation found. Connect an agent from Feed or POST /agent/delegation first."),
             );
-            return summarize(state, logTail, notes);
+            return summarize(state, logTail, notes, targetArtifactType);
           }
           await runPipeline(active, state, writeRun, { targetArtifactType });
-          return summarize(state, logTail, notes);
+          return summarize(state, logTail, notes, targetArtifactType);
         } catch (err) {
           if (!state) {
             return summarize(
@@ -162,10 +183,11 @@ export default smithers((ctx) => (
               },
               logTail,
               notes,
+              targetArtifactType,
             );
           }
           markError(state, err);
-          return summarize(state, logTail, notes);
+          return summarize(state, logTail, notes, targetArtifactType);
         } finally {
           releaseRunLock(runId);
         }
