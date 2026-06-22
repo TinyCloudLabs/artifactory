@@ -13,6 +13,7 @@ bun run smithers:dev-mode
 bun run smithers:readiness
 bun run smithers:agent-run
 bun run smithers:agent-run:staged
+bun run smithers:media-smoke
 ```
 
 `feed-dev-mode` probes the current local development setup:
@@ -44,6 +45,27 @@ alignment, active TinyCloud delegation, stale runner lock state, Gemini/FAL
 media-provider readiness, and the deterministic agent/frontend/Smithers gates.
 It writes a JSON report under `.smithers/reports/` and does not start Claude,
 Gemini, FAL, TinyCloud writes, or `/agent/run`.
+
+`full-media-generation-smoke` is the controlled rich-media proof run. It calls
+the real skill scripts directly, without Claude editorial selection:
+`make-clip` video smoke → `make-clip save`, `make-podcast synthesize/save`, and
+`write-article save` → `illustrate-card`. By default it writes local artifacts
+and a report under `.smithers/reports/` without TinyCloud writes:
+
+```sh
+bun run smithers:media-smoke
+```
+
+To publish exactly those three proof artifacts into the delegated Feed, pass
+`publish=true` explicitly:
+
+```sh
+bun run smithers:media-smoke -- --input '{"publish":true}'
+```
+
+This spends provider credits: FAL/Seedance for one short clip plus Gemini TTS
+and Gemini image generation. It is meant to prove media plumbing and Feed
+rendering, not transcript editorial quality.
 
 Start the two surfaces with:
 

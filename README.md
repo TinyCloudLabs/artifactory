@@ -173,6 +173,28 @@ Skills **stamp** these. The harness **routes** on them.
 
 Skills are independently callable — no skill depends on another having run.
 
+### Rich-media smoke run
+
+Use Smithers when the goal is to prove the Feed can carry every rich artifact
+type in one controlled pass:
+
+```sh
+bun run smithers:media-smoke
+```
+
+The default is local-only: it generates one video clip, one podcast, and one
+article with a generated hero image under `.smithers/reports/`, then writes a
+JSON report. To publish exactly those three proof artifacts into the delegated
+Feed, run:
+
+```sh
+bun run smithers:media-smoke -- --input '{"publish":true}'
+```
+
+This is a spend-bearing operator test (FAL video + Gemini TTS/image). It bypasses
+Claude editorial selection on purpose and calls the real skill scripts directly,
+so failures point at the specific media skill or the delegated publish path.
+
 ---
 
 ## Layer 2 — the distillery harness (the orchestration)
