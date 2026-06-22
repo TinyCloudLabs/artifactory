@@ -98,6 +98,16 @@ export interface CorpusPlanSelection {
   reason: string;
 }
 
+export interface RunMixPlan {
+  status: "ready" | "missing" | "error";
+  path: "artifacts/mix-plan.md";
+  content?: string;
+  bytes?: number;
+  truncated?: boolean;
+  updatedAt?: string;
+  error?: string;
+}
+
 export interface RunState {
   run_id: string;
   status: RunStatus;
@@ -106,6 +116,7 @@ export interface RunState {
   media?: RunMediaSummary;
   targetArtifactType?: ArtifactType;
   corpusPlan?: CorpusPlanSummary;
+  mixPlan?: RunMixPlan;
   proof?: AgentRunProof;
   error?: string;
   startedAt: number;
@@ -550,6 +561,9 @@ const SKILLS = {
   publish: "skills/tc-publish/scripts/publish.ts",
 } as const;
 
+const MIX_PLAN_RELATIVE_PATH = "artifacts/mix-plan.md" as const;
+const MIX_PLAN_MAX_CHARS = 8_000;
+
 /**
  * Drive the whole pipeline for one run under `active`. Mutates `state` in place
  * (stage by stage) so GET /agent/run/:id reflects progress; the caller persists
@@ -942,14 +956,55 @@ export async function runGenerateStage(
     },
   );
   if (gen.code !== 0) {
+    await captureRunMixPlan(ctx);
     throw new Error(`generate failed (exit ${gen.code}): ${gen.stderr.slice(-800) || gen.stdout.slice(-800)}`);
   }
+  await captureRunMixPlan(ctx);
   const routes = await listArtifactRoutes(ctx.artifactsDir);
   ctx.step(`generate: completed (${summarizeArtifactRoutes(routes)})`);
   const stdoutTail = boundedProcessOutput("stdout", gen.stdout);
   if (stdoutTail) ctx.step(`generate: ${stdoutTail}`);
   const stderrTail = boundedProcessOutput("stderr", gen.stderr);
   if (stderrTail) ctx.step(`generate: ${stderrTail}`);
+}
+
+export async function readRunMixPlan(artifactsDir: string): Promise<RunMixPlan> {
+  const path = join(artifactsDir, "mix-plan.md");
+  try {
+    const info = await stat(path);
+    if (!info.isFile()) {
+      return { status: "missing", path: MIX_PLAN_RELATIVE_PATH, error: "mix-plan.md is not a file" };
+    }
+    const content = await readFile(path, "utf8");
+    const truncated = content.length > MIX_PLAN_MAX_CHARS;
+    return {
+      status: "ready",
+      path: MIX_PLAN_RELATIVE_PATH,
+      content: truncated ? content.slice(0, MIX_PLAN_MAX_CHARS) : content,
+      bytes: Buffer.byteLength(content, "utf8"),
+      truncated,
+      updatedAt: info.mtime.toISOString(),
+    };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { status: "missing", path: MIX_PLAN_RELATIVE_PATH };
+    }
+    return {
+      status: "error",
+      path: MIX_PLAN_RELATIVE_PATH,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function captureRunMixPlan(ctx: PipelineContext): Promise<void> {
+  const mixPlan = await readRunMixPlan(ctx.artifactsDir);
+  ctx.state.mixPlan = mixPlan;
+  if (mixPlan.status === "ready") {
+    ctx.step(`mix-plan: captured ${mixPlan.bytes ?? 0} byte(s)${mixPlan.truncated ? " (truncated)" : ""}`);
+  } else {
+    ctx.step(`mix-plan: ${mixPlan.status}${mixPlan.error ? ` (${mixPlan.error})` : ""}`);
+  }
 }
 
 function isMissingInteractionsTable(message: string): boolean {

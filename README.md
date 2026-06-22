@@ -263,7 +263,11 @@ skills continuously and decides what happens to their output. It is the
   run must state why instead of silently filling the feed with text artifacts.
   The mix plan must also document compact/developed/rich-media feed shape,
   source/theme/type diversity, weak interaction backpressure, and the
-  regression-to-mean guard for sparse early preferences.
+  regression-to-mean guard for sparse early preferences. After generation the
+  agent captures a bounded `mixPlan` snapshot into run status, so
+  `GET /agent/run/:id`, `GET /agent/runs`, Smithers outputs, and Feed's Agents
+  history can show the selection reasoning even after scratch artifacts are
+  cleaned up.
   The live agent also persists a small Listen read cursor outside the repo and
   passes `--offset` into `tc-listen-read`, so repeated Feed-triggered runs rotate
   through transcript windows instead of reusing the same latest conversations

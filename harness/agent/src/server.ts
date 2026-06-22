@@ -245,6 +245,7 @@ function handleGetRun(req: Request, runId: string): Response {
     media: state.media ?? summarizePublishedMedia(state.published),
     ...(state.targetArtifactType ? { targetArtifactType: state.targetArtifactType } : {}),
     ...(state.corpusPlan ? { corpusPlan: state.corpusPlan } : {}),
+    ...(state.mixPlan ? { mixPlan: state.mixPlan } : {}),
     ...(state.proof ? { proof: state.proof } : {}),
     startedAt: state.startedAt,
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),

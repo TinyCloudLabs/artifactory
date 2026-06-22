@@ -67,6 +67,16 @@ const proofSchema = z.object({
   checks: z.array(z.object({ name: z.string(), ok: z.boolean(), detail: z.string() })),
 });
 
+const mixPlanSchema = z.object({
+  status: z.enum(["ready", "missing", "error"]),
+  path: z.literal("artifacts/mix-plan.md"),
+  content: z.string().optional(),
+  bytes: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
+  updatedAt: z.string().optional(),
+  error: z.string().optional(),
+});
+
 const runStatusSchema = z.enum(["queued", "running", "done", "error"]);
 
 const stageBaseSchema = z.object({
@@ -96,6 +106,7 @@ const listenSchema = stageBaseSchema.extend({
 const generateSchema = stageBaseSchema.extend({
   skipped: z.boolean(),
   transcriptCount: z.number().int().nonnegative(),
+  mixPlan: mixPlanSchema.optional(),
 });
 
 const publishSchema = stageBaseSchema.extend({
@@ -103,6 +114,7 @@ const publishSchema = stageBaseSchema.extend({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  mixPlan: mixPlanSchema.optional(),
   proof: proofSchema,
 });
 
@@ -111,6 +123,7 @@ const cleanupSchema = stageBaseSchema.extend({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  mixPlan: mixPlanSchema.optional(),
   proof: proofSchema,
 });
 
@@ -172,6 +185,7 @@ function proofFor(state: RunState, targetArtifactType?: ArtifactType) {
   const media = summarizePublishedMedia(state.published);
   return {
     media,
+    mixPlan: state.mixPlan,
     proof: verifyAgentRunProof({
       targetArtifactType,
       published: state.published,
@@ -365,6 +379,7 @@ export default smithers((ctx) => {
                   ...base("generate", state, logTailMax, true),
                   skipped: false,
                   transcriptCount: listen.transcriptCount,
+                  ...(state.mixPlan ? { mixPlan: state.mixPlan } : {}),
                 };
               } catch (err) {
                 state = markError(state ?? missingRunState(runId), err);
@@ -372,6 +387,7 @@ export default smithers((ctx) => {
                   ...base("generate", state, logTailMax, false),
                   skipped: false,
                   transcriptCount: listen.transcriptCount,
+                  ...(state.mixPlan ? { mixPlan: state.mixPlan } : {}),
                 };
               }
             }}
@@ -391,24 +407,26 @@ export default smithers((ctx) => {
                 state.status = "done";
                 state.finishedAt = Date.now();
                 writeRun(state);
-                const { media, proof } = proofFor(state, targetArtifactType);
+                const { media, mixPlan, proof } = proofFor(state, targetArtifactType);
                 return {
                   ...base("publish", state, logTailMax, true),
                   skipped: false,
                   published: state.published,
                   held: state.held ?? [],
                   media,
+                  ...(mixPlan ? { mixPlan } : {}),
                   proof,
                 };
               } catch (err) {
                 state = markError(state ?? missingRunState(runId), err);
-                const { media, proof } = proofFor(state, targetArtifactType);
+                const { media, mixPlan, proof } = proofFor(state, targetArtifactType);
                 return {
                   ...base("publish", state, logTailMax, false),
                   skipped: false,
                   published: state.published,
                   held: state.held ?? [],
                   media,
+                  ...(mixPlan ? { mixPlan } : {}),
                   proof,
                 };
               }
@@ -433,13 +451,14 @@ export default smithers((ctx) => {
               } finally {
                 releaseRunLock(runId);
               }
-              const { media, proof } = proofFor(state, targetArtifactType);
+              const { media, mixPlan, proof } = proofFor(state, targetArtifactType);
               return {
                 ...base("cleanup", state, logTailMax, state.status !== "error"),
                 cleaned: true,
                 published: state.published,
                 held: state.held ?? [],
                 media,
+                ...(mixPlan ? { mixPlan } : {}),
                 proof,
               };
             }}

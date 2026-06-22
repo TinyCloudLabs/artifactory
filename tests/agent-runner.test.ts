@@ -28,6 +28,7 @@ import {
   nextListenReadOffset,
   parseListenCandidateList,
   parseListenReadCursor,
+  readRunMixPlan,
   runPublishStage,
   sanitizeArtifactMediaForPublish,
   shouldPublishArtifact,
@@ -398,6 +399,24 @@ describe("agent runner generation prompt", () => {
     expect(plan).toContain("use remaining slots");
     expect(plan).toContain("diversify the feed");
     expect(plan).not.toContain("reserve one publishable slot for a clip attempt");
+  });
+
+  test("captures a bounded mix-plan snapshot for run status", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mix-plan-"));
+    try {
+      await writeFile(join(dir, "mix-plan.md"), "# Artifact Mix Plan\n\n- feed-shape: compact/developed/rich-media\n");
+
+      const plan = await readRunMixPlan(dir);
+
+      expect(plan.status).toBe("ready");
+      expect(plan.path).toBe("artifacts/mix-plan.md");
+      expect(plan.content).toContain("feed-shape");
+      expect(plan.bytes).toBeGreaterThan(0);
+      expect(plan.truncated).toBe(false);
+      expect(plan.updatedAt).toBeString();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("can target one artifact type without turning it into a quota", () => {

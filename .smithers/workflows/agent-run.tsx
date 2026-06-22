@@ -57,6 +57,16 @@ const proofSchema = z.object({
   checks: z.array(z.object({ name: z.string(), ok: z.boolean(), detail: z.string() })),
 });
 
+const mixPlanSchema = z.object({
+  status: z.enum(["ready", "missing", "error"]),
+  path: z.literal("artifacts/mix-plan.md"),
+  content: z.string().optional(),
+  bytes: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
+  updatedAt: z.string().optional(),
+  error: z.string().optional(),
+});
+
 const agentRunSchema = z.object({
   ok: z.boolean(),
   agentRunId: z.string(),
@@ -66,6 +76,7 @@ const agentRunSchema = z.object({
   published: z.array(publishedSchema),
   held: z.array(heldSchema),
   media: mediaSummarySchema,
+  mixPlan: mixPlanSchema.optional(),
   proof: proofSchema,
   error: z.string().optional(),
   log: z.array(z.string()),
@@ -94,6 +105,7 @@ function summarize(
     published: state.published,
     held: state.held ?? [],
     media,
+    ...(state.mixPlan ? { mixPlan: state.mixPlan } : {}),
     proof: verifyAgentRunProof({
       targetArtifactType,
       published: state.published,
