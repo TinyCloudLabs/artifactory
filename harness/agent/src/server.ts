@@ -5,8 +5,8 @@
 // THE CONTRACT (.context/FRONTEND-AGENT-PLAN.md — the front end depends on it):
 //   GET  /agent/info            → { did, name, permissions[], challenge? }
 //   POST /agent/delegation      { serialized } → { ok, agentDid, delegationCid, spaceId, expiresAt }
-//   POST /agent/run             {} → { run_id, status:"queued" }
-//   GET  /agent/run/:run_id     → { run_id, status, published?[], held?[], error? }
+//   POST /agent/run             { artifactType?: "auto"|ArtifactType } → { run_id, status:"queued" }
+//   GET  /agent/run/:run_id     → { run_id, status, published?[], held?[], proof?, error? }
 //   GET  /agent/runs            → { runs: RunSummary[], lock? }  (recent runs + shared lock)
 //
 // Run from the distillery repo root:  bun harness/agent/src/server.ts
@@ -34,6 +34,7 @@ import {
 import { PERMISSIONS } from "./permissions.ts";
 import { ensureApiToken, tokenMatches } from "./api-token.ts";
 import { buildMediaReadiness } from "./info.ts";
+import { ARTIFACT_TYPES, type ArtifactType } from "../../../skills/_shared/lib/formats.ts";
 
 const RUN_LOG_TAIL = 20;
 
@@ -152,6 +153,25 @@ async function handlePostDelegation(req: Request): Promise<Response> {
 }
 
 async function handlePostRun(req: Request): Promise<Response> {
+  let body: { artifactType?: unknown } = {};
+  try {
+    const raw = await req.text();
+    if (raw.trim().length > 0) {
+      body = JSON.parse(raw) as { artifactType?: unknown };
+    }
+  } catch {
+    return json(req, 400, { error: { code: "invalid_json", message: "Body must be JSON." } });
+  }
+  const targetArtifactType = parseTargetArtifactType(body.artifactType);
+  if (targetArtifactType === null) {
+    return json(req, 400, {
+      error: {
+        code: "invalid_artifact_type",
+        message: `artifactType must be "auto" or one of: ${ARTIFACT_TYPES.join(", ")}`,
+      },
+    });
+  }
+
   const active = session.getActive();
   if (!active) {
     return json(req, 409, {
@@ -177,14 +197,25 @@ async function handlePostRun(req: Request): Promise<Response> {
 
   // Fire-and-forget: the run executes in the background; the client polls
   // GET /agent/run/:id. Errors are captured into the run's status.json.
-  void executeRun(state, active);
+  void executeRun(state, active, targetArtifactType);
 
   return json(req, 202, { run_id: state.run_id, status: "queued" });
 }
 
-async function executeRun(state: RunState, active: ActiveDelegation): Promise<void> {
+function parseTargetArtifactType(value: unknown): ArtifactType | undefined | null {
+  if (value === undefined || value === null || value === "" || value === "auto") return undefined;
+  return typeof value === "string" && (ARTIFACT_TYPES as readonly string[]).includes(value)
+    ? (value as ArtifactType)
+    : null;
+}
+
+async function executeRun(
+  state: RunState,
+  active: ActiveDelegation,
+  targetArtifactType?: ArtifactType,
+): Promise<void> {
   try {
-    await runPipeline(active, state, writeRun);
+    await runPipeline(active, state, writeRun, { targetArtifactType });
   } catch (err) {
     state.status = "error";
     state.error = err instanceof Error ? err.message : String(err);
@@ -211,7 +242,9 @@ function handleGetRun(req: Request, runId: string): Response {
     status: state.status,
     published: state.published,
     held: state.held ?? [],
-    media: summarizePublishedMedia(state.published),
+    media: state.media ?? summarizePublishedMedia(state.published),
+    ...(state.targetArtifactType ? { targetArtifactType: state.targetArtifactType } : {}),
+    ...(state.proof ? { proof: state.proof } : {}),
     startedAt: state.startedAt,
     ...(typeof state.finishedAt === "number" ? { finishedAt: state.finishedAt } : {}),
     ...(log.length > 0 ? { log } : {}),

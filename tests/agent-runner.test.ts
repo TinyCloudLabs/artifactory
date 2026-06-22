@@ -751,6 +751,7 @@ describe("agent runner artifact media preflight", () => {
       space: "applications",
       corpusDir: join(root, "corpus"),
       artifactsDir: root,
+      targetArtifactType: "podcast",
       step: (msg) => {
         state.log.push(`2026-06-18T19:39:56.704Z ${msg}`);
       },
@@ -766,6 +767,15 @@ describe("agent runner artifact media preflight", () => {
         reason: 'audio required for podcast but missing file "missing.m4a"',
       },
     ]);
+    expect(state.media).toEqual({ heroImages: 0, audio: 0, video: 0 });
+    expect(state.proof).toMatchObject({
+      ok: false,
+      targetArtifactType: "podcast",
+    });
+    expect(state.proof?.checks.find((check) => check.name === "target: published podcast")).toMatchObject({
+      ok: false,
+    });
     expect(state.log.join("\n")).toContain("1 draft(s) held");
+    expect(state.log.join("\n")).toContain("target proof failed for podcast");
   });
 });

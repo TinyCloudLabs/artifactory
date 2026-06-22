@@ -37,6 +37,7 @@ import { spawn } from "node:child_process";
 import { config } from "./config.ts";
 import type { ActiveDelegation } from "./session.ts";
 import { classifyListenReadResult } from "./listen-read-outcome.ts";
+import { summarizeRunProofMedia, verifyAgentRunProof, type AgentRunProof } from "./run-proof.ts";
 import { ARTIFACT_TYPES, isOutwardType, type ArtifactType } from "../../../skills/_shared/lib/formats.ts";
 import { sqlQuery } from "../../../skills/_shared/lib/tc.ts";
 
@@ -87,6 +88,8 @@ export interface RunState {
   published: PublishedRef[];
   held?: HeldArtifactRef[];
   media?: RunMediaSummary;
+  targetArtifactType?: ArtifactType;
+  proof?: AgentRunProof;
   error?: string;
   startedAt: number;
   finishedAt?: number;
@@ -379,6 +382,7 @@ export async function runPipeline(
   options: PipelineOptions = {},
 ): Promise<void> {
   const ctx = createPipelineContext(active, state, onProgress, options);
+  state.targetArtifactType = ctx.targetArtifactType;
 
   state.status = "running";
   ctx.step(
@@ -691,6 +695,20 @@ export async function runPublishStage(ctx: PipelineContext): Promise<void> {
     );
     if (ref) ctx.state.published.push(ref);
     ctx.step(`publish: ${ref ? `${ref.type}/${ref.slug}${formatMediaSummary(ref)}` : label} published`);
+  }
+  ctx.state.media = summarizeRunProofMedia(ctx.state.published);
+  ctx.state.proof = verifyAgentRunProof({
+    targetArtifactType: ctx.targetArtifactType,
+    published: ctx.state.published,
+    held: ctx.state.held ?? [],
+    media: ctx.state.media,
+  });
+  if (ctx.targetArtifactType) {
+    ctx.step(
+      `publish: target proof ${ctx.state.proof.ok ? "passed" : "failed"} for ${ctx.targetArtifactType}`,
+    );
+  } else {
+    ctx.onProgress(ctx.state);
   }
 }
 

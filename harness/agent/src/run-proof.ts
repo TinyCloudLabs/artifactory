@@ -13,6 +13,16 @@ export interface AgentRunProof {
   checks: AgentRunProofCheck[];
 }
 
+export function summarizeRunProofMedia(published: readonly PublishedRef[] | undefined): RunMediaSummary {
+  const summary: RunMediaSummary = { heroImages: 0, audio: 0, video: 0 };
+  for (const artifact of Array.isArray(published) ? published : []) {
+    if (artifact?.media?.heroImage) summary.heroImages += 1;
+    if (artifact?.media?.audio) summary.audio += 1;
+    if (artifact?.media?.video) summary.video += 1;
+  }
+  return summary;
+}
+
 function check(name: string, ok: boolean, detail: string): AgentRunProofCheck {
   return { name, ok, detail };
 }
