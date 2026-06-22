@@ -166,8 +166,14 @@ export function nextListenReadOffset(offset: number, transcriptCount: number): n
   return safeOffset + safeCount;
 }
 
-export function buildListenReadArgs(corpusDir: string, count: number, space: string, offset: number): string[] {
-  return [
+export function buildListenReadArgs(
+  corpusDir: string,
+  count: number,
+  space: string,
+  offset: number,
+  conversationIds: string[] = [],
+): string[] {
+  const args = [
     SKILLS.listenRead,
     "--out",
     corpusDir,
@@ -178,6 +184,8 @@ export function buildListenReadArgs(corpusDir: string, count: number, space: str
     "--space",
     space,
   ];
+  for (const id of conversationIds) args.push("--conversation-id", id);
+  return args;
 }
 
 /**
@@ -500,20 +508,27 @@ export async function prepareRunScratch(ctx: PipelineContext): Promise<void> {
 export async function runListenReadStage(ctx: PipelineContext): Promise<ListenReadStageResult> {
   // LISTEN-READ — pull the user's transcripts into a per-run corpus. EMPTY-SAFE:
   // exit 1 + "No non-empty transcripts" → 0 transcripts → valid, done.
-  const configuredOffset = config.transcriptRotation
+  const selectedIds = config.transcriptIds;
+  const hasSelectedIds = selectedIds.length > 0;
+  const configuredOffset = hasSelectedIds
+    ? 0
+    : config.transcriptRotation
     ? await readListenReadCursor()
     : config.transcriptOffset;
   let usedOffset = configuredOffset;
   ctx.step(
-    `listen-read: fetching the user's Listen transcripts ` +
-      `(count ${config.transcriptCount}, offset ${configuredOffset})`,
+    hasSelectedIds
+      ? `listen-read: fetching ${selectedIds.length} selected Listen conversation(s)`
+      : `listen-read: fetching the user's Listen transcripts ` +
+        `(count ${config.transcriptCount}, offset ${configuredOffset})`,
   );
-  let read = await executeListenRead(ctx, configuredOffset);
+  let read = await executeListenRead(ctx, configuredOffset, selectedIds);
   logListenReadOutput(ctx, read);
 
   let transcripts = await listCorpus(ctx.corpusDir);
   let readOutcome = classifyListenReadResult(read);
   if (
+    !hasSelectedIds &&
     configuredOffset > 0 &&
     transcripts.length === 0 &&
     readOutcome.kind !== "error"
@@ -522,7 +537,7 @@ export async function runListenReadStage(ctx: PipelineContext): Promise<ListenRe
     await rm(ctx.corpusDir, { recursive: true, force: true });
     await mkdir(ctx.corpusDir, { recursive: true, mode: 0o700 });
     usedOffset = 0;
-    read = await executeListenRead(ctx, 0);
+    read = await executeListenRead(ctx, 0, selectedIds);
     logListenReadOutput(ctx, read);
     transcripts = await listCorpus(ctx.corpusDir);
     readOutcome = classifyListenReadResult(read);
@@ -547,7 +562,7 @@ export async function runListenReadStage(ctx: PipelineContext): Promise<ListenRe
     ctx.onProgress(ctx.state);
     return { kind: "empty" };
   }
-  if (config.transcriptRotation) {
+  if (config.transcriptRotation && !hasSelectedIds) {
     const nextOffset = nextListenReadOffset(usedOffset, config.transcriptCount);
     await writeListenReadCursor(nextOffset, ctx.state.run_id);
     ctx.step(`listen-read: ${transcripts.length} transcript(s) fetched; next offset ${nextOffset}`);
@@ -557,10 +572,14 @@ export async function runListenReadStage(ctx: PipelineContext): Promise<ListenRe
   return { kind: "ready", transcripts };
 }
 
-async function executeListenRead(ctx: PipelineContext, offset: number): Promise<SpawnResult> {
+async function executeListenRead(
+  ctx: PipelineContext,
+  offset: number,
+  conversationIds: string[] = [],
+): Promise<SpawnResult> {
   return run(
     "bun",
-    buildListenReadArgs(ctx.corpusDir, config.transcriptCount, ctx.space, offset),
+    buildListenReadArgs(ctx.corpusDir, config.transcriptCount, ctx.space, offset, conversationIds),
     "sandbox",
     {
       heartbeatMs: config.stageHeartbeatMs,

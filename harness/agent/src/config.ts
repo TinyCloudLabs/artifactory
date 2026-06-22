@@ -173,6 +173,13 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
+function csvEnv(name: string): string[] {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
 export const config = {
   /** The distillery checkout the skills run from (cwd of every skill spawn). */
   repoRoot,
@@ -224,6 +231,8 @@ export const config = {
   transcriptRotation: booleanEnv("AGENT_TRANSCRIPT_ROTATION", true),
   /** Durable non-secret cursor for rotating Listen transcript windows across runs. */
   listenReadCursorPath: resolve(runsDir, "listen-read-cursor.json"),
+  /** Optional explicit Listen conversation IDs for operator/Smithers selected-corpus runs. */
+  transcriptIds: csvEnv("AGENT_TRANSCRIPT_IDS"),
   /** Target number of publishable, Feed-visible artifacts per run. */
   targetArtifacts: positiveIntegerEnv("AGENT_TARGET_ARTIFACTS", 3),
   /** Optional dev/operator posture for proving richer media paths. */

@@ -80,7 +80,7 @@ describe("agent runner listen-read classification", () => {
   });
 
   test("builds listen-read args with an explicit offset", () => {
-    expect(buildListenReadArgs("/tmp/corpus", 5, "space-id", 12)).toEqual([
+    expect(buildListenReadArgs("/tmp/corpus", 5, "space-id", 12, ["c1", "c2"])).toEqual([
       "skills/tc-listen-read/scripts/listen-read.ts",
       "--out",
       "/tmp/corpus",
@@ -90,6 +90,10 @@ describe("agent runner listen-read classification", () => {
       "12",
       "--space",
       "space-id",
+      "--conversation-id",
+      "c1",
+      "--conversation-id",
+      "c2",
     ]);
   });
 

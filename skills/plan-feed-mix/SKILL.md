@@ -58,7 +58,7 @@ Use this shape:
   - podcast: attempt | skip — reason
   - article/image: attempt | skip — reason
 - candidate transcripts:
-  - <path>: <format> — <why this format fits>
+  - <path or Listen conversation id>: <format> — <why this format fits>
 - skip notes:
   - <format>: <reason>
 ```

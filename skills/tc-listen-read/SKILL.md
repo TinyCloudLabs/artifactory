@@ -42,6 +42,27 @@ it. Writes one markdown file per non-empty transcript and lists what it wrote.
 the live Feed agent uses it for run-to-run rotation so repeated generations do
 not always read the same latest transcript window.
 
+For planned corpus selection, list candidate metadata without pulling full
+transcript payloads:
+
+```sh
+bun skills/tc-listen-read/scripts/listen-read.ts --list-candidates --count 20 --offset 0 --space <owner-space>
+```
+
+Then read specific selected conversations:
+
+```sh
+bun skills/tc-listen-read/scripts/listen-read.ts \
+  --out <corpus-dir> \
+  --conversation-id <conversation-id> \
+  --conversation-id <conversation-id> \
+  --space <owner-space>
+```
+
+`--conversation-ids id1,id2,id3` is also accepted. Explicit IDs preserve the
+planner's order, skip missing/empty transcripts, and still use the same
+TinyCloud delegation/capability path.
+
 ### Emit the delegation request the owner grants (one command)
 
 When the Listen owner is a different identity (e.g. the OpenKey `default`

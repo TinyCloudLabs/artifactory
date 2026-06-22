@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  conversationByIdsSql,
   conversationListSql,
   mapConversationColumns,
   transcriptTurnsFromInline,
@@ -101,5 +102,15 @@ describe("tc-listen-read SQL backpressure", () => {
   test("conversation list query remains offset-addressable for run rotation", () => {
     const columns = mapConversationColumns(["id"]);
     expect(conversationListSql(columns)).toEndWith("LIMIT ? OFFSET ?");
+  });
+
+  test("conversation id query is parameterized for planned corpus selection", () => {
+    const columns = mapConversationColumns(["id", "title", "started_at"]);
+    const sql = conversationByIdsSql(columns, 3);
+
+    expect(sql).toContain(`WHERE "id" IN (?, ?, ?)`);
+    expect(sql).toContain(`"title" AS title`);
+    expect(sql).toContain(`"started_at" AS started_at`);
+    expect(() => conversationByIdsSql(columns, 0)).toThrow("at least one id");
   });
 });

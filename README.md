@@ -259,7 +259,10 @@ skills continuously and decides what happens to their output. It is the
   The live agent also persists a small Listen read cursor outside the repo and
   passes `--offset` into `tc-listen-read`, so repeated Feed-triggered runs rotate
   through transcript windows instead of reusing the same latest conversations
-  every time.
+  every time. `tc-listen-read` can also list candidate conversation metadata and
+  fetch explicit `--conversation-id` selections; `AGENT_TRANSCRIPT_IDS` exposes
+  that path for operator/Smithers selected-corpus runs while the automatic
+  planner is being built.
   Before publish it stamps `raw_artifact.producer` with run/delegation
   provenance so Feed cards can show which delegated run produced each durable
   artifact.

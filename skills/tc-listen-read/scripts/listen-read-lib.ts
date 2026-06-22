@@ -70,6 +70,13 @@ export interface ConversationMeta {
   transcript_text?: string;
 }
 
+export interface ConversationCandidate {
+  id: string;
+  title: string;
+  started_at?: string;
+  transcript_storage: "kv" | "inline" | "none";
+}
+
 /** One spoken turn in a Listen transcript (the KV JSON array element shape). */
 export interface TranscriptTurn {
   index: number;
@@ -223,7 +230,7 @@ function missingColumn(e: unknown): boolean {
   return /no such column|unknown column/i.test(message);
 }
 
-export function conversationListSql(columns: ConversationColumnMap): string {
+function conversationSelectColumns(columns: ConversationColumnMap): string[] {
   const id = sqlIdent(columns.id);
   const selected = [
     `${id} AS id`,
@@ -243,13 +250,55 @@ export function conversationListSql(columns: ConversationColumnMap): string {
       ? `(${inlineChecks.join(" OR ")}) AS has_inline_transcript`
       : "0 AS has_inline_transcript",
   );
-  return `SELECT ${selected.join(", ")} FROM conversation ORDER BY rowid DESC LIMIT ? OFFSET ?`;
+  return selected;
+}
+
+export function conversationListSql(columns: ConversationColumnMap): string {
+  return `SELECT ${conversationSelectColumns(columns).join(", ")} FROM conversation ORDER BY rowid DESC LIMIT ? OFFSET ?`;
+}
+
+export function conversationByIdsSql(columns: ConversationColumnMap, idCount: number): string {
+  if (!Number.isInteger(idCount) || idCount < 1) {
+    throw new Error("conversationByIdsSql requires at least one id");
+  }
+  const id = sqlIdent(columns.id);
+  const placeholders = Array.from({ length: idCount }, () => "?").join(", ");
+  return `SELECT ${conversationSelectColumns(columns).join(", ")} FROM conversation WHERE ${id} IN (${placeholders})`;
+}
+
+function rowsToConversationMeta(columns: string[], rows: unknown[][]): ConversationMeta[] {
+  const col = (name: string) => columns.indexOf(name);
+  const idCol = col("id");
+  const titleCol = col("title");
+  const startCol = col("started_at");
+  const inlineCol = col("has_inline_transcript");
+  if (idCol < 0) {
+    throw new Error(
+      `conversation table has no 'id' column (columns: ${columns.join(", ")})`,
+    );
+  }
+  return rows.map((row) => ({
+    id: String(row[idCol]),
+    title: optionalString(row, titleCol) ?? String(row[idCol]),
+    started_at: optionalString(row, startCol),
+    has_inline_transcript: optionalBool(row, inlineCol) ?? false,
+  }));
+}
+
+function conversationColumnCandidates(): ConversationColumnMap[] {
+  return [
+    mapConversationColumns(["id", "title", "started_at", "transcript_json", "transcript_text"]),
+    mapConversationColumns(["id", "title", "started_at"]),
+    mapConversationColumns(["id", "title"]),
+    mapConversationColumns(["id"]),
+  ];
 }
 
 /**
  * List recent conversations, most-recent first. Selects a resilient column set:
  * `id`, a title-ish column, and a start-time-ish column if present. The Listen
- * schema's exact column names vary by importer, so we read `*` and pick.
+ * schema's exact column names vary by importer, so we read metadata only and
+ * pick from known column names.
  */
 export async function listConversations(
   limit: number,
@@ -257,15 +306,9 @@ export async function listConversations(
   opts: TcRunOptions = {},
   offset = 0,
 ): Promise<ConversationMeta[]> {
-  const candidates = [
-    mapConversationColumns(["id", "title", "started_at", "transcript_json", "transcript_text"]),
-    mapConversationColumns(["id", "title", "started_at"]),
-    mapConversationColumns(["id", "title"]),
-    mapConversationColumns(["id"]),
-  ];
   let res: Awaited<ReturnType<typeof sqlQuery>> | undefined;
   let lastMissingColumn: unknown;
-  for (const columns of candidates) {
+  for (const columns of conversationColumnCandidates()) {
     try {
       res = await sqlQuery(
         conversationListSql(columns),
@@ -280,21 +323,59 @@ export async function listConversations(
     }
   }
   if (!res) throw lastMissingColumn;
-  const col = (name: string) => res.columns.indexOf(name);
-  const idCol = col("id");
-  const titleCol = col("title");
-  const startCol = col("started_at");
-  const inlineCol = col("has_inline_transcript");
-  if (idCol < 0) {
-    throw new Error(
-      `conversation table has no 'id' column (columns: ${res.columns.join(", ")})`,
-    );
+  return rowsToConversationMeta(res.columns, res.rows);
+}
+
+export async function listConversationsByIds(
+  ids: string[],
+  target: ListenTarget,
+  opts: TcRunOptions = {},
+): Promise<ConversationMeta[]> {
+  const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  let res: Awaited<ReturnType<typeof sqlQuery>> | undefined;
+  let lastMissingColumn: unknown;
+  for (const columns of conversationColumnCandidates()) {
+    try {
+      res = await sqlQuery(
+        conversationByIdsSql(columns, uniqueIds.length),
+        { db: LISTEN_CONVERSATIONS_DB, space: target.space },
+        uniqueIds,
+        opts,
+      );
+      break;
+    } catch (e) {
+      if (!missingColumn(e)) throw e;
+      lastMissingColumn = e;
+    }
   }
-  return res.rows.map((row) => ({
-    id: String(row[idCol]),
-    title: optionalString(row, titleCol) ?? String(row[idCol]),
-    started_at: optionalString(row, startCol),
-    has_inline_transcript: optionalBool(row, inlineCol) ?? false,
+  if (!res) throw lastMissingColumn;
+  const byId = new Map(rowsToConversationMeta(res.columns, res.rows).map((meta) => [meta.id, meta]));
+  return uniqueIds
+    .map((id) => byId.get(id))
+    .filter((meta): meta is ConversationMeta => Boolean(meta));
+}
+
+export async function listConversationCandidates(
+  limit: number,
+  target: ListenTarget,
+  opts: TcRunOptions = {},
+  offset = 0,
+): Promise<ConversationCandidate[]> {
+  const keyList = await kvList(`${TRANSCRIPT_PREFIX}/`, { space: target.space }, opts);
+  const transcriptIds = new Set(
+    keyList.keys.map((k) => k.slice(`${TRANSCRIPT_PREFIX}/`.length)),
+  );
+  const conversations = await listConversations(limit, target, opts, offset);
+  return conversations.map((meta) => ({
+    id: meta.id,
+    title: meta.title,
+    ...(meta.started_at ? { started_at: meta.started_at } : {}),
+    transcript_storage: transcriptIds.has(meta.id)
+      ? "kv"
+      : meta.has_inline_transcript
+        ? "inline"
+        : "none",
   }));
 }
 
@@ -394,6 +475,76 @@ export interface DumpCorpusOptions {
   offset?: number;
   /** Maximum number of conversation metadata rows to scan from the initial offset. */
   scanLimit?: number;
+  /** Explicit Listen conversation IDs selected by an upstream corpus planner. */
+  conversationIds?: string[];
+}
+
+async function writeConversationTranscript(
+  meta: ConversationMeta,
+  transcriptIds: Set<string>,
+  corpusDir: string,
+  target: ListenTarget,
+  opts: TcRunOptions,
+): Promise<WrittenTranscript | undefined> {
+  let turns: TranscriptTurn[];
+  if (transcriptIds.has(meta.id)) {
+    try {
+      turns = await fetchTranscript(meta.id, target, opts);
+    } catch (e) {
+      // A conversation whose transcript key vanished between list and get is
+      // the same "nothing to distill" case as an empty transcript — skip it.
+      // Any other tc error (auth, unhosted, malformed) still throws loudly.
+      if (e instanceof TcCliError && e.code === "NOT_FOUND") return undefined;
+      throw e;
+    }
+  } else if (meta.has_inline_transcript) {
+    try {
+      turns = transcriptTurnsFromInline(await fetchInlineTranscript(meta, target, opts));
+    } catch (e) {
+      // A single huge inline transcript can still exceed the SQL response cap.
+      // Skip that row and continue paging so one meeting cannot block the
+      // whole feed run from finding smaller transcript-backed conversations.
+      if (e instanceof TcCliError && e.code === "SQL_RESPONSE_TOO_LARGE") return undefined;
+      throw e;
+    }
+  } else {
+    turns = [];
+  }
+  if (turns.length === 0) return undefined;
+  const md = renderTranscriptMarkdown(meta, turns);
+  const fileName = `${slugify(meta.title)}-${meta.id.slice(0, 8)}.md`;
+  const path = join(corpusDir, fileName);
+  await writeFile(path, md);
+  return {
+    conversationId: meta.id,
+    title: meta.title,
+    path,
+    turnCount: turns.length,
+  };
+}
+
+/**
+ * Read selected conversations + their transcripts and write each as a markdown
+ * file into `corpusDir`. Missing/empty transcript rows are skipped.
+ */
+export async function dumpSelectedConversations(
+  conversationIds: string[],
+  corpusDir: string,
+  target: ListenTarget,
+  opts: TcRunOptions = {},
+): Promise<WrittenTranscript[]> {
+  await mkdir(corpusDir, { recursive: true });
+  const keyList = await kvList(`${TRANSCRIPT_PREFIX}/`, { space: target.space }, opts);
+  const transcriptIds = new Set(
+    keyList.keys.map((k) => k.slice(`${TRANSCRIPT_PREFIX}/`.length)),
+  );
+  const metas = await listConversationsByIds(conversationIds, target, opts);
+  const written: WrittenTranscript[] = [];
+  for (const meta of metas) {
+    const next = await writeConversationTranscript(meta, transcriptIds, corpusDir, target, opts);
+    if (next) written.push(next);
+  }
+  return written;
 }
 
 /**
@@ -408,6 +559,9 @@ export async function dumpCorpus(
   opts: TcRunOptions = {},
   options: DumpCorpusOptions = {},
 ): Promise<WrittenTranscript[]> {
+  if (options.conversationIds && options.conversationIds.length > 0) {
+    return dumpSelectedConversations(options.conversationIds, corpusDir, target, opts);
+  }
   await mkdir(corpusDir, { recursive: true });
   // Different import paths store transcripts in different places. The importer
   // writes KV blobs, while the Listen app can store Fireflies rows inline in SQL
@@ -434,41 +588,8 @@ export async function dumpCorpus(
     if (conversations.length === 0) break;
     for (const meta of conversations) {
       if (written.length >= count) break;
-      let turns: TranscriptTurn[];
-      if (transcriptIds.has(meta.id)) {
-        try {
-          turns = await fetchTranscript(meta.id, target, opts);
-        } catch (e) {
-          // A conversation whose transcript key vanished between list and get is
-          // the same "nothing to distill" case as an empty transcript — skip it.
-          // Any other tc error (auth, unhosted, malformed) still throws loudly.
-          if (e instanceof TcCliError && e.code === "NOT_FOUND") continue;
-          throw e;
-        }
-      } else if (meta.has_inline_transcript) {
-        try {
-          turns = transcriptTurnsFromInline(await fetchInlineTranscript(meta, target, opts));
-        } catch (e) {
-          // A single huge inline transcript can still exceed the SQL response cap.
-          // Skip that row and continue paging so one meeting cannot block the
-          // whole feed run from finding smaller transcript-backed conversations.
-          if (e instanceof TcCliError && e.code === "SQL_RESPONSE_TOO_LARGE") continue;
-          throw e;
-        }
-      } else {
-        turns = [];
-      }
-      if (turns.length === 0) continue; // empty transcript — nothing to distill
-      const md = renderTranscriptMarkdown(meta, turns);
-      const fileName = `${slugify(meta.title)}-${meta.id.slice(0, 8)}.md`;
-      const path = join(corpusDir, fileName);
-      await writeFile(path, md);
-      written.push({
-        conversationId: meta.id,
-        title: meta.title,
-        path,
-        turnCount: turns.length,
-      });
+      const next = await writeConversationTranscript(meta, transcriptIds, corpusDir, target, opts);
+      if (next) written.push(next);
     }
   }
   return written;

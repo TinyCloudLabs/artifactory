@@ -26,6 +26,7 @@ import { TcCliError } from "../../_shared/lib/tc.ts";
 import {
   dumpCorpus,
   emitListenReadRequest,
+  listConversationCandidates,
   listenReadCaps,
 } from "./listen-read-lib.ts";
 
@@ -34,7 +35,8 @@ const DEFAULT_REQUEST_FILE = "./listen-read-request.json";
 function usage(): never {
   console.error(
     "usage:\n" +
-      "  read:  bun .../listen-read.ts --out DIR [--count N] [--offset N] [--space SPACE] [--profile NAME] [--owner-space URI]\n" +
+      "  read:  bun .../listen-read.ts --out DIR [--count N] [--offset N] [--conversation-id ID ...] [--space SPACE] [--profile NAME] [--owner-space URI]\n" +
+      "  list:  bun .../listen-read.ts --list-candidates [--count N] [--offset N] [--space SPACE] [--profile NAME]\n" +
       "  emit:  bun .../listen-read.ts --emit-request [FILE] --owner-space URI",
   );
   process.exit(2);
@@ -48,6 +50,8 @@ let ownerSpace: string | undefined;
 let profile: string | undefined;
 let emitRequest = false;
 let requestFile = DEFAULT_REQUEST_FILE;
+let listCandidates = false;
+const conversationIds: string[] = [];
 
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
@@ -61,6 +65,14 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg === "--offset") {
     offset = Number(args[++i]);
     if (!Number.isInteger(offset) || offset < 0) usage();
+  } else if (arg === "--conversation-id") {
+    const id = args[++i];
+    if (!id || id.startsWith("--")) usage();
+    conversationIds.push(id);
+  } else if (arg === "--conversation-ids") {
+    const ids = args[++i];
+    if (!ids || ids.startsWith("--")) usage();
+    conversationIds.push(...ids.split(",").map((id) => id.trim()).filter(Boolean));
   } else if (arg === "--space") {
     space = args[++i];
     if (!space || space.startsWith("--")) usage();
@@ -78,6 +90,8 @@ for (let i = 0; i < args.length; i++) {
     // optional positional FILE (only if the next token isn't another flag)
     const next = args[i + 1];
     if (next && !next.startsWith("--")) requestFile = args[++i]!;
+  } else if (arg === "--list-candidates") {
+    listCandidates = true;
   } else {
     usage();
   }
@@ -121,9 +135,6 @@ if (emitRequest) {
   }
 }
 
-// Mode 2: read Listen into the corpus.
-if (!outDir) usage();
-
 async function surfaceAccessRemediation(e: TcCliError): Promise<void> {
   console.error(`\ntc error [${e.code}]: ${e.message}`);
   if (e.hint) console.error(`\n${e.hint}`);
@@ -164,8 +175,28 @@ async function surfaceAccessRemediation(e: TcCliError): Promise<void> {
   }
 }
 
+// Mode 2: list candidate Listen conversations without fetching full transcript
+// payloads. This is the planning surface for Smithers selection.
+if (listCandidates) {
+  try {
+    const candidates = await listConversationCandidates(count, { space }, { profile }, offset);
+    console.log(JSON.stringify({ count: candidates.length, offset, candidates }, null, 2));
+    process.exit(0);
+  } catch (e) {
+    if (e instanceof TcCliError) {
+      await surfaceAccessRemediation(e);
+      process.exit(1);
+    }
+    console.error(`tc-listen-read: ${(e as Error).message}`);
+    process.exit(1);
+  }
+}
+
+// Mode 3: read Listen into the corpus.
+if (!outDir) usage();
+
 try {
-  const written = await dumpCorpus(count, outDir, { space }, { profile }, { offset });
+  const written = await dumpCorpus(count, outDir, { space }, { profile }, { offset, conversationIds });
   if (written.length === 0) {
     console.error(
       "No non-empty transcripts found. Nothing written. (Check the conversation count / space.)",

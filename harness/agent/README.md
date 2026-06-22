@@ -142,6 +142,7 @@ Env (all optional):
 | `AGENT_TRANSCRIPT_COUNT` | `5` | Listen transcripts pulled per run |
 | `AGENT_TRANSCRIPT_ROTATION` | `1` | rotate live delegated runs through Listen pages instead of always reading the newest window |
 | `AGENT_TRANSCRIPT_OFFSET` | `0` | initial/manual Listen offset; used directly when rotation is disabled |
+| `AGENT_TRANSCRIPT_IDS` | unset | comma-separated Listen conversation IDs for operator/Smithers selected-corpus runs; bypasses rotation for that run |
 | `AGENT_TARGET_ARTIFACTS` | `3` | target number of publishable, Feed-visible artifacts per run; quality can produce fewer |
 | `AGENT_MEDIA_FOCUS` | `balanced` | `balanced`, `podcast`, or `video`; dev/operator posture for proving richer media paths without forcing low-quality artifacts |
 | `AGENT_GEN_MODEL` | `opus` | model for the headless `claude -p` generate step |
@@ -224,6 +225,10 @@ run scratch.
    at `AGENT_RUNS_DIR/listen-read-cursor.json` and passes `--offset` so repeated
    Feed runs rotate beyond the newest transcript window. If an offset is past
    available data, the stage retries once from offset 0 and resets the cursor.
+   For planned corpus experiments, `AGENT_TRANSCRIPT_IDS=id1,id2` bypasses the
+   cursor and makes the read stage fetch those explicit Listen conversations.
+   The CLI also supports `--list-candidates` for low-payload selection visibility
+   before a Smithers planner chooses IDs.
    **Empty-Listen-safe:** 0 transcripts → the run completes with 0 artifacts
    (valid), skipping generate + publish.
 2. **generate** — headless `claude -p` first reads
