@@ -239,8 +239,11 @@ skills continuously and decides what happens to their output. It is the
   artifacts. `feed-loop-readiness` is the no-spend preflight for the delegated
   loop: it checks pushed repo state, Feed submodule alignment, active TinyCloud
   delegation, stale runner locks, media-provider readiness, and the deterministic
-  agent/frontend/Smithers gates before a live run. The live `agent-run` and
-  `agent-run-staged` workflows also accept
+  agent/frontend/Smithers gates before a live run. `feed-loop-orchestration` is
+  the no-spend control-plane report: it checks that the readiness, composition,
+  staged live-run, media-proof, and runner-stage surfaces are present, runs a
+  deterministic gate subset, writes a JSON report, and states what is still
+  HTTP-owned. The live `agent-run` and `agent-run-staged` workflows also accept
   `{"artifactType":"..."}` (`auto` by default) as a quality-gated generation
   bias for development runs; it nudges skill choice without forcing weak output
   and returns a `proof` block showing whether the target actually published.

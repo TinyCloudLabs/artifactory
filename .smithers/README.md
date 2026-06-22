@@ -11,10 +11,24 @@ bun run smithers:list
 bun run smithers:ps
 bun run smithers:dev-mode
 bun run smithers:readiness
+bun run smithers:feed-loop
 bun run smithers:monitor
 bun run smithers:agent-run
 bun run smithers:agent-run:staged
 bun run smithers:media-smoke
+```
+
+`feed-loop-orchestration` is the no-spend control-plane report for the whole
+Artifactory/Feed loop. It answers the meta question "what is Smithers actually
+owning right now?" by checking that the readiness, composition, staged live-run,
+media-proof, runner-stage, and package-script surfaces exist; running the
+deterministic feed-composition gate; writing a JSON report under
+`.smithers/reports/`; and listing the remaining migration gap where production
+`POST /agent/run` still calls the shared runner directly instead of creating a
+Smithers task graph.
+
+```sh
+bun run smithers:feed-loop
 ```
 
 `feed-dev-mode` probes the current local development setup:

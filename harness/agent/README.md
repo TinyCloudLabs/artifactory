@@ -302,11 +302,20 @@ rather than growing a parallel pipeline. For local development checks, run:
 bun run smithers:doctor
 bun run smithers:ps
 bun run smithers:dev-mode
+bun run smithers:feed-loop
 bun run smithers:artifact-types
 bun run smithers:composition
 bun run smithers:agent-run
 bun run smithers:agent-run:staged
 ```
+
+`smithers:feed-loop` is the no-spend control-plane report for the whole
+Artifactory/Feed loop. It checks that the readiness, composition, staged
+live-run, media-proof, and runner-stage surfaces exist; runs a deterministic
+subset of the composition gates; writes a report under `.smithers/reports/`; and
+keeps the current boundary explicit: Smithers owns the operator/dev control
+plane today, while production `POST /agent/run` still calls the shared runner
+directly.
 
 `smithers:artifact-types` is the safe per-format smoke test: it targets one
 artifact type (or `all`) and verifies registry/render routing, skill docs, and
