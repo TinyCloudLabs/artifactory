@@ -206,9 +206,15 @@ artifacts into the delegated Feed, run:
 bun run smithers:media-smoke -- --input '{"publish":true}'
 ```
 
-This is a spend-bearing operator test (FAL video + Gemini TTS/image). It bypasses
-Claude editorial selection on purpose and calls the real skill scripts directly,
-so failures point at the specific media skill or the delegated publish path.
+This is a spend-bearing operator test for the direct skill plumbing:
+FAL/Seedance for the controlled `make-clip` video smoke plus Gemini TTS/image
+for podcast and article media. It bypasses Claude editorial selection on purpose
+and calls the real skill scripts directly, so failures point at the specific
+media skill or the delegated publish path. For the preferred transcript-driven
+clip proof, use `smithers:agent-run:staged` or Feed's `/agents` target selector
+with `{"artifactType":"clip"}` while Gemini/Veo and `AGENT_ENABLE_VIDEO=1` are
+configured; the live runner prefers `make-cheap-video` unless the higher-control
+FAL path is explicitly needed.
 If generation succeeds but publish needs retrying, `scripts/full-media-smoke.ts
 --publish-existing <dir>` republishes an existing artifact directory without
 rerunning video, audio, or image generation. Retry reports rediscover the local
