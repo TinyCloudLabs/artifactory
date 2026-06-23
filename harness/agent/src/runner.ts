@@ -1237,6 +1237,13 @@ export async function stampArtifactRunProvenance(
     delegated_space: ctx.active.spaceId,
     delegation_cid: ctx.active.delegationCid,
     delegation_expires_at: ctx.active.expiresAt,
+    ...(ctx.state.executionSource
+      ? {
+          execution_source: ctx.state.executionSource.source,
+          execution_source_label: ctx.state.executionSource.label,
+          execution_entrypoint: ctx.state.executionSource.entrypoint,
+        }
+      : {}),
     ...(ctx.targetArtifactType ? { target_artifact_type: ctx.targetArtifactType } : {}),
     media_focus: config.mediaFocus,
     published_by_agent_at: new Date().toISOString(),

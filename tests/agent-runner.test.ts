@@ -801,6 +801,7 @@ describe("agent runner artifact media preflight", () => {
       run_id: "run-1781811131857-prv001",
       status: "running",
       published: [],
+      executionSource: RUN_EXECUTION_SOURCES.smithersAgentRunStaged,
       startedAt: Date.now(),
       log: [],
     };
@@ -828,6 +829,9 @@ describe("agent runner artifact media preflight", () => {
       delegated_space: "did:pkh:eip155:1:0x0000000000000000000000000000000000000001",
       delegation_cid: "bafy-delegation",
       delegation_expires_at: "2026-06-19T22:00:00.000Z",
+      execution_source: "smithers-agent-run-staged",
+      execution_source_label: "Smithers staged agent-run",
+      execution_entrypoint: "bun run smithers:agent-run:staged",
       target_artifact_type: "article",
       media_focus: "balanced",
     });
