@@ -7,5 +7,6 @@ export * from "./workflow.ts";
 export * from "./run.ts";
 export * from "./status.ts";
 export * from "./runtime-adapter.ts";
+export * from "./listen-resolver.ts";
 export { createArtifactory, type Artifactory, type ArtifactoryOptions } from "./artifactory.ts";
 export { runCli } from "./cli-entry.ts";
