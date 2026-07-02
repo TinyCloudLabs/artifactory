@@ -3,6 +3,9 @@ import {
   assertFeedV1SchemaUsesMigrations,
   feedV1MigrationApplyPlans,
   FEED_V1_APP_SCHEMA,
+  FEED_V1_ARTIFACT_DOC_PREFIX,
+  FEED_V1_ARTIFACTS_INDEX_DB_PATH,
+  FEED_V1_FEED_INDEX_DB_PATH,
 } from "../skills/_shared/lib/feed-v1-schema.ts";
 import {
   assertNotLegacyFeedShape,
@@ -174,7 +177,12 @@ describe("Feed v1 schema and bootstrap", () => {
     assertFeedV1SchemaUsesMigrations();
     const plans = feedV1MigrationApplyPlans();
     expect(plans.map((plan) => plan.dbName)).toEqual(["artifacts_index", "feed_index"]);
-    expect(plans[0]!.namespace).toBe("xyz.tinycloud.feed.v1.artifacts_index");
+    expect(plans.map((plan) => plan.dbPath)).toEqual([
+      "xyz.tinycloud.artifacts/index",
+      "xyz.tinycloud.feed/index",
+    ]);
+    expect(plans[0]!.namespace).toBe("xyz.tinycloud.artifacts.index");
+    expect(plans[1]!.namespace).toBe("xyz.tinycloud.feed.index");
     expect(plans[0]!.migrations[0]!.sql.some((sql) => sql.includes("artifact_index"))).toBe(true);
     expect(plans[1]!.migrations[0]!.sql.some((sql) => sql.includes("feed_artifact_projection"))).toBe(true);
     expect(
@@ -189,6 +197,16 @@ describe("Feed v1 schema and bootstrap", () => {
         ),
       ),
     ).toBe(false);
+  });
+
+  test("uses the spec's canonical Feed/Artifacts resource split", () => {
+    expect(FEED_V1_ARTIFACTS_INDEX_DB_PATH).toBe("xyz.tinycloud.artifacts/index");
+    expect(FEED_V1_FEED_INDEX_DB_PATH).toBe("xyz.tinycloud.feed/index");
+    expect(FEED_V1_ARTIFACT_DOC_PREFIX).toBe("xyz.tinycloud.artifacts/artifacts");
+    expect(FEED_V1_APP_SCHEMA.resources.sql.map((resource) => [resource.namespace, resource.dbPath])).toEqual([
+      ["xyz.tinycloud.artifacts", "xyz.tinycloud.artifacts/index"],
+      ["xyz.tinycloud.feed", "xyz.tinycloud.feed/index"],
+    ]);
   });
 
   test("builds deterministic seed rows for package, run, artifact, and projection", () => {
