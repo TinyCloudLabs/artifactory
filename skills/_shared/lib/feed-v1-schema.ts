@@ -6,6 +6,18 @@
 
 export type FeedV1SqlResourceName = "artifacts_index" | "feed_index";
 
+// Canonical Feed v1 storage split per the spec: artifact-side resources live
+// under xyz.tinycloud.artifacts and feed-side resources under
+// xyz.tinycloud.feed.
+export type FeedV1Namespace = "xyz.tinycloud.artifacts" | "xyz.tinycloud.feed";
+
+export const FEED_V1_ARTIFACTS_NAMESPACE: FeedV1Namespace = "xyz.tinycloud.artifacts";
+export const FEED_V1_FEED_NAMESPACE: FeedV1Namespace = "xyz.tinycloud.feed";
+
+export const FEED_V1_ARTIFACTS_INDEX_DB_PATH = "xyz.tinycloud.artifacts/index";
+export const FEED_V1_FEED_INDEX_DB_PATH = "xyz.tinycloud.feed/index";
+export const FEED_V1_ARTIFACT_DOC_PREFIX = "xyz.tinycloud.artifacts/artifacts";
+
 export type FeedV1SchemaMigration = {
   id: string;
   description: string;
@@ -14,6 +26,8 @@ export type FeedV1SchemaMigration = {
 
 export type FeedV1SqlResource = {
   name: FeedV1SqlResourceName;
+  namespace: FeedV1Namespace;
+  dbPath: string;
   engine: "sqlite";
   schema: string;
   description: string;
@@ -23,7 +37,6 @@ export type FeedV1SqlResource = {
 };
 
 export type FeedV1AppSchema = {
-  namespace: "xyz.tinycloud.feed.v1";
   resources: {
     sql: FeedV1SqlResource[];
   };
@@ -186,11 +199,12 @@ export const FEED_V1_FEED_MIGRATIONS: FeedV1SchemaMigration[] = [
 ];
 
 export const FEED_V1_APP_SCHEMA: FeedV1AppSchema = {
-  namespace: "xyz.tinycloud.feed.v1",
   resources: {
     sql: [
       {
         name: "artifacts_index",
+        namespace: FEED_V1_ARTIFACTS_NAMESPACE,
+        dbPath: FEED_V1_ARTIFACTS_INDEX_DB_PATH,
         engine: "sqlite",
         schema: "schemas/artifacts-index.sql",
         description: "Artifacts truth index, package state, run ledger, source refs, spend ledger, and worker lock.",
@@ -200,6 +214,8 @@ export const FEED_V1_APP_SCHEMA: FeedV1AppSchema = {
       },
       {
         name: "feed_index",
+        namespace: FEED_V1_FEED_NAMESPACE,
+        dbPath: FEED_V1_FEED_INDEX_DB_PATH,
         engine: "sqlite",
         schema: "schemas/feed-index.sql",
         description: "Feed projection, feedback, preferences, generation requests, and control intents.",
@@ -214,13 +230,15 @@ export const FEED_V1_APP_SCHEMA: FeedV1AppSchema = {
 export type MigrationApplyPlan = {
   namespace: string;
   dbName: FeedV1SqlResourceName;
+  dbPath: string;
   migrations: FeedV1SchemaMigration[];
 };
 
 export function feedV1MigrationApplyPlans(schema: FeedV1AppSchema = FEED_V1_APP_SCHEMA): MigrationApplyPlan[] {
   return schema.resources.sql.map((resource) => ({
-    namespace: `${schema.namespace}.${resource.name}`,
+    namespace: resource.dbPath.replace("/", "."),
     dbName: resource.name,
+    dbPath: resource.dbPath,
     migrations: resource.migrations,
   }));
 }
