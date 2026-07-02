@@ -1,0 +1,82 @@
+{
+  "workflowId": "noop",
+  "packageId": "noop-package",
+  "version": "0.0.1",
+  "digest": "sha256:noop",
+  "skillManifest": {
+    "schemaVersion": "feed.skill_manifest.v1",
+    "packageId": "noop-package",
+    "displayName": "Noop",
+    "version": "0.0.1",
+    "digest": "sha256:noop",
+    "source": "first_party",
+    "tier": 1,
+    "admissionState": "reviewed_first_party",
+    "artifactTypes": ["noop"],
+    "renderShapes": ["short_form"],
+    "outputSchemaRef": "schemas/noop.json",
+    "validatorRefs": [],
+    "evaluatorRefs": [],
+    "workflowRef": "workflows/noop.smithers.json",
+    "workflowDigest": "sha256:noop",
+    "workflowExecutor": "stub",
+    "stageCapabilities": [
+      { "stageId": "stub", "capabilities": [], "authority": "none" }
+    ],
+    "runtimePolicy": {
+      "runtimeClass": "stub",
+      "providerClass": "none",
+      "credentialMode": "none",
+      "egressClass": "none",
+      "allowedTools": [],
+      "disallowedTools": ["tinycloud"],
+      "maxModelCalls": 0,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 1024
+    },
+    "limits": {
+      "maxAcceptedArtifacts": 1,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 1024,
+      "maxModelCalls": 0,
+      "maxSourceRefs": 1,
+      "maxInputTokens": 128
+    },
+    "disclosure": {
+      "userCopy": "No-op workflow used by artifactory CLI tests.",
+      "credentialOwner": "none",
+      "providerClass": "none",
+      "egressClass": "none"
+    }
+  },
+  "runtimePolicy": {
+    "runtimeClass": "stub",
+    "providerClass": "none",
+    "credentialMode": "none",
+    "egressClass": "none",
+    "allowedTools": [],
+    "disallowedTools": ["tinycloud"],
+    "maxModelCalls": 0,
+    "timeoutMs": 1000,
+    "maxOutputBytes": 1024,
+    "budgetId": "m0"
+  },
+  "sourcePack": {
+    "refs": [
+      {
+        "sourceRefId": "src-noop",
+        "sourceKind": "listen_conversation",
+        "sourceId": "listen-noop",
+        "observedPath": "sql_transcript_text",
+        "observedHash": "sha256:src",
+        "observedAt": "2026-07-02T00:00:00.000Z"
+      }
+    ],
+    "excerpts": [
+      { "sourceRefId": "src-noop", "text": "hello" }
+    ],
+    "maxInputTokens": 128
+  },
+  "settings": {},
+  "maxAcceptedArtifacts": 1
+}
