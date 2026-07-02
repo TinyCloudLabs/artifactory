@@ -1,0 +1,15 @@
+{
+  "name": "@tinycloud/artifactory",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Deterministic Feed v1 artifact pipeline CLI (TC-68).",
+  "private": true,
+  "bin": {
+    "@tinycloud/artifactory": "./cli.ts",
+    "artifactory": "./cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./cli.ts"
+  }
+}
