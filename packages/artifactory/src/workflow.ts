@@ -8,6 +8,7 @@ import type {
   TranscriptSourceRef,
   ArtifactorySkillManifest,
 } from "../../../skills/_shared/lib/feed-v1.ts";
+import type { ListenResolution } from "./listen-resolver.ts";
 
 export type WorkflowFixture = {
   workflowId: string;
@@ -21,6 +22,7 @@ export type WorkflowFixture = {
     excerpts: { sourceRefId: string; text: string; quoteLineRefs?: string[] }[];
     maxInputTokens: number;
   };
+  listenResolution?: ListenResolution;
   settings: unknown;
   maxAcceptedArtifacts: number;
 };

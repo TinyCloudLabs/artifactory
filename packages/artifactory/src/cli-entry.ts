@@ -79,6 +79,7 @@ async function runCommand(
         command: "run",
         runId,
         status: result.status,
+        candidateOutput: result.runtimeOutput.candidates,
         publishedArtifactIds: result.workflowRun.publishedArtifactIds,
         dropped: result.dropped,
       },
