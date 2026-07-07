@@ -14,7 +14,12 @@ import type { PublishWriter } from "./publish-writer.ts";
 import type { RunLockStore } from "./run-lock.ts";
 import type { ArtifactSkillRuntime, ArtifactSkillRuntimeOutput } from "./runtime-adapter.ts";
 import type { SourceLedger } from "./source-ledger.ts";
-import { validateCandidates, type DropAudit, type DroppedCandidate } from "./validation.ts";
+import {
+  serializeTranscriptSourceRef,
+  validateCandidates,
+  type DropAudit,
+  type DroppedCandidate,
+} from "./validation.ts";
 import {
   resolveListenResolution,
   type ListenResolverFactory,
@@ -141,7 +146,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
       sourceRefAllowlist: new Set(
-        sourcePack.refs.map((ref) => ref.sourceRefId),
+        sourcePack.refs.map(serializeTranscriptSourceRef),
       ),
     });
 
