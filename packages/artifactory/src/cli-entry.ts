@@ -37,13 +37,35 @@ export async function runCli(options: CliOptions): Promise<CliResult> {
 
   const command = argv[0];
   if (command === "run") {
-    return runCommand(argv.slice(1), artifactory, io, now);
+    return withRedactionBoundary("run", io, () => runCommand(argv.slice(1), artifactory, io, now));
   }
   if (command === "status") {
-    return statusCommand(argv.slice(1), artifactory, io);
+    return withRedactionBoundary("status", io, () => statusCommand(argv.slice(1), artifactory, io));
   }
   io.stderr(`unknown command: ${command}\n${USAGE}`);
   return { exitCode: 2 };
+}
+
+// Redaction boundary: unexpected exceptions from the run/status pipelines can
+// carry raw listen/SDK error text — backend JSON payloads, conversation ids,
+// or delegation material. Never echo err.message to the terminal; print only
+// the error class name.
+async function withRedactionBoundary(
+  command: string,
+  io: CliIO,
+  fn: () => Promise<CliResult>,
+): Promise<CliResult> {
+  try {
+    return await fn();
+  } catch (err) {
+    io.stderr(redactCliError(command, err));
+    return { exitCode: 1 };
+  }
+}
+
+export function redactCliError(command: string, err: unknown): string {
+  const name = err instanceof Error && err.name ? err.name : "Error";
+  return `${command}: failed (${name}); details redacted — they may contain backend or conversation data`;
 }
 
 async function runCommand(
@@ -79,6 +101,7 @@ async function runCommand(
         command: "run",
         runId,
         status: result.status,
+        candidateOutput: result.runtimeOutput.candidates,
         publishedArtifactIds: result.workflowRun.publishedArtifactIds,
         dropped: result.dropped,
       },

@@ -1,0 +1,80 @@
+{
+  "workflowId": "listen-resolve",
+  "packageId": "listen-package",
+  "version": "0.0.1",
+  "digest": "sha256:listen",
+  "skillManifest": {
+    "schemaVersion": "feed.skill_manifest.v1",
+    "packageId": "listen-package",
+    "displayName": "Listen Resolve",
+    "version": "0.0.1",
+    "digest": "sha256:listen",
+    "source": "first_party",
+    "tier": 1,
+    "admissionState": "reviewed_first_party",
+    "artifactTypes": ["noop"],
+    "renderShapes": ["short_form"],
+    "outputSchemaRef": "schemas/noop.json",
+    "validatorRefs": [],
+    "evaluatorRefs": [],
+    "workflowRef": "workflows/listen-resolve.smithers.json",
+    "workflowDigest": "sha256:listen",
+    "workflowExecutor": "stub",
+    "stageCapabilities": [
+      { "stageId": "stub", "capabilities": [], "authority": "none" }
+    ],
+    "runtimePolicy": {
+      "runtimeClass": "stub",
+      "providerClass": "none",
+      "credentialMode": "none",
+      "egressClass": "none",
+      "allowedTools": [],
+      "disallowedTools": ["tinycloud"],
+      "maxModelCalls": 0,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 1024
+    },
+    "limits": {
+      "maxAcceptedArtifacts": 1,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 1024,
+      "maxModelCalls": 0,
+      "maxSourceRefs": 4,
+      "maxInputTokens": 48
+    },
+    "disclosure": {
+      "userCopy": "Listen resolution workflow used by artifactory CLI tests.",
+      "credentialOwner": "none",
+      "providerClass": "none",
+      "egressClass": "none"
+    }
+  },
+  "runtimePolicy": {
+    "runtimeClass": "stub",
+    "providerClass": "none",
+    "credentialMode": "none",
+    "egressClass": "none",
+    "allowedTools": [],
+    "disallowedTools": ["tinycloud"],
+    "maxModelCalls": 0,
+    "timeoutMs": 1000,
+    "maxOutputBytes": 1024,
+    "budgetId": "m0"
+  },
+  "sourcePack": {
+    "refs": [],
+    "excerpts": [],
+    "maxInputTokens": 48
+  },
+  "listenResolution": {
+    "auth": {
+      "privateKeyEnv": "ARTIFACTORY_LISTEN_PRIVATE_KEY",
+      "serializedDelegation": "delegation-fixture"
+    },
+    "query": {
+      "conversationId": "conversation-1"
+    }
+  },
+  "settings": {},
+  "maxAcceptedArtifacts": 1
+}

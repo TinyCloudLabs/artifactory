@@ -12,6 +12,7 @@ import {
 } from "./runtime-adapter.ts";
 import { executeRun, type RunOptions, type RunResult } from "./run.ts";
 import { readRunStatus, type RunStatus } from "./status.ts";
+import type { ListenResolverFactory } from "./listen-resolver.ts";
 import type { WorkflowFixture } from "./workflow.ts";
 
 export type ArtifactoryOptions = {
@@ -21,6 +22,7 @@ export type ArtifactoryOptions = {
   costLedger?: CostLedger;
   publishWriter?: PublishWriter;
   dropAudit?: DropAudit;
+  listenResolverFactory?: ListenResolverFactory;
 };
 
 export type ArtifactoryRunInput = {
@@ -54,6 +56,7 @@ export function createArtifactory(options: ArtifactoryOptions = {}): Artifactory
   const costLedger = options.costLedger ?? createInMemoryCostLedger();
   const publishWriter = options.publishWriter ?? createInMemoryPublishWriter();
   const dropAudit = options.dropAudit ?? createInMemoryDropAudit();
+  const listenResolverFactory = options.listenResolverFactory;
 
   return {
     runtime,
@@ -75,6 +78,7 @@ export function createArtifactory(options: ArtifactoryOptions = {}): Artifactory
         costLedger,
         publishWriter,
         dropAudit,
+        listenResolverFactory,
       };
       return executeRun(runOptions);
     },

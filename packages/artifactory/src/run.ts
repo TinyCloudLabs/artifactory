@@ -12,7 +12,7 @@ import type {
 import type { CostLedger } from "./cost-ledger.ts";
 import type { PublishWriter } from "./publish-writer.ts";
 import type { RunLockStore } from "./run-lock.ts";
-import type { ArtifactSkillRuntime } from "./runtime-adapter.ts";
+import type { ArtifactSkillRuntime, ArtifactSkillRuntimeOutput } from "./runtime-adapter.ts";
 import type { SourceLedger } from "./source-ledger.ts";
 import {
   serializeTranscriptSourceRef,
@@ -20,6 +20,11 @@ import {
   type DropAudit,
   type DroppedCandidate,
 } from "./validation.ts";
+import {
+  resolveListenResolution,
+  type ListenResolverFactory,
+  type ListenResolvedConversation,
+} from "./listen-resolver.ts";
 import type { WorkflowFixture } from "./workflow.ts";
 
 export type RunOptions = {
@@ -34,6 +39,7 @@ export type RunOptions = {
   costLedger: CostLedger;
   publishWriter: PublishWriter;
   dropAudit: DropAudit;
+  listenResolverFactory?: ListenResolverFactory;
 };
 
 export type RunResult = {
@@ -41,6 +47,9 @@ export type RunResult = {
   workflowRun: FeedWorkflowRun;
   publishedArtifacts: FeedArtifact[];
   dropped: DroppedCandidate[];
+  runtimeOutput: ArtifactSkillRuntimeOutput;
+  sourcePack: WorkflowFixture["sourcePack"];
+  resolvedConversations: ListenResolvedConversation[];
 };
 
 export async function executeRun(options: RunOptions): Promise<RunResult> {
@@ -75,18 +84,58 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       finishedAt: nowIso,
     };
     await options.publishWriter.recordRun(workflowRun);
-    return { status: "blocked_authority", workflowRun, publishedArtifacts: [], dropped: [] };
+    return {
+      status: "blocked_authority",
+      workflowRun,
+      publishedArtifacts: [],
+      dropped: [],
+      runtimeOutput: {
+        candidates: [],
+        trace: {
+          procedureVersion: "blocked_authority",
+          modelCalls: 0,
+          toolCalls: [],
+          stageTrace: [],
+          droppedCandidates: [],
+        },
+      },
+      sourcePack: workflow.sourcePack,
+      resolvedConversations: [],
+    };
   }
 
   try {
-    for (const ref of workflow.sourcePack.refs) {
+    let sourcePack = workflow.sourcePack;
+    let resolvedConversations: ListenResolvedConversation[] = [];
+    if (workflow.listenResolution) {
+      const listenResolution = workflow.listenResolution;
+      const listenResult = await resolveListenResolution(
+        listenResolution,
+        workflow.sourcePack.maxInputTokens,
+        {
+          now: () => now,
+          driver: options.listenResolverFactory
+            ? await options.listenResolverFactory(listenResolution.auth)
+            : undefined,
+          // skillManifest.limits are hard caps on the packed sources.
+          limits: {
+            maxSourceRefs: workflow.skillManifest.limits.maxSourceRefs,
+            maxInputTokens: workflow.skillManifest.limits.maxInputTokens,
+          },
+        },
+      );
+      sourcePack = listenResult.sourcePack;
+      resolvedConversations = listenResult.conversations;
+    }
+
+    for (const ref of sourcePack.refs) {
       await options.sourceLedger.observe({ runId, ref });
     }
 
     const skillInput: SkillRunInput = {
       runId,
       skillManifest: workflow.skillManifest,
-      sourcePack: workflow.sourcePack,
+      sourcePack,
       settings: workflow.settings,
       runtimePolicy: workflow.runtimePolicy,
     };
@@ -97,7 +146,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
       sourceRefAllowlist: new Set(
-        workflow.sourcePack.refs.map(serializeTranscriptSourceRef),
+        sourcePack.refs.map(serializeTranscriptSourceRef),
       ),
     });
 
@@ -135,7 +184,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       packageId: workflow.packageId,
       packageDigest: workflow.digest,
       status,
-      sourceRefs: workflow.sourcePack.refs,
+      sourceRefs: sourcePack.refs,
       publishedArtifactIds: published.map((artifact) => artifact.artifactId),
       droppedCandidates: allDropped,
       spend: { budgetId: workflow.runtimePolicy.budgetId, amount: 0, currency: "USD" },
@@ -156,7 +205,15 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       recordedAt: nowIso,
     });
 
-    return { status, workflowRun, publishedArtifacts: published, dropped: allDropped };
+    return {
+      status,
+      workflowRun,
+      publishedArtifacts: published,
+      dropped: allDropped,
+      runtimeOutput,
+      sourcePack,
+      resolvedConversations,
+    };
   } finally {
     await options.runLock.release(acquired.row.lockId, ownerId);
   }
