@@ -91,6 +91,9 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       runId,
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
+      sourceRefAllowlist: new Set(
+        workflow.sourcePack.refs.map((ref) => ref.sourceRefId),
+      ),
     });
 
     const producedBy = {
