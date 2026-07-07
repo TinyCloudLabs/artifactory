@@ -112,6 +112,11 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
           driver: options.listenResolverFactory
             ? await options.listenResolverFactory(listenResolution.auth)
             : undefined,
+          // skillManifest.limits are hard caps on the packed sources.
+          limits: {
+            maxSourceRefs: workflow.skillManifest.limits.maxSourceRefs,
+            maxInputTokens: workflow.skillManifest.limits.maxInputTokens,
+          },
         },
       );
       sourcePack = listenResult.sourcePack;
@@ -136,7 +141,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
       sourceRefAllowlist: new Set(
-        workflow.sourcePack.refs.map((ref) => ref.sourceRefId),
+        sourcePack.refs.map((ref) => ref.sourceRefId),
       ),
     });
 

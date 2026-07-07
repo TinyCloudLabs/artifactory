@@ -86,7 +86,7 @@ liveDescribe("live Listen transcript windowing", () => {
 
     expect(sourcePack.refs).toHaveLength(1);
     expect(sourcePack.excerpts.length).toBeGreaterThan(0);
-    expect(sourcePack.excerpts[0]?.quoteLineRefs.length).toBeGreaterThan(0);
+    expect(sourcePack.excerpts[0]?.quoteLineRefs?.length ?? 0).toBeGreaterThan(0);
     expect(excerptChars).toBeGreaterThan(0);
   }, 30000);
 });
@@ -101,7 +101,7 @@ function normalizeSegments(value: unknown): ListenTranscriptSegment[] {
   }
   if (!Array.isArray(value)) return [];
   return value
-    .map((entry, index) => {
+    .map((entry, index): ListenTranscriptSegment | undefined => {
       if (!entry || typeof entry !== "object") return undefined;
       const record = entry as Record<string, unknown>;
       const text = typeof record.text === "string" ? record.text : typeof record.raw_text === "string" ? record.raw_text : "";
@@ -112,7 +112,7 @@ function normalizeSegments(value: unknown): ListenTranscriptSegment[] {
         speaker_id: typeof record.speaker_id === "string" ? record.speaker_id : undefined,
         text,
         raw_text: typeof record.raw_text === "string" ? record.raw_text : undefined,
-      } satisfies ListenTranscriptSegment;
+      };
     })
     .filter((segment): segment is ListenTranscriptSegment => Boolean(segment));
 }

@@ -68,6 +68,16 @@ export type ListenResolution = {
   query: ListenResolutionQuery;
 };
 
+/**
+ * Declared packing bounds from the skill manifest (skillManifest.limits).
+ * Both are hard caps: conversations beyond maxSourceRefs are not packed, and
+ * packing stops once the total estimated tokens reach the effective budget.
+ */
+export type ListenSourcePackLimits = {
+  maxSourceRefs?: number;
+  maxInputTokens?: number;
+};
+
 export type ListenResolutionResult = {
   conversations: ListenResolvedConversation[];
   sourcePack: SkillRunInput["sourcePack"];
@@ -108,13 +118,14 @@ export async function resolveListenResolution(
     driver?: ListenResolverDriver;
     loadSdk?: () => Promise<TinyCloudNodeSdk>;
     now?: () => Date;
+    limits?: ListenSourcePackLimits;
   } = {},
 ): Promise<ListenResolutionResult> {
   const driver = options.driver ?? (await createListenResolverDriver(resolution.auth, options.loadSdk));
   const conversations = await resolveListenConversations(resolution.query, driver, options.now);
   return {
     conversations,
-    sourcePack: buildSourcePackFromConversations(conversations, maxInputTokens),
+    sourcePack: buildSourcePackFromConversations(conversations, maxInputTokens, options.limits),
   };
 }
 
@@ -142,20 +153,48 @@ export async function resolveListenConversations(
 export function buildSourcePackFromConversations(
   conversations: ListenResolvedConversation[],
   maxInputTokens: number,
+  limits: ListenSourcePackLimits = {},
 ): SkillRunInput["sourcePack"] {
-  const budget = normalizeTokenBudget(maxInputTokens);
+  const budget = normalizeTokenBudget(
+    limits.maxInputTokens !== undefined
+      ? Math.min(maxInputTokens, limits.maxInputTokens)
+      : maxInputTokens,
+  );
+  const maxSourceRefs =
+    limits.maxSourceRefs !== undefined ? normalizeMaxSourceRefs(limits.maxSourceRefs) : undefined;
   const refs: TranscriptSourceRef[] = [];
   const refIds = new Set<string>();
   const excerpts: SkillRunInput["sourcePack"]["excerpts"] = [];
+  let remainingTokens = budget;
 
   for (const conversation of conversations) {
-    if (!refIds.has(conversation.sourceRef.sourceRefId)) {
-      refs.push(conversation.sourceRef);
-      refIds.add(conversation.sourceRef.sourceRefId);
+    if (remainingTokens <= 0) break;
+
+    const refId = conversation.sourceRef.sourceRefId;
+    const isNewRef = !refIds.has(refId);
+    if (isNewRef && maxSourceRefs !== undefined && refIds.size >= maxSourceRefs) {
+      continue;
     }
 
     const windows = windowTranscriptSegments(conversation.transcript, budget);
+    const admitted: typeof windows = [];
     for (const window of windows) {
+      const windowTokens = estimateTokens(window.text);
+      if (windowTokens > remainingTokens) {
+        // Budget exhausted: hard stop — nothing past this point is packed.
+        remainingTokens = 0;
+        break;
+      }
+      admitted.push(window);
+      remainingTokens -= windowTokens;
+    }
+    if (admitted.length === 0) continue;
+
+    if (isNewRef) {
+      refs.push(conversation.sourceRef);
+      refIds.add(refId);
+    }
+    for (const window of admitted) {
       excerpts.push({
         sourceRefId: conversation.conversationId,
         text: window.text,
@@ -172,15 +211,15 @@ export async function createListenResolverDriver(
   loadSdk: () => Promise<TinyCloudNodeSdk> = loadListenNodeSdk,
 ): Promise<ListenResolverDriver> {
   const sdk = await loadSdk();
-  const privateKey = await readPrivateKey(auth);
-  const node: any = new sdk.TinyCloudNode({
+  const privateKey = await loadPrivateKey(auth);
+  const node = new sdk.TinyCloudNode({
     host: auth.host?.trim() || DEFAULT_LISTEN_HOST,
     privateKey,
     autoCreateSpace: false,
   });
   await node.signIn();
   const delegation = sdk.deserializeDelegation(auth.serializedDelegation.trim());
-  const access: any = await node.useDelegation(delegation);
+  const access = await node.useDelegation(delegation);
 
   return {
     async listRecent(limit, offset) {
@@ -216,6 +255,13 @@ function normalizeTokenBudget(maxInputTokens: number): number {
     throw new Error("maxInputTokens must be a positive number");
   }
   return Math.floor(maxInputTokens);
+}
+
+function normalizeMaxSourceRefs(maxSourceRefs: number): number {
+  if (!Number.isFinite(maxSourceRefs) || maxSourceRefs <= 0) {
+    throw new Error("maxSourceRefs must be a positive number");
+  }
+  return Math.floor(maxSourceRefs);
 }
 
 function estimateTokens(text: string): number {
