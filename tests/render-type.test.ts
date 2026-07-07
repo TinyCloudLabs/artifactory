@@ -50,7 +50,10 @@ describe("renderTypeFor — §4.2 mapping", () => {
 
 describe("artifact schema — §1 DDL", () => {
   function embeddedFeedClientSource(): string {
-    return readFileSync(join(import.meta.dir, "..", "submodules", "feed", "web", "src", "feedClient.ts"), "utf8");
+    return readFileSync(
+      join(import.meta.dir, "..", "submodules", "feed", "web", "src", "feedClient.ts"),
+      "utf8",
+    );
   }
 
   function extractTemplateConst(source: string, name: string): string {

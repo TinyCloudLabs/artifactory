@@ -1,0 +1,12 @@
+{
+  "workflowId": "default-reviewed-bundle",
+  "stages": [
+    {
+      "stageId": "stub",
+      "capabilities": [],
+      "authority": "none",
+      "egressClass": "none",
+      "spendClass": "none"
+    }
+  ]
+}
