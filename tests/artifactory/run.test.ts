@@ -99,6 +99,71 @@ describe("artifactory run", () => {
     expect(status.lock).toBeNull();
   });
 
+  test("candidates citing sources outside the sourcePack are dropped as audited provenance violations", async () => {
+    const candidate: CandidateArtifactEnvelope = {
+      schemaVersion: "feed.candidate_artifact.v1",
+      localCandidateId: "c-forged",
+      artifactType: "noop",
+      renderShape: "short_form",
+      title: "forged provenance",
+      body: { text: "cites a source the run never observed" },
+      sourceRefs: [
+        {
+          sourceRefId: "src-not-in-pack",
+          sourceKind: "listen_conversation",
+          sourceId: "listen-forged",
+          observedPath: "sql_transcript_text",
+          observedHash: "sha256:forged",
+          observedAt: "2026-07-02T00:00:00.000Z",
+        },
+      ],
+      quality: { criticPass: true, quotesVerified: true },
+      idempotency: {
+        sourceFingerprint: "sha256:forged",
+        artifactFingerprint: "sha256:c-forged",
+        dedupeKey: "noop:sha256:forged",
+      },
+      storage: { docKey: "artifacts/c-forged.json" },
+    };
+    const runtime: ArtifactSkillRuntime = {
+      tool: RUN_ARTIFACT_SKILL,
+      async run(_input: ArtifactSkillRuntimeInput): Promise<ArtifactSkillRuntimeOutput> {
+        return {
+          candidates: [candidate],
+          trace: {
+            procedureVersion: "test.v1",
+            modelCalls: 0,
+            toolCalls: [],
+            stageTrace: [],
+            droppedCandidates: [],
+          },
+        };
+      },
+    };
+
+    const artifactory = createArtifactory({ runtime });
+    const workflow = await loadWorkflowFile(FIXTURE);
+    const result = await artifactory.run({
+      runId: "run-provenance",
+      ownerId: "test-owner",
+      workflow,
+      now: new Date("2026-07-02T00:00:00.000Z"),
+      leaseMs: 60_000,
+    });
+
+    expect(result.status).toBe("zero_artifacts");
+    expect(result.publishedArtifacts).toEqual([]);
+    expect(result.workflowRun.publishedArtifactIds).toEqual([]);
+    expect(result.dropped).toEqual([
+      {
+        reason: "provenance:source_ref_not_in_source_pack:src-not-in-pack",
+        localCandidateId: "c-forged",
+        title: "forged provenance",
+      },
+    ]);
+    expect(artifactory.dropAudit.list("run-provenance")).toEqual(result.dropped);
+  });
+
   test("blocks when the lock is already held", async () => {
     const artifactory = createArtifactory();
     const workflow = await loadWorkflowFile(FIXTURE);

@@ -39,7 +39,17 @@ export function createInMemoryDropAudit(): DropAudit {
 
 export function validateCandidates(
   candidates: unknown[],
-  options: { runId: string; audit: DropAudit; maxAccepted: number },
+  options: {
+    runId: string;
+    audit: DropAudit;
+    maxAccepted: number;
+    /**
+     * Provenance gate: sourceRefIds the run actually observed (the sourcePack
+     * refs). Candidates citing any sourceRef outside this set are dropped and
+     * audited — they must never publish.
+     */
+    sourceRefAllowlist?: ReadonlySet<string>;
+  },
 ): ValidationOutcome {
   const accepted: CandidateArtifactEnvelope[] = [];
   const dropped: DroppedCandidate[] = [];
@@ -65,6 +75,22 @@ export function validateCandidates(
       dropped.push(drop);
       options.audit.record(options.runId, drop);
       continue;
+    }
+    if (options.sourceRefAllowlist) {
+      const allowlist = options.sourceRefAllowlist;
+      const unknownRef = result.value.sourceRefs.find(
+        (ref) => !allowlist.has(ref.sourceRefId),
+      );
+      if (unknownRef) {
+        const drop: DroppedCandidate = {
+          reason: `provenance:source_ref_not_in_source_pack:${unknownRef.sourceRefId}`,
+          localCandidateId: result.value.localCandidateId,
+          title: result.value.title,
+        };
+        dropped.push(drop);
+        options.audit.record(options.runId, drop);
+        continue;
+      }
     }
     accepted.push(result.value);
   }
