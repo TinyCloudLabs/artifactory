@@ -61,6 +61,40 @@ describe("artifactory CLI", () => {
     expect(Array.isArray(status.publishedArtifacts)).toBe(true);
   });
 
+  test("unexpected pipeline failures print a redacted message, never the raw error text", async () => {
+    const sensitiveMessage =
+      'Listen SQL query failed: {"code":401,"detail":"backend says no"} '
+      + "conversation not found: conversation-8f2c1d9e "
+      + 'delegation {"cid":"bafy-secret-cid","delegateDID":"did:pkh:eip155:1:0xDEADBEEF"}';
+    const io = collectingIO();
+    const artifactory = createArtifactory({
+      runtime: {
+        tool: "RUN_ARTIFACT_SKILL",
+        async run() {
+          throw new Error(sensitiveMessage);
+        },
+      },
+    });
+
+    const result = await runCli({
+      argv: ["run", FIXTURE, "--run-id", "run-redacted", "--owner", "cli-owner"],
+      io: io.io,
+      artifactory,
+      now: () => new Date("2026-07-02T00:00:00.000Z"),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(io.stdout).toEqual([]);
+    const stderrText = io.stderr.join("\n");
+    expect(stderrText).toContain("run: failed");
+    expect(stderrText).toContain("redacted");
+    expect(stderrText).not.toContain("backend says no");
+    expect(stderrText).not.toContain("conversation-8f2c1d9e");
+    expect(stderrText).not.toContain("bafy-secret-cid");
+    expect(stderrText).not.toContain("did:pkh");
+    expect(stderrText).not.toContain("{");
+  });
+
   test("--help prints usage", async () => {
     const io = collectingIO();
     const result = await runCli({ argv: ["--help"], io: io.io });
