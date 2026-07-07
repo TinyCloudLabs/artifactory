@@ -21,6 +21,7 @@
     "harness/index-corpus/**/*.ts",
     "harness/query-corpus/**/*.ts",
     "harness/distill-preferences/**/*.ts",
+    "packages/artifactory/**/*.ts",
     "tests/**/*.ts"
   ],
   "exclude": ["harness/feed"]
