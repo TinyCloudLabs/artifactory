@@ -52,13 +52,11 @@ describe("listen-backed artifactory run", () => {
               title: "resolved candidate",
               body: { text: "resolved" },
               sourceRefs: input.sourcePack.refs,
-              quality: { criticPass: true, quotesVerified: true },
-              idempotency: {
-                sourceFingerprint: "sha256:source",
-                artifactFingerprint: "sha256:artifact",
-                dedupeKey: "noop:source",
+              quality: { criticPass: true, quotesVerified: true, reasons: [], warnings: [] },
+              idempotencyBasis: {
+                sourceFingerprintMaterial: input.sourcePack.refs.map((ref) => ref.sourceRefId),
+                artifactFingerprintMaterial: { text: "resolved" },
               },
-              storage: { docKey: "artifacts/candidate-1.json" },
             },
           ],
           trace: {

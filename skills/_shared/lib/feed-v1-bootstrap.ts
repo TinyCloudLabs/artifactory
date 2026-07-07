@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import {
   type CandidateArtifactEnvelope,
   type FeedArtifact,
   type FeedArtifactProjection,
   type FeedWorkflowPackage,
   type FeedWorkflowRun,
+  type HashString,
   validateCandidateArtifactEnvelope,
   validateFeedArtifact,
 } from "./feed-v1.ts";
@@ -123,6 +125,26 @@ export function workflowRunRow(run: FeedWorkflowRun): SqlSeedRow {
   };
 }
 
+function sha256(value: string): HashString {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}
+
+// Worker-side idempotency assignment (spec §Idempotency): the skill supplies
+// fingerprint material only; the Worker derives the durable keys, and
+// dedupe_key = sha256(packageDigest + sourceFingerprint + artifactFingerprint).
+export function assignCandidateIdempotency(
+  candidate: CandidateArtifactEnvelope,
+  packageDigest: string,
+): FeedArtifact["idempotency"] {
+  const sourceFingerprint = sha256(JSON.stringify(candidate.idempotencyBasis.sourceFingerprintMaterial));
+  const artifactFingerprint = sha256(JSON.stringify(candidate.idempotencyBasis.artifactFingerprintMaterial));
+  return {
+    sourceFingerprint,
+    artifactFingerprint,
+    dedupeKey: sha256(packageDigest + sourceFingerprint + artifactFingerprint),
+  };
+}
+
 export function candidateToArtifact(
   candidate: CandidateArtifactEnvelope,
   producedBy: FeedArtifact["producedBy"],
@@ -130,9 +152,10 @@ export function candidateToArtifact(
 ): FeedArtifact {
   const result = validateCandidateArtifactEnvelope(candidate);
   if (!result.ok) throw new Error(`invalid candidate artifact: ${result.errors.join("; ")}`);
+  const artifactId = `${producedBy.runId}:${candidate.localCandidateId}`;
   return {
     schemaVersion: "feed.artifact.v1",
-    artifactId: `${producedBy.runId}:${candidate.localCandidateId}`,
+    artifactId,
     artifactType: candidate.artifactType,
     renderShape: candidate.renderShape,
     title: candidate.title,
@@ -140,11 +163,15 @@ export function candidateToArtifact(
     body: candidate.body,
     renderHints: candidate.renderHints,
     sourceRefs: candidate.sourceRefs,
-    parentArtifactRefs: candidate.parentArtifactRefs,
+    parentArtifactRefs: candidate.parentArtifactRefs?.map((ref) => ({
+      artifactId: ref.artifactId,
+      artifactType: ref.artifactType,
+      observedHash: ref.observedHash,
+    })),
     producedBy,
     freshness: { label: "fresh", asOf: now },
-    idempotency: candidate.idempotency,
-    storage: candidate.storage,
+    idempotency: assignCandidateIdempotency(candidate, producedBy.packageDigest),
+    storage: { docKey: `runs/${producedBy.runId}/${candidate.localCandidateId}.json` },
     createdAt: now,
     updatedAt: now,
   };

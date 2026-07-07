@@ -49,13 +49,11 @@ describe("artifactory run", () => {
           observedAt: "2026-07-02T00:00:00.000Z",
         },
       ],
-      quality: { criticPass: true, quotesVerified: true },
-      idempotency: {
-        sourceFingerprint: "sha256:src",
-        artifactFingerprint: "sha256:c-1",
-        dedupeKey: "noop:sha256:src",
+      quality: { criticPass: true, quotesVerified: true, reasons: ["clean noop candidate"], warnings: [] },
+      idempotencyBasis: {
+        sourceFingerprintMaterial: ["listen-noop", "sha256:src"],
+        artifactFingerprintMaterial: { text: "hello" },
       },
-      storage: { docKey: "artifacts/c-1.json" },
     };
     const runtime: ArtifactSkillRuntime = {
       tool: RUN_ARTIFACT_SKILL,
@@ -88,6 +86,12 @@ describe("artifactory run", () => {
     expect(result.publishedArtifacts.length).toBe(1);
     expect(result.publishedArtifacts[0]!.artifactId).toBe("run-happy:c-1");
     expect(result.publishedArtifacts[0]!.producedBy.packageId).toBe(workflow.packageId);
+    // The Worker seam, not the skill, assigns durable idempotency + storage.
+    const idempotency = result.publishedArtifacts[0]!.idempotency;
+    expect(idempotency.sourceFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(idempotency.artifactFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(idempotency.dedupeKey).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(result.publishedArtifacts[0]!.storage.docKey).toBe("runs/run-happy/c-1.json");
     const dropReasons = result.dropped.map((entry) => entry.reason);
     expect(dropReasons).toContain("runtime_probe");
     expect(dropReasons.some((reason) => reason.startsWith("validation:"))).toBe(true);
@@ -117,13 +121,11 @@ describe("artifactory run", () => {
           observedAt: "2026-07-02T00:00:00.000Z",
         },
       ],
-      quality: { criticPass: true, quotesVerified: true },
-      idempotency: {
-        sourceFingerprint: "sha256:forged",
-        artifactFingerprint: "sha256:c-forged",
-        dedupeKey: "noop:sha256:forged",
+      quality: { criticPass: true, quotesVerified: true, reasons: [], warnings: [] },
+      idempotencyBasis: {
+        sourceFingerprintMaterial: ["listen-forged", "sha256:forged"],
+        artifactFingerprintMaterial: { text: "reuses an admitted sourceRefId but forges the metadata" },
       },
-      storage: { docKey: "artifacts/c-forged.json" },
     };
     const runtime: ArtifactSkillRuntime = {
       tool: RUN_ARTIFACT_SKILL,

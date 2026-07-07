@@ -139,13 +139,20 @@ describe("Feed v1 contracts", () => {
       title: "A sharp point",
       body: { text: "A sharp point." },
       sourceRefs: [source()],
-      quality: { criticPass: true, quotesVerified: true },
-      idempotency: {
-        sourceFingerprint: "sha256:source",
-        artifactFingerprint: "sha256:candidate",
-        dedupeKey: "insight:sha256:source",
+      parentArtifactRefs: [
+        {
+          kind: "feed_artifact",
+          artifactId: "artifact-0",
+          artifactType: "daily_digest",
+          observedHash: "sha256:parent",
+          observedAt: now,
+        },
+      ],
+      quality: { criticPass: true, quotesVerified: true, reasons: ["quotes verified"], warnings: [] },
+      idempotencyBasis: {
+        sourceFingerprintMaterial: ["listen-1", "sha256:source"],
+        artifactFingerprintMaterial: { text: "A sharp point." },
       },
-      storage: { docKey: "scratch/c-1.json" },
     };
     const output: SkillRunOutput = {
       candidates: [candidate],
@@ -159,7 +166,52 @@ describe("Feed v1 contracts", () => {
     };
 
     expect(validateSkillRunOutput(output).ok).toBe(true);
-    expect(candidateToArtifact(candidate, artifact().producedBy, now).schemaVersion).toBe("feed.artifact.v1");
+    const derived = candidateToArtifact(candidate, artifact().producedBy, now);
+    expect(derived.schemaVersion).toBe("feed.artifact.v1");
+    expect(validateFeedArtifact(derived).ok).toBe(true);
+    // Worker-assigned idempotency: dedupeKey = sha256(packageDigest + sourceFingerprint + artifactFingerprint).
+    expect(derived.idempotency.sourceFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(derived.idempotency.artifactFingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(derived.idempotency.dedupeKey).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(derived.storage.docKey).toBe("runs/run-1/c-1.json");
+    expect(derived.parentArtifactRefs).toEqual([
+      { artifactId: "artifact-0", artifactType: "daily_digest", observedHash: "sha256:parent" },
+    ]);
+    // Deterministic: identical basis + package digest re-derives identical keys.
+    expect(candidateToArtifact(candidate, artifact().producedBy, now).idempotency).toEqual(derived.idempotency);
+  });
+
+  test("rejects candidates that self-assign idempotency/storage instead of shipping basis material", () => {
+    const legacyCandidate = {
+      schemaVersion: "feed.candidate_artifact.v1",
+      localCandidateId: "c-legacy",
+      artifactType: "insight",
+      renderShape: "short_form",
+      title: "Self-assigned keys",
+      body: { text: "nope" },
+      sourceRefs: [source()],
+      quality: { criticPass: true, quotesVerified: true },
+      idempotency: {
+        sourceFingerprint: "sha256:source",
+        artifactFingerprint: "sha256:candidate",
+        dedupeKey: "insight:sha256:source",
+      },
+      storage: { docKey: "scratch/c-legacy.json" },
+    };
+    const result = validateSkillRunOutput({
+      candidates: [legacyCandidate],
+      trace: {
+        procedureVersion: "0.1.0",
+        modelCalls: 1,
+        toolCalls: [],
+        stageTrace: [],
+        droppedCandidates: [],
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((error) => error.includes("idempotencyBasis"))).toBe(true);
+    }
   });
 
   test("rejects legacy artifact/interactions rows as native v1 input", () => {
