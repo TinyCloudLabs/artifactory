@@ -20,12 +20,16 @@ import {
   type DropAudit,
   type DroppedCandidate,
 } from "./validation.ts";
+<<<<<<< HEAD
 import {
   resolveListenResolution,
   type ListenResolverFactory,
   type ListenResolvedConversation,
 } from "./listen-resolver.ts";
 import { assertWorkflowAdmitted, type WorkflowFixture } from "./workflow.ts";
+=======
+import type { WorkflowFixture } from "./workflow.ts";
+>>>>>>> 26ab04d (TC-11 TC-68: enforce full source provenance before publish)
 
 export type RunOptions = {
   runId: string;
