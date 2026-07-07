@@ -99,17 +99,17 @@ describe("artifactory run", () => {
     expect(status.lock).toBeNull();
   });
 
-  test("candidates citing sources outside the sourcePack are dropped as audited provenance violations", async () => {
+  test("candidates with same sourceRefId but forged provenance metadata are dropped as audited violations", async () => {
     const candidate: CandidateArtifactEnvelope = {
       schemaVersion: "feed.candidate_artifact.v1",
       localCandidateId: "c-forged",
       artifactType: "noop",
       renderShape: "short_form",
       title: "forged provenance",
-      body: { text: "cites a source the run never observed" },
+      body: { text: "reuses an admitted sourceRefId but forges the metadata" },
       sourceRefs: [
         {
-          sourceRefId: "src-not-in-pack",
+          sourceRefId: "src-noop",
           sourceKind: "listen_conversation",
           sourceId: "listen-forged",
           observedPath: "sql_transcript_text",
@@ -156,7 +156,7 @@ describe("artifactory run", () => {
     expect(result.workflowRun.publishedArtifactIds).toEqual([]);
     expect(result.dropped).toEqual([
       {
-        reason: "provenance:source_ref_not_in_source_pack:src-not-in-pack",
+        reason: "provenance:source_ref_not_in_source_pack:src-noop",
         localCandidateId: "c-forged",
         title: "forged provenance",
       },

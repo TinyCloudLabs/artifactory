@@ -5,6 +5,7 @@
 import {
   validateCandidateArtifactEnvelope,
   type CandidateArtifactEnvelope,
+  type TranscriptSourceRef,
 } from "../../../skills/_shared/lib/feed-v1.ts";
 
 export type DroppedCandidate = {
@@ -37,6 +38,18 @@ export function createInMemoryDropAudit(): DropAudit {
   };
 }
 
+export function serializeTranscriptSourceRef(ref: TranscriptSourceRef): string {
+  return JSON.stringify({
+    sourceRefId: ref.sourceRefId,
+    sourceKind: ref.sourceKind,
+    sourceId: ref.sourceId,
+    observedPath: ref.observedPath,
+    observedHash: ref.observedHash,
+    observedAt: ref.observedAt,
+    quoteLineRefs: ref.quoteLineRefs,
+  });
+}
+
 export function validateCandidates(
   candidates: unknown[],
   options: {
@@ -44,9 +57,9 @@ export function validateCandidates(
     audit: DropAudit;
     maxAccepted: number;
     /**
-     * Provenance gate: sourceRefIds the run actually observed (the sourcePack
-     * refs). Candidates citing any sourceRef outside this set are dropped and
-     * audited — they must never publish.
+     * Provenance gate: canonical source refs the run actually observed
+     * (the sourcePack refs). Candidates citing any source ref outside this set
+     * are dropped and audited — they must never publish.
      */
     sourceRefAllowlist?: ReadonlySet<string>;
   },
@@ -79,7 +92,7 @@ export function validateCandidates(
     if (options.sourceRefAllowlist) {
       const allowlist = options.sourceRefAllowlist;
       const unknownRef = result.value.sourceRefs.find(
-        (ref) => !allowlist.has(ref.sourceRefId),
+        (ref) => !allowlist.has(serializeTranscriptSourceRef(ref)),
       );
       if (unknownRef) {
         const drop: DroppedCandidate = {
