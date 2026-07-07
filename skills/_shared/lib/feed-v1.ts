@@ -221,9 +221,11 @@ export type ArtifactorySkillManifest = {
 };
 
 export type ArtifactInputRef = {
+  kind: "feed_artifact";
   artifactId: string;
   artifactType: string;
   observedHash?: HashString;
+  observedAt: IsoDateString;
 };
 
 export type SkillRunInput = {
@@ -276,9 +278,16 @@ export type CandidateArtifactEnvelope = {
   quality: {
     criticPass: boolean;
     quotesVerified: boolean;
+    reasons: string[];
+    warnings: string[];
   };
-  idempotency: FeedArtifact["idempotency"];
-  storage: FeedArtifact["storage"];
+  // Candidates carry fingerprint material only. The Worker seam
+  // (candidateToArtifact) derives durable idempotency keys and storage keys;
+  // skill output never assigns them (spec §Runtime Contract).
+  idempotencyBasis: {
+    sourceFingerprintMaterial: string[];
+    artifactFingerprintMaterial: unknown;
+  };
 };
 
 export type SkillRunTrace = {
@@ -396,16 +405,43 @@ export function validateCandidateArtifactEnvelope(value: unknown): ValidationRes
     ["title", "string"],
     ["sourceRefs", "array"],
     ["quality", "object"],
-    ["idempotency", "object"],
-    ["storage", "object"],
+    ["idempotencyBasis", "object"],
   ]);
   if (!result.ok) return result;
   const errors: string[] = [];
   if (result.value.sourceRefs.length === 0) errors.push("sourceRefs: required non-empty array");
   if (typeof result.value.quality.criticPass !== "boolean") errors.push("quality.criticPass: required boolean");
   if (typeof result.value.quality.quotesVerified !== "boolean") errors.push("quality.quotesVerified: required boolean");
-  if (!result.value.storage.docKey) errors.push("storage.docKey: required string");
+  if (!isStringArray(result.value.quality.reasons)) errors.push("quality.reasons: required string array");
+  if (!isStringArray(result.value.quality.warnings)) errors.push("quality.warnings: required string array");
+  if (!isStringArray(result.value.idempotencyBasis.sourceFingerprintMaterial)) {
+    errors.push("idempotencyBasis.sourceFingerprintMaterial: required string array");
+  }
+  if (!("artifactFingerprintMaterial" in result.value.idempotencyBasis)) {
+    errors.push("idempotencyBasis.artifactFingerprintMaterial: required");
+  }
+  if (result.value.parentArtifactRefs !== undefined) {
+    if (!Array.isArray(result.value.parentArtifactRefs)) {
+      errors.push("parentArtifactRefs: must be an array");
+    } else {
+      result.value.parentArtifactRefs.forEach((ref, i) => {
+        const obj = record(ref);
+        if (!obj) {
+          errors.push(`parentArtifactRefs[${i}]: must be an object`);
+          return;
+        }
+        if (obj.kind !== "feed_artifact") errors.push(`parentArtifactRefs[${i}].kind: must be feed_artifact`);
+        if (typeof obj.artifactId !== "string") errors.push(`parentArtifactRefs[${i}].artifactId: required string`);
+        if (typeof obj.artifactType !== "string") errors.push(`parentArtifactRefs[${i}].artifactType: required string`);
+        addIso(errors, obj.observedAt, `parentArtifactRefs[${i}].observedAt`);
+      });
+    }
+  }
   return errors.length > 0 ? { ok: false, errors } : result;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 export function validateSkillRunOutput(value: unknown): ValidationResult<SkillRunOutput> {
