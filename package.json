@@ -15,6 +15,7 @@
     "artifact:agent:dev:raw": "bash scripts/artifact-agent-dev-https.sh",
     "artifact:backend:smoke": "bash scripts/artifact-backend-smoke.sh",
     "artifact:test": "bash scripts/artifact-check.sh",
+    "build": "bun run artifact:frontend:check",
     "smithers:doctor": "bunx smithers-orchestrator workflow doctor",
     "smithers:list": "bunx smithers-orchestrator workflow list",
     "smithers:ps": "bunx smithers-orchestrator ps --all",
@@ -30,7 +31,7 @@
     "smithers:video-smoke": "bunx smithers-orchestrator workflow run video-generation-smoke",
     "smithers:media-smoke": "bunx smithers-orchestrator workflow run full-media-generation-smoke",
     "smithers:composition": "bunx smithers-orchestrator workflow run feed-composition-smoke",
-    "test": "bun test",
+    "test": "bun test --preload ./tests/no-spend-setup.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {

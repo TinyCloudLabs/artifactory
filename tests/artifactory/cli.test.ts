@@ -65,7 +65,10 @@ describe("artifactory CLI", () => {
     const sensitiveMessage =
       'Listen SQL query failed: {"code":401,"detail":"backend says no"} '
       + "conversation not found: conversation-8f2c1d9e "
-      + 'delegation {"cid":"bafy-secret-cid","delegateDID":"did:pkh:eip155:1:0xDEADBEEF"}';
+      + 'delegation {"cid":"bafy-secret-cid","delegateDID":"did:pkh:eip155:1:0xDEADBEEF"} '
+      + "secretRef=vault/secrets/scoped/feed/OPENAI_API_KEY "
+      + "missing OPENAI_API_KEY "
+      + "OPENAI_API_KEY=sk-openai-xyz";
     const io = collectingIO();
     const artifactory = createArtifactory({
       runtime: {
@@ -92,6 +95,9 @@ describe("artifactory CLI", () => {
     expect(stderrText).not.toContain("conversation-8f2c1d9e");
     expect(stderrText).not.toContain("bafy-secret-cid");
     expect(stderrText).not.toContain("did:pkh");
+    expect(stderrText).not.toContain("vault/secrets/scoped/feed/OPENAI_API_KEY");
+    expect(stderrText).not.toContain("OPENAI_API_KEY");
+    expect(stderrText).not.toContain("OPENAI_API_KEY=sk-openai-xyz");
     expect(stderrText).not.toContain("{");
   });
 

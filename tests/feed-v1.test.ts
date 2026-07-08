@@ -285,6 +285,10 @@ describe("Feed v1 provider and skill defaults", () => {
     expect(FEED_V1_PROVIDER_PROFILES.find((profile) => profile.providerId === "phala")?.verification).toBe(
       "phala_tdx",
     );
+    expect(FEED_V1_PROVIDER_PROFILES.map((profile) => profile.secretRefs[0])).toEqual([
+      "vault/secrets/scoped/feed/OPENAI_API_KEY",
+      "vault/secrets/scoped/feed/REDPILL_API_KEY",
+    ]);
   });
 
   test("keeps outward and media-heavy Artifactory skills gated", () => {

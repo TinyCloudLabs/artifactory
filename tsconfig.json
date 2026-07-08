@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "baseUrl": ".",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -13,7 +14,12 @@
     "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "paths": {
+      "@tinycloud/node-sdk": [
+        "/Users/samgbafa/Documents/github/tinycloud-dev/repositories/js-sdk/packages/node-sdk/dist/index.d.ts"
+      ]
+    }
   },
   "include": [
     "skills/**/*.ts",

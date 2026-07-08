@@ -5,15 +5,15 @@
 // The agent owns an explicit package dependency on @tinycloud/node-sdk so local
 // development does not depend on whatever global/local js-sdk checkout happens
 // to exist on the machine. NODE_SDK_DIST remains as an escape hatch for testing a
-// built GitHub checkout. The old absolute path fallback is retained only for
-// legacy machines that still have the historical tinycloud-dev layout.
+// built checkout.
 
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
-// The built node-sdk the primary checkout's `tc-local` already uses. Same
-// machine-specific anchor convention as tc.ts's DEFAULT_TC_LOCAL.
-const DEFAULT_NODE_SDK_DIST =
-  "/Users/samgbafa/Documents/github/tinycloud-dev/repositories/js-sdk/packages/node-sdk/dist/index.js";
+const DEFAULT_NODE_SDK_DIST = resolve(
+  import.meta.dir,
+  "../../../../../repositories/js-sdk/packages/node-sdk/dist/index.js",
+);
 
 function resolveNodeSdkPath(): string {
   const override = process.env.NODE_SDK_DIST?.trim();

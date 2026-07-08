@@ -12,6 +12,7 @@ import {
 } from "./runtime-adapter.ts";
 import { executeRun, type RunOptions, type RunResult } from "./run.ts";
 import { readRunStatus, type RunStatus } from "./status.ts";
+import { assertWorkflowAdmitted } from "./workflow.ts";
 import type { ListenResolverFactory } from "./listen-resolver.ts";
 import type { WorkflowFixture } from "./workflow.ts";
 
@@ -66,6 +67,7 @@ export function createArtifactory(options: ArtifactoryOptions = {}): Artifactory
     publishWriter,
     dropAudit,
     async run(input) {
+      await assertWorkflowAdmitted(input.workflow);
       const runOptions: RunOptions = {
         runId: input.runId,
         ownerId: input.ownerId,
