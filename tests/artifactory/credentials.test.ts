@@ -36,7 +36,6 @@ function makeCandidate(overrides: Partial<CandidateArtifactEnvelope> = {}): Cand
       sourceFingerprintMaterial: ["listen-noop", "sha256:src"],
       artifactFingerprintMaterial: { text: "result" },
     },
-    storage: { docKey: "artifacts/candidate-1.json" },
     ...overrides,
   };
 }
