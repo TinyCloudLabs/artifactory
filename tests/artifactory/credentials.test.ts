@@ -31,11 +31,10 @@ function makeCandidate(overrides: Partial<CandidateArtifactEnvelope> = {}): Cand
         observedAt: "2026-07-02T00:00:00.000Z",
       },
     ],
-    quality: { criticPass: true, quotesVerified: true },
-    idempotency: {
-      sourceFingerprint: "sha256:src",
-      artifactFingerprint: "sha256:candidate",
-      dedupeKey: "noop:sha256:src",
+    quality: { criticPass: true, quotesVerified: true, reasons: [], warnings: [] },
+    idempotencyBasis: {
+      sourceFingerprintMaterial: ["listen-noop", "sha256:src"],
+      artifactFingerprintMaterial: { text: "result" },
     },
     storage: { docKey: "artifacts/candidate-1.json" },
     ...overrides,
