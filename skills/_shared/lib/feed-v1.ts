@@ -253,6 +253,7 @@ export type SkillRunInput = {
   runtimePolicy: RuntimePolicy;
   secretEnv?: {
     name: string;
+    secretRef?: string;
     injection: "env";
     stageId: string;
     source: "worker_injected";
@@ -477,7 +478,7 @@ export const FEED_V1_PROVIDER_PROFILES: FeedV1ProviderProfile[] = [
     credentialMode: "feed_hosted",
     providerClass: "first_party",
     defaultEgressClass: "model_provider",
-    secretRefs: ["secrets/feed/providers/openai/api_key"],
+    secretRefs: ["vault/secrets/scoped/feed/OPENAI_API_KEY"],
     defaultModel: "openai/gpt-5-mini",
     verification: "none",
   },
@@ -487,7 +488,7 @@ export const FEED_V1_PROVIDER_PROFILES: FeedV1ProviderProfile[] = [
     credentialMode: "feed_hosted",
     providerClass: "first_party",
     defaultEgressClass: "model_provider",
-    secretRefs: ["secrets/feed/providers/phala/redpill_api_key"],
+    secretRefs: ["vault/secrets/scoped/feed/REDPILL_API_KEY"],
     defaultModel: "phala/gpt-oss-120b",
     verification: "phala_tdx",
   },
