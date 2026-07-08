@@ -90,9 +90,11 @@ async function makeValidatorRefBundleCopy(): Promise<string> {
   const root = await makeTempBundleCopy();
   const skillTomlPath = join(root, "skill.toml");
   const skillToml = await readFile(skillTomlPath, "utf8");
+  await mkdir(join(root, "validators"), { recursive: true });
+  await writeFile(join(root, "validators/custom.ts"), "export const customValidator = true;\n", "utf8");
   await writeFile(
     skillTomlPath,
-    skillToml.replace("validator_refs = []", 'validator_refs = ["schema"]'),
+    skillToml.replace("validator_refs = []", 'validator_refs = ["schema", "validators/custom.ts"]'),
     "utf8",
   );
   return root;
@@ -170,12 +172,13 @@ describe("package compiler", () => {
     }
   });
 
-  test("treats validator refs as opaque platform ids instead of package files", async () => {
+  test("resolves validator refs as platform ids before package files", async () => {
     const root = await makeValidatorRefBundleCopy();
     try {
       const compiled = await compileSkillPackage(root);
-      expect(compiled.manifest.validatorRefs).toEqual(["schema"]);
-      expect(compiled.materials.some((material) => material.path === "schema")).toBe(false);
+      expect(compiled.manifest.validatorRefs).toEqual(["schema@1", "validators/custom.ts"]);
+      expect(compiled.materials.some((material) => material.path === "validators/custom.ts")).toBe(true);
+      expect(compiled.materials.some((material) => material.path === "schema@1")).toBe(false);
       expect(compiled.policyDecision.ok).toBe(true);
     } finally {
       await teardown(root);

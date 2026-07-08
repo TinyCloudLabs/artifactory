@@ -10,6 +10,11 @@ import type {
   TranscriptSourceRef,
 } from "../../../skills/_shared/lib/feed-v1.ts";
 import { compileSkillPackage, PackageSourceError } from "./package-compiler.ts";
+import {
+  admitReviewedBundle,
+  loadReviewedBundlePolicy,
+  PackageAdmissionError,
+} from "./package-policy.ts";
 import type { ListenResolution } from "./listen-resolver.ts";
 
 export type WorkflowFixture = {
@@ -35,6 +40,7 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
   const parsed = JSON.parse(raw) as unknown;
   const fixture = parseWorkflow(parsed, path);
   if (!fixture.packageRoot) {
+    await assertWorkflowAdmitted(fixture);
     return fixture;
   }
 
@@ -48,7 +54,7 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
     compiled.package.version,
   );
 
-  return {
+  const compiledFixture: WorkflowFixture = {
     ...fixture,
     packageRoot,
     packageId: compiled.package.packageId,
@@ -58,6 +64,34 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
     skillManifest: compiled.manifest,
     maxAcceptedArtifacts: compiled.manifest.limits.maxAcceptedArtifacts,
   };
+  await assertWorkflowAdmitted(compiledFixture);
+  return compiledFixture;
+}
+
+export async function assertWorkflowAdmitted(fixture: WorkflowFixture): Promise<void> {
+  const policy = await loadReviewedBundlePolicy();
+  const reasons: string[] = [];
+  if (fixture.skillManifest.admissionState !== "reviewed_first_party") {
+    reasons.push(
+      `skillManifest.admissionState=${fixture.skillManifest.admissionState} is not allowed at execution time`,
+    );
+  }
+
+  const decision = admitReviewedBundle(
+    {
+      packageId: fixture.packageId,
+      workflowExecutor: fixture.skillManifest.workflowExecutor,
+      runtimePolicy: fixture.skillManifest.runtimePolicy,
+      limits: fixture.skillManifest.limits,
+      stageCapabilities: fixture.skillManifest.stageCapabilities,
+    },
+    policy,
+  );
+  reasons.push(...decision.reasons);
+
+  if (reasons.length > 0) {
+    throw new PackageAdmissionError(fixture.packageId, policy.name, reasons);
+  }
 }
 
 export function parseWorkflow(value: unknown, sourcePath = "workflow file"): WorkflowFixture {

@@ -1,15 +1,22 @@
 import { describe, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
 import { createArtifactory } from "../../packages/artifactory/src/artifactory.ts";
-import { loadWorkflowFile } from "../../packages/artifactory/src/workflow.ts";
+import { loadWorkflowFile, parseWorkflow } from "../../packages/artifactory/src/workflow.ts";
 import type {
   ArtifactSkillRuntime,
   ArtifactSkillRuntimeInput,
   ArtifactSkillRuntimeOutput,
 } from "../../packages/artifactory/src/runtime-adapter.ts";
 import { RUN_ARTIFACT_SKILL } from "../../packages/artifactory/src/runtime-adapter.ts";
+import { PackageAdmissionError } from "../../packages/artifactory/src/package-policy.ts";
 import type { CandidateArtifactEnvelope } from "../../skills/_shared/lib/feed-v1.ts";
 
 const FIXTURE = new URL("./fixtures/noop.workflow.json", import.meta.url).pathname;
+const PACKAGE_FIXTURE = new URL("./fixtures/default-reviewed-bundle.workflow.json", import.meta.url).pathname;
+
+async function readWorkflowFixture(path: string) {
+  return parseWorkflow(JSON.parse(await readFile(path, "utf8")));
+}
 
 describe("artifactory run", () => {
   test("no-op workflow publishes zero artifacts and releases the lock", async () => {
@@ -185,5 +192,53 @@ describe("artifactory run", () => {
     });
     expect(result.status).toBe("blocked_authority");
     expect(result.workflowRun.error?.code).toBe("run_lock_conflict");
+  });
+
+  test("rejects inline workflows that are not reviewed at execution time", async () => {
+    const artifactory = createArtifactory();
+    const workflow = await readWorkflowFixture(FIXTURE);
+    workflow.skillManifest.admissionState = "candidate";
+
+    let error: unknown;
+    try {
+      await artifactory.run({
+        runId: "run-inline-candidate",
+        ownerId: "test-owner",
+        workflow,
+        now: new Date("2026-07-02T00:00:00.000Z"),
+        leaseMs: 60_000,
+      });
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(PackageAdmissionError);
+    if (error instanceof PackageAdmissionError) {
+      expect(error.reasons.some((reason) => reason.includes("admissionState=candidate"))).toBe(true);
+    }
+  });
+
+  test("rejects package-backed workflows that are not reviewed at execution time", async () => {
+    const artifactory = createArtifactory();
+    const workflow = await readWorkflowFixture(PACKAGE_FIXTURE);
+    workflow.skillManifest.admissionState = "candidate";
+
+    let error: unknown;
+    try {
+      await artifactory.run({
+        runId: "run-package-candidate",
+        ownerId: "test-owner",
+        workflow,
+        now: new Date("2026-07-02T00:00:00.000Z"),
+        leaseMs: 60_000,
+      });
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(PackageAdmissionError);
+    if (error instanceof PackageAdmissionError) {
+      expect(error.reasons.some((reason) => reason.includes("admissionState=candidate"))).toBe(true);
+    }
   });
 });

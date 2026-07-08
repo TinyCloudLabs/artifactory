@@ -29,7 +29,7 @@
       "credentialMode": "none",
       "egressClass": "none",
       "allowedTools": [],
-      "disallowedTools": ["tinycloud"],
+      "disallowedTools": ["tinycloud", "shell", "network"],
       "maxModelCalls": 0,
       "timeoutMs": 1000,
       "maxOutputBytes": 1024
@@ -39,7 +39,7 @@
       "timeoutMs": 1000,
       "maxOutputBytes": 1024,
       "maxModelCalls": 0,
-      "maxSourceRefs": 4,
+      "maxSourceRefs": 1,
       "maxInputTokens": 48
     },
     "disclosure": {
@@ -55,7 +55,7 @@
     "credentialMode": "none",
     "egressClass": "none",
     "allowedTools": [],
-    "disallowedTools": ["tinycloud"],
+    "disallowedTools": ["tinycloud", "shell", "network"],
     "maxModelCalls": 0,
     "timeoutMs": 1000,
     "maxOutputBytes": 1024,

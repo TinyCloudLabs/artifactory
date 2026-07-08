@@ -109,6 +109,16 @@ type SkillContract = {
   };
 };
 
+const PLATFORM_VALIDATOR_REFS = {
+  schema: "schema@1",
+  source_refs: "source_refs@1",
+  quote_verbatim: "quote_verbatim@1",
+  critic_pass: "critic_pass@1",
+  policy: "policy@1",
+} as const;
+
+const PLATFORM_VALIDATOR_REF_SET = new Set<string>(Object.values(PLATFORM_VALIDATOR_REFS));
+
 export class PackageSourceError extends Error {
   readonly packageId?: string;
   readonly sourcePath?: string;
@@ -145,15 +155,22 @@ export async function compileSkillPackage(
   const settingsSchemaPath = contract.settings?.schema
     ? resolvePackagePath(sourceRoot, contract.settings.schema)
     : undefined;
-  const validatorRefs = [...(contract.validation?.validator_refs ?? [])];
-  // Validator refs are platform IDs/versions, not package files. They stay as
-  // opaque digest inputs and are never resolved through the package tree.
+  const validatorRefs: string[] = [];
   const explicitMaterialPaths = new Set<string>([
     workflowPath,
     outputSchemaPath,
     ...(settingsSchemaPath ? [settingsSchemaPath] : []),
-    ...(contract.validation?.evaluator_refs ?? []).map((ref) => resolvePackagePath(sourceRoot, ref)),
   ]);
+  // Platform validators are canonical ids; everything else is treated as a
+  // package-relative validator file and included in the digest.
+  for (const ref of contract.validation?.validator_refs ?? []) {
+    const resolved = resolveValidatorRef(sourceRoot, ref);
+    validatorRefs.push(resolved.ref);
+    if (resolved.materialPath) explicitMaterialPaths.add(resolved.materialPath);
+  }
+  for (const ref of contract.validation?.evaluator_refs ?? []) {
+    explicitMaterialPaths.add(resolvePackagePath(sourceRoot, ref));
+  }
 
   const materialPaths = await collectPackageMaterialPaths(sourceRoot);
   for (const path of explicitMaterialPaths) materialPaths.add(path);
@@ -687,6 +704,35 @@ function parseFrontmatter(raw: string): { frontmatter?: Record<string, unknown>;
 
 function normalizeRefPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+}
+
+function resolveValidatorRef(
+  rootDir: string,
+  ref: string,
+): { ref: string; materialPath?: string } {
+  const normalized = normalizeRefPath(ref);
+  if (Object.prototype.hasOwnProperty.call(PLATFORM_VALIDATOR_REFS, normalized)) {
+    return { ref: PLATFORM_VALIDATOR_REFS[normalized as keyof typeof PLATFORM_VALIDATOR_REFS] };
+  }
+  if (PLATFORM_VALIDATOR_REF_SET.has(normalized)) {
+    return { ref: normalized };
+  }
+
+  const versionedMatch = /^([a-z_][a-z0-9_]*)@(\d+)$/.exec(normalized);
+  if (versionedMatch) {
+    const base = versionedMatch[1] as keyof typeof PLATFORM_VALIDATOR_REFS;
+    const expected = PLATFORM_VALIDATOR_REFS[base];
+    if (expected) {
+      throw new PackageSourceError(`unsupported validator ref ${ref}; expected ${expected}`, {
+        sourcePath: ref,
+      });
+    }
+  }
+
+  return {
+    ref: normalized,
+    materialPath: resolvePackagePath(rootDir, normalized),
+  };
 }
 
 function resolvePackagePath(rootDir: string, ref: string): string {
