@@ -1,0 +1,94 @@
+{
+  "workflowId": "default-reviewed-bundle",
+  "packageId": "default-reviewed-bundle",
+  "version": "0.1.0",
+  "digest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+  "packageRoot": "./default-reviewed-bundle",
+  "skillManifest": {
+    "schemaVersion": "feed.skill_manifest.v1",
+    "packageId": "default-reviewed-bundle",
+    "displayName": "Default Reviewed Bundle",
+    "version": "0.1.0",
+    "digest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+    "source": "first_party",
+    "tier": 1,
+    "admissionState": "reviewed_first_party",
+    "artifactTypes": ["stub_artifact"],
+    "renderShapes": ["short_form"],
+    "outputSchemaRef": "schemas/output.schema.json",
+    "settingsSchemaRef": "schemas/settings.schema.json",
+    "validatorRefs": [],
+    "evaluatorRefs": ["evaluators/review.md"],
+    "workflowRef": "workflows/default-reviewed-bundle.stub.json",
+    "workflowDigest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35",
+    "workflowExecutor": "stub",
+    "stageCapabilities": [
+      {
+        "stageId": "stub",
+        "capabilities": [],
+        "authority": "none",
+        "egressClass": "none",
+        "spendClass": "none"
+      }
+    ],
+    "runtimePolicy": {
+      "runtimeClass": "stub",
+      "providerClass": "none",
+      "credentialMode": "none",
+      "egressClass": "none",
+      "allowedTools": [],
+      "disallowedTools": ["tinycloud", "shell", "network"],
+      "maxModelCalls": 0,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 4096
+    },
+    "limits": {
+      "maxAcceptedArtifacts": 1,
+      "timeoutMs": 1000,
+      "maxOutputBytes": 4096,
+      "maxModelCalls": 0,
+      "maxSourceRefs": 1,
+      "maxInputTokens": 12000
+    },
+    "disclosure": {
+      "userCopy": "Reads bounded Listen excerpts and emits a single reviewed stub artifact.",
+      "credentialOwner": "none",
+      "providerClass": "none",
+      "egressClass": "none"
+    }
+  },
+  "runtimePolicy": {
+    "runtimeClass": "stub",
+    "providerClass": "none",
+    "credentialMode": "none",
+    "egressClass": "none",
+    "allowedTools": [],
+    "disallowedTools": ["tinycloud", "shell", "network"],
+    "maxModelCalls": 0,
+    "timeoutMs": 1000,
+    "maxOutputBytes": 4096,
+    "budgetId": "m0"
+  },
+  "sourcePack": {
+    "refs": [
+      {
+        "sourceRefId": "src-default",
+        "sourceKind": "listen_conversation",
+        "sourceId": "conversation-default",
+        "observedPath": "sql_transcript_text",
+        "observedHash": "sha256:feed-default-source",
+        "observedAt": "2026-07-02T00:00:00.000Z"
+      }
+    ],
+    "excerpts": [
+      {
+        "sourceRefId": "src-default",
+        "text": "The reviewed bundle should emit one grounded stub artifact.",
+        "quoteLineRefs": ["0"]
+      }
+    ],
+    "maxInputTokens": 12000
+  },
+  "settings": {},
+  "maxAcceptedArtifacts": 1
+}

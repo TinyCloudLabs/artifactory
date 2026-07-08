@@ -1,0 +1,37 @@
+{
+  "manifestDigest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+  "workflowDigest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35",
+  "packageDigest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+  "materials": [
+    {
+      "path": "evaluators/review.md",
+      "kind": "text",
+      "digest": "sha256:8a3a50d659f1023458ba25cb682a5a27487632854e30326eb30fedff1cba2fb0"
+    },
+    {
+      "path": "fixtures/expected-candidate.json",
+      "kind": "json",
+      "digest": "sha256:d00c524035f57f96b99a2371bb79df15db761f70186cddbaa3e7c1948841d1f0"
+    },
+    {
+      "path": "fixtures/source-pack.json",
+      "kind": "json",
+      "digest": "sha256:c63ac60286ae23a8660c4a0ad022daeb7ea5bf4b5d32ff3660e69facf16a9af0"
+    },
+    {
+      "path": "schemas/output.schema.json",
+      "kind": "json",
+      "digest": "sha256:89bea4866e3834b02c7bbc87ebcdecdc1a52e0aab3e737e7b5954d7451a4c1bb"
+    },
+    {
+      "path": "schemas/settings.schema.json",
+      "kind": "json",
+      "digest": "sha256:0315fc123cf5b3495e854ac63c47aaff76b34851a87baa07a783533f93acfe57"
+    },
+    {
+      "path": "workflows/default-reviewed-bundle.stub.json",
+      "kind": "json",
+      "digest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35"
+    }
+  ]
+}

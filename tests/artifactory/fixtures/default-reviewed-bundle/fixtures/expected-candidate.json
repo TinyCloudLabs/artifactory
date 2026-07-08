@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "feed.candidate_artifact.v1",
+  "localCandidateId": "candidate-1",
+  "artifactType": "stub_artifact",
+  "renderShape": "short_form",
+  "title": "Reviewed stub artifact",
+  "summary": "A deterministic stub artifact from the reviewed bundle.",
+  "body": {
+    "text": "The reviewed bundle should emit one grounded stub artifact."
+  },
+  "sourceRefs": [
+    {
+      "sourceRefId": "src-default",
+      "sourceKind": "listen_conversation",
+      "sourceId": "conversation-default",
+      "observedPath": "sql_transcript_text",
+      "observedHash": "sha256:feed-default-source",
+      "observedAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "quality": {
+    "criticPass": true,
+    "quotesVerified": true,
+    "reasons": ["stub runtime"],
+    "warnings": []
+  },
+  "idempotencyBasis": {
+    "sourceFingerprintMaterial": ["src-default", "sha256:feed-default-source"],
+    "artifactFingerprintMaterial": {
+      "text": "The reviewed bundle should emit one grounded stub artifact."
+    }
+  }
+}

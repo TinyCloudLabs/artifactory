@@ -29,7 +29,7 @@
       "credentialMode": "none",
       "egressClass": "none",
       "allowedTools": [],
-      "disallowedTools": ["tinycloud"],
+      "disallowedTools": ["tinycloud", "shell", "network"],
       "maxModelCalls": 0,
       "timeoutMs": 1000,
       "maxOutputBytes": 1024
@@ -55,7 +55,7 @@
     "credentialMode": "none",
     "egressClass": "none",
     "allowedTools": [],
-    "disallowedTools": ["tinycloud"],
+    "disallowedTools": ["tinycloud", "shell", "network"],
     "maxModelCalls": 0,
     "timeoutMs": 1000,
     "maxOutputBytes": 1024,

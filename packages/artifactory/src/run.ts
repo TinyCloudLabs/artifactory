@@ -25,7 +25,7 @@ import {
   type ListenResolverFactory,
   type ListenResolvedConversation,
 } from "./listen-resolver.ts";
-import type { WorkflowFixture } from "./workflow.ts";
+import { assertWorkflowAdmitted, type WorkflowFixture } from "./workflow.ts";
 
 export type RunOptions = {
   runId: string;
@@ -55,6 +55,8 @@ export type RunResult = {
 export async function executeRun(options: RunOptions): Promise<RunResult> {
   const { runId, ownerId, workflow, now, leaseMs, runtime } = options;
   const nowIso = now.toISOString();
+
+  await assertWorkflowAdmitted(workflow);
 
   const acquired = await options.runLock.acquire({
     scope: workflow.packageId,

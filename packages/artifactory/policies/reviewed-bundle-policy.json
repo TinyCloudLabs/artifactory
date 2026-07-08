@@ -1,0 +1,21 @@
+{
+  "name": "reviewed-bundle-default",
+  "allowedRuntimeClasses": ["stub"],
+  "allowedProviderClasses": ["none"],
+  "allowedCredentialModes": ["none"],
+  "allowedEgressClasses": ["none"],
+  "allowedWorkflowExecutors": ["stub"],
+  "allowedStageAuthorities": ["none"],
+  "allowedStageCapabilities": [],
+  "allowedStageEgressClasses": ["none"],
+  "allowedStageSpendClasses": ["none"],
+  "allowedTools": [],
+  "requiredDisallowedTools": ["tinycloud", "shell", "network"],
+  "allowedExternalCapabilities": [],
+  "maxModelCalls": 0,
+  "timeoutMs": 1000,
+  "maxOutputBytes": 4096,
+  "maxAcceptedArtifacts": 1,
+  "maxSourceRefs": 1,
+  "maxInputTokens": 12000
+}

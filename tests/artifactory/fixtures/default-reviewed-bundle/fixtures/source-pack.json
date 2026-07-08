@@ -1,0 +1,20 @@
+{
+  "refs": [
+    {
+      "sourceRefId": "src-default",
+      "sourceKind": "listen_conversation",
+      "sourceId": "conversation-default",
+      "observedPath": "sql_transcript_text",
+      "observedHash": "sha256:feed-default-source",
+      "observedAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "excerpts": [
+    {
+      "sourceRefId": "src-default",
+      "text": "The reviewed bundle should emit one grounded stub artifact.",
+      "quoteLineRefs": ["0"]
+    }
+  ],
+  "maxInputTokens": 12000
+}
