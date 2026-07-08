@@ -452,6 +452,18 @@ export function kvPut(
   return tcJson(argv, opts);
 }
 
+/** Put a raw string value at `key`, falling back to the SDK for large payloads. */
+export async function kvPutString(
+  key: string,
+  value: string,
+  target: KvTarget = {},
+  opts: TcRunOptions = {},
+): Promise<{ key: string; written: boolean }> {
+  return shouldUseSdkKvPut(value)
+    ? kvPutStringViaSdk(key, value, target, opts)
+    : kvPut(key, value, target, opts);
+}
+
 /**
  * Put binary bytes at `<key>.b64` (the `.b64` suffix is load-bearing — it
  * tells every reader to base64-decode). Returns the actual key written.

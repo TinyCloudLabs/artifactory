@@ -2,6 +2,7 @@
 // the stub runtime; `status --run <id> --scope <scope>` prints ledger state.
 
 import { createArtifactory, type Artifactory } from "./artifactory.ts";
+import { runMigrationCommand } from "./migration.ts";
 import { loadWorkflowFile } from "./workflow.ts";
 
 export type CliIO = {
@@ -22,6 +23,7 @@ const USAGE = [
   "Usage:",
   "  @tinycloud/artifactory run <workflow.json> [--run-id <id>] [--owner <ownerId>] [--lease-ms <n>]",
   "  @tinycloud/artifactory status --run <runId> --scope <scope>",
+  "  @tinycloud/artifactory migrate [--space <space>] [--dry-run]",
   "  @tinycloud/artifactory --help",
 ].join("\n");
 
@@ -41,6 +43,9 @@ export async function runCli(options: CliOptions): Promise<CliResult> {
   }
   if (command === "status") {
     return withRedactionBoundary("status", io, () => statusCommand(argv.slice(1), artifactory, io));
+  }
+  if (command === "migrate") {
+    return withRedactionBoundary("migrate", io, () => runMigrationCommand({ argv: argv.slice(1), io }));
   }
   io.stderr(`unknown command: ${command}\n${USAGE}`);
   return { exitCode: 2 };
