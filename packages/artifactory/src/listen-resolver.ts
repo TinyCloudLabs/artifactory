@@ -8,7 +8,7 @@ import type { SkillRunInput, TranscriptSourceRef } from "../../../skills/_shared
 const DEFAULT_LISTEN_HOST = "https://node.tinycloud.xyz";
 const DEFAULT_NODE_SDK_DIST = resolve(
   import.meta.dir,
-  "../../../repositories/js-sdk/packages/node-sdk/dist/index.js",
+  "../../../../../repositories/js-sdk/packages/node-sdk/dist/index.js",
 );
 const LISTEN_CONVERSATIONS_DB = "xyz.tinycloud.listen/conversations";
 
