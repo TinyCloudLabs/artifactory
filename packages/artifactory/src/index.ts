@@ -10,3 +10,4 @@ export * from "./runtime-adapter.ts";
 export * from "./listen-resolver.ts";
 export { createArtifactory, type Artifactory, type ArtifactoryOptions } from "./artifactory.ts";
 export { runCli } from "./cli-entry.ts";
+export { runMigrationCommand } from "./migration.ts";
