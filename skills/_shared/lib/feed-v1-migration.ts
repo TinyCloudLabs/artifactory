@@ -427,6 +427,12 @@ function buildInteractionRows(
     if (LEGACY_CONTROL_ACTIONS.has(interaction.action)) {
       const targetRef = `artifact:${interaction.artifactId}`;
       const prompt = note ?? artifact.headline;
+      const payload = {
+        legacyAction: interaction.action,
+        ...(prompt ? { prompt } : {}),
+      };
+      const payloadJson = json(payload);
+      const payloadHash = sha256(stableStringify(payload));
       controlRows.push({
         table: "control_intent_event",
         values: {
@@ -437,10 +443,7 @@ function buildInteractionRows(
           status: "accepted",
           target_ref: targetRef,
           payload_hash: payloadHash,
-          payload_json: json({
-            legacyAction: interaction.action,
-            ...(prompt ? { prompt } : {}),
-          }),
+          payload_json: payloadJson,
           created_at: interaction.recordedAt,
         },
       });

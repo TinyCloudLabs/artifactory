@@ -17,6 +17,7 @@ import {
 import {
   FEED_V1_ARTIFACTS_INDEX_DB_PATH,
   FEED_V1_FEED_INDEX_DB_PATH,
+  feedV1MigrationApplyPlans,
 } from "../../../skills/_shared/lib/feed-v1-schema.ts";
 
 export type MigrationCliIO = {
@@ -51,6 +52,9 @@ export async function runMigrationCommand(input: {
   );
 
   const plan = buildFeedV1MigrationPlan({ legacyArtifacts, legacyInteractions });
+  if (!dryRun) {
+    await bootstrapFeedV1SplitSchema({ target, opts });
+  }
   const summary = await applyFeedV1MigrationPlan(plan, cliWriter({ target, opts }), { dryRun });
 
   io.stdout(
@@ -67,6 +71,21 @@ export async function runMigrationCommand(input: {
     ),
   );
   return { exitCode: 0 };
+}
+
+export async function bootstrapFeedV1SplitSchema(input: {
+  target: { space?: string };
+  opts: { profile?: string };
+  execute?: typeof sqlExecute;
+}): Promise<void> {
+  const execute = input.execute ?? sqlExecute;
+  for (const plan of feedV1MigrationApplyPlans()) {
+    for (const migration of plan.migrations) {
+      for (const statement of migration.sql) {
+        await execute(statement, { db: plan.dbPath, space: input.target.space }, undefined, input.opts);
+      }
+    }
+  }
 }
 
 function cliWriter(input: {

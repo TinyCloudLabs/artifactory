@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import { bootstrapFeedV1SplitSchema } from "../packages/artifactory/src/migration.ts";
 import { validateFeedArtifact } from "../skills/_shared/lib/feed-v1.ts";
 import {
   applyFeedV1MigrationPlan,
@@ -129,6 +131,8 @@ describe("Feed v1 legacy migration", () => {
     const requestRow = plan.feedRows.find((row) => row.table === "generation_request");
     expect(requestRow?.values.request_id).toBe("int-6");
     expect(String(requestRow?.values.prompt)).toBe("Build a deeper artifact.");
+    expect(controlRow?.values.payload_hash).toBe(sha256(String(controlRow?.values.payload_json)));
+    expect(requestRow?.values.dedupe_key).toBe(controlRow?.values.payload_hash);
   });
 
   test("partially migrated user resumes without duplicates", async () => {
@@ -185,6 +189,25 @@ describe("Feed v1 legacy migration", () => {
     expect(plan.summary.skippedInteractions).toBe(1);
     expect(plan.audits.some((audit) => audit.reason === "invalid_legacy_artifact")).toBe(true);
     expect(plan.audits.some((audit) => audit.reason === "unexpected_legacy_action")).toBe(true);
+  });
+
+  test("bootstrapFeedV1SplitSchema provisions the split schema before migration writes", async () => {
+    const statements: Array<{ db: string; sql: string }> = [];
+    await bootstrapFeedV1SplitSchema({
+      target: { space: "test-space" },
+      opts: { profile: "test-profile" },
+      execute: async (statement, target) => {
+        statements.push({ db: target.db, sql: statement });
+        return { changes: 0, lastInsertRowId: 0 };
+      },
+    });
+
+    const artifactsStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.artifacts/index");
+    const feedStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.feed/index");
+    expect(artifactsStatements).toHaveLength(7);
+    expect(feedStatements).toHaveLength(6);
+    expect(artifactsStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS artifact_index");
+    expect(feedStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS feed_artifact_projection");
   });
 });
 
@@ -243,4 +266,8 @@ function rowKey(row: SqlSeedRow): string {
     default:
       return `${row.table}:${Object.values(row.values).join(":")}`;
   }
+}
+
+function sha256(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
