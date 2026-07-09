@@ -11,11 +11,12 @@ import type {
   SkillRunInput,
 } from "../../../skills/_shared/lib/feed-v1.ts";
 import { FEED_V1_PROVIDER_PROFILES } from "../../../skills/_shared/lib/feed-v1.ts";
-import type { CostLedger } from "./cost-ledger.ts";
+import type { CostLedger, CostLedgerEntry } from "./cost-ledger.ts";
 import type { PublishWriter } from "./publish-writer.ts";
 import type { RunLockStore } from "./run-lock.ts";
 import {
   redactArtifactSkillRuntimeOutput,
+  redactArtifactSkillRuntimeText,
   type ArtifactSkillRuntime,
   type ArtifactSkillRuntimeOutput,
 } from "./runtime-adapter.ts";
@@ -66,6 +67,8 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     ownerId,
     workflow,
     costLedger: options.costLedger,
+    runId,
+    nowIso,
   });
   if (!gate.ok) {
     const workflowRun = makeBlockedWorkflowRun({
@@ -108,6 +111,9 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     now,
   });
   if (!acquired.ok) {
+    // Package lock lost after the budget reservation was taken. Release the
+    // reservation so a blocked run does not burn budget.
+    await cancelBudgetReservationQuietly(options.costLedger, gate.reservedLedgerId, ownerId);
     const workflowRun = makeBlockedWorkflowRun({
       runId,
       workflow,
@@ -140,6 +146,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     };
   }
 
+  let completedSuccessfully = false;
   try {
     let sourcePack = workflow.sourcePack;
     let resolvedConversations: ListenResolvedConversation[] = [];
@@ -177,8 +184,13 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       secretEnv: gate.secretEnv,
     };
 
+    const rawRuntimeOutput = await invokeRuntimeSafely(
+      runtime,
+      skillInput,
+      gate.sensitiveValues,
+    );
     const runtimeOutput = redactArtifactSkillRuntimeOutput(
-      await runtime.run(skillInput),
+      rawRuntimeOutput,
       gate.sensitiveValues,
     );
     const outcome = validateCandidates(runtimeOutput.candidates, {
@@ -233,17 +245,9 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     };
     await options.publishWriter.recordRun(workflowRun);
 
-    await options.costLedger.record({
-      ledgerId: `${runId}:${gate.budgetId}:${nowIso}`,
-      userId: ownerId,
-      budgetId: gate.budgetId,
-      windowStart: nowIso,
-      spendClass: gate.spendClass,
-      amount: gate.runAmount,
-      currency: gate.currency,
-      runId,
-      recordedAt: nowIso,
-    });
+    // The reservation from resolveRunGates already appended the entry to the
+    // ledger, so we DO NOT call record() again — that would double-count.
+    completedSuccessfully = true;
 
     return {
       status,
@@ -255,7 +259,64 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       resolvedConversations,
     };
   } finally {
+    if (!completedSuccessfully) {
+      // Runtime threw, publish threw, listen resolve threw, etc. Release the
+      // budget reservation so failed runs do not burn budget.
+      await cancelBudgetReservationQuietly(options.costLedger, gate.reservedLedgerId, ownerId);
+    }
     await options.runLock.release(acquired.row.lockId, ownerId);
+  }
+}
+
+// Any error surfaced by the runtime.run() call can carry raw secret material
+// (provider bodies, secret refs, api-key values). We redact the message,
+// stack, and cause chain BEFORE rethrowing so nothing embedded in the error
+// leaks past executeRun.
+async function invokeRuntimeSafely(
+  runtime: ArtifactSkillRuntime,
+  input: SkillRunInput,
+  sensitiveValues: readonly string[],
+): Promise<ArtifactSkillRuntimeOutput> {
+  try {
+    return await runtime.run(input);
+  } catch (err) {
+    throw redactError(err, sensitiveValues, "runtime failed");
+  }
+}
+
+function redactError(
+  err: unknown,
+  sensitiveValues: readonly string[],
+  fallbackMessage: string,
+): Error {
+  if (!(err instanceof Error)) {
+    return new Error(
+      redactArtifactSkillRuntimeText(String(err ?? fallbackMessage), sensitiveValues),
+    );
+  }
+  const scrubbedMessage = redactArtifactSkillRuntimeText(err.message, sensitiveValues);
+  const scrubbedCause = err.cause !== undefined
+    ? redactError(err.cause, sensitiveValues, fallbackMessage)
+    : undefined;
+  const scrubbed = new Error(scrubbedMessage, scrubbedCause ? { cause: scrubbedCause } : undefined);
+  if (err.stack) {
+    scrubbed.stack = redactArtifactSkillRuntimeText(err.stack, sensitiveValues);
+  }
+  return scrubbed;
+}
+
+async function cancelBudgetReservationQuietly(
+  costLedger: CostLedger,
+  ledgerId: string | undefined,
+  userId: string,
+): Promise<void> {
+  if (!ledgerId) return;
+  try {
+    await costLedger.cancel(ledgerId, userId);
+  } catch {
+    // Cleanup failure must not shadow the primary result/error surfaced to
+    // the caller. The ledger error would also carry provider strings, so we
+    // must not rethrow it here.
   }
 }
 
@@ -271,6 +332,7 @@ type BudgetGate = {
   runAmount: number;
   currency: string;
   spendClass: "none" | "model" | "media" | "tool";
+  reservedLedgerId?: string;
 };
 
 type RunGateSuccess = CredentialGate & BudgetGate;
@@ -291,6 +353,8 @@ async function resolveRunGates(input: {
   ownerId: string;
   workflow: WorkflowFixture;
   costLedger: CostLedger;
+  runId: string;
+  nowIso: string;
 }): Promise<RunGateResult> {
   const settings = asRecord(input.workflow.settings);
   const budget = asRecord(firstDefined(settings, "budget", "budgets", "spend", "metering"));
@@ -351,9 +415,29 @@ async function resolveRunGates(input: {
     };
   }
 
-  const spent = await currentBudgetSpend(input.costLedger, input.ownerId, budgetId, currency);
   const limit = numberFromRecord(budget, "limit", "maxSpend", "cap", "ceiling");
-  if (limit !== undefined && spent + runAmount > limit) {
+  const ledgerId = `${input.runId}:${budgetId}:${input.nowIso}`;
+  const entry: CostLedgerEntry = {
+    ledgerId,
+    userId: input.ownerId,
+    budgetId,
+    windowStart: input.nowIso,
+    spendClass,
+    amount: runAmount,
+    currency,
+    runId: input.runId,
+    recordedAt: input.nowIso,
+  };
+
+  // Atomic check-and-reserve. Errors from the ledger must not leak provider
+  // strings — wrap in a generic "budget accounting failed".
+  let reservation: Awaited<ReturnType<CostLedger["reserve"]>>;
+  try {
+    reservation = await input.costLedger.reserve(entry, { limit });
+  } catch {
+    throw new Error("budget accounting failed");
+  }
+  if (!reservation.ok) {
     return {
       ok: false,
       status: "blocked_budget",
@@ -376,6 +460,7 @@ async function resolveRunGates(input: {
     runAmount,
     currency,
     spendClass,
+    reservedLedgerId: ledgerId,
   };
 }
 
@@ -445,17 +530,6 @@ function resolveCredentialGate(
     ],
     sensitiveValues: [resolvedSecretRef],
   };
-}
-
-async function currentBudgetSpend(
-  costLedger: CostLedger,
-  ownerId: string,
-  budgetId: string,
-  currency: string,
-): Promise<number> {
-  const totals = await costLedger.totals({ userId: ownerId, budgetId });
-  const match = totals.find((entry) => entry.currency === currency) ?? totals[0];
-  return match?.amount ?? 0;
 }
 
 function makeBlockedWorkflowRun(input: {
