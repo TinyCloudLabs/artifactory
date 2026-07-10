@@ -218,7 +218,7 @@ export async function createListenResolverDriver(
     autoCreateSpace: false,
   });
   await node.signIn();
-  const delegation = sdk.deserializeDelegation(auth.serializedDelegation.trim());
+  const delegation = sdk.deserializeDelegation(portableDelegationJson(auth.serializedDelegation));
   const access = await node.useDelegation(delegation);
 
   return {
@@ -248,6 +248,22 @@ export async function createListenResolverDriver(
       return parseTranscriptSegments(result.data.data);
     },
   };
+}
+
+function portableDelegationJson(serialized: string): string {
+  const trimmed = serialized.trim();
+  const parsed = parseJsonValue(trimmed);
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    (parsed as Record<string, unknown>).kind === "tinycloud.auth.delegation"
+  ) {
+    const delegation = (parsed as Record<string, unknown>).delegation;
+    if (typeof delegation === "string") return delegation.trim();
+    if (delegation && typeof delegation === "object") return JSON.stringify(delegation);
+  }
+  return trimmed;
 }
 
 function normalizeTokenBudget(maxInputTokens: number): number {

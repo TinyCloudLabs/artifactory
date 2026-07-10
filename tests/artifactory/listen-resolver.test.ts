@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildSourcePackFromConversations,
+  createListenResolverDriver,
   resolveListenConversations,
   resolveListenResolution,
   type ListenConversationRow,
@@ -42,6 +43,59 @@ function makeDriver(rows: ListenConversationRow[], transcripts: Record<string, L
 }
 
 describe("listen resolver", () => {
+  test("unwraps a TinyCloud auth artifact before SDK deserialization", async () => {
+    const envKey = "ARTIFACTORY_LISTEN_TEST_PRIVATE_KEY";
+    const previousPrivateKey = process.env[envKey];
+    process.env[envKey] = "0xfeed";
+    const portableDelegation = {
+      root: "bafy-test-root",
+      actions: [{ can: "tinycloud/sql/read", with: "tinycloud://test" }],
+    };
+    let deserializedInput = "";
+
+    class FakeTinyCloudNode {
+      async signIn(): Promise<void> {}
+
+      async useDelegation(): Promise<{
+        sql: { db(): { query(): Promise<{ ok: boolean }> } };
+        kv: { get(): Promise<{ ok: boolean }> };
+      }> {
+        return {
+          sql: { db: () => ({ query: async () => ({ ok: true }) }) },
+          kv: { get: async () => ({ ok: true }) },
+        };
+      }
+    }
+
+    try {
+      await createListenResolverDriver(
+        {
+          privateKeyEnv: envKey,
+          serializedDelegation: JSON.stringify({
+            kind: "tinycloud.auth.delegation",
+            version: 1,
+            delegation: portableDelegation,
+          }),
+        },
+        async () => ({
+          TinyCloudNode: FakeTinyCloudNode,
+          deserializeDelegation(serialized: string) {
+            deserializedInput = serialized;
+            return JSON.parse(serialized);
+          },
+        }),
+      );
+    } finally {
+      if (previousPrivateKey === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = previousPrivateKey;
+      }
+    }
+
+    expect(JSON.parse(deserializedInput)).toEqual(portableDelegation);
+  });
+
   test("preserves explicit conversation order and resolves KV transcripts", async () => {
     const now = new Date("2026-07-02T00:00:00.000Z");
     const driver = makeDriver(
