@@ -15,6 +15,8 @@
     "artifact:agent:dev:raw": "bash scripts/artifact-agent-dev-https.sh",
     "artifact:backend:smoke": "bash scripts/artifact-backend-smoke.sh",
     "artifact:test": "bash scripts/artifact-check.sh",
+    "feed:v1:publish-dev": "bun scripts/feed-v1-publish-dev.ts",
+    "feed:v1:worker": "bun harness/feed-v1-worker/worker.ts",
     "build": "bun run artifact:frontend:check",
     "smithers:doctor": "bunx smithers-orchestrator workflow doctor",
     "smithers:list": "bunx smithers-orchestrator workflow list",
