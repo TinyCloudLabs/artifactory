@@ -22,6 +22,12 @@ function collectingIO() {
 describe("listen-backed artifactory run", () => {
   test("resolves transcripts, windows them, and prints runtime candidate output", async () => {
     const driver: ListenResolverDriver = {
+      authority: {
+        lineageId: "bafy-listen-child",
+        releasePolicy: "delegated",
+        audienceDids: ["did:example:agent"],
+        expiresAt: "2027-07-02T00:00:00.000Z",
+      },
       async listRecent(limit, offset) {
         return [{ id: "conversation-1" }].slice(offset, offset + limit);
       },
@@ -96,5 +102,12 @@ describe("listen-backed artifactory run", () => {
     expect(payload.candidateOutput).toHaveLength(1);
     expect(payload.candidateOutput[0]?.title).toBe("resolved candidate");
     expect(payload.publishedArtifactIds).toEqual(["run-listen:candidate-1"]);
+    const published = await artifactory.publishWriter.listArtifacts("run-listen");
+    expect(published[0]?.sourceRefs[0]?.authority?.lineageId).toBe("bafy-listen-child");
+    expect(published[0]?.derivedAccess).toMatchObject({
+      releasePolicy: "delegated",
+      audienceDids: ["did:example:agent"],
+      expiresAt: "2027-07-02T00:00:00.000Z",
+    });
   });
 });

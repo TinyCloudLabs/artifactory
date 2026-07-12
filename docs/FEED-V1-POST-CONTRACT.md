@@ -85,6 +85,23 @@ release policy (`private`, `delegated`, or `public`), optional grantor DID,
 allowed audience DIDs, and expiry. Bearers, private keys, authorization headers,
 and raw delegation payloads are rejected from this structure.
 
+Listen workflows name a registered input authority; workflow JSON never carries
+a share link, portable delegation, embedded JWK, or parent bearer. The registry
+holds a constrained child `PortableDelegation` and an agent-key reference.
+The default registry is a JSON object keyed by authority name at
+`ARTIFACTORY_SOURCE_AUTHORITY_REGISTRY`; deployments may inject the equivalent
+trusted registry resolver.
+Before SDK activation, Artifactory verifies active/revoked state, host, child
+lineage, agent audience, expiry, space, and the exact read-only Listen grants
+(`sql/read` on conversations and `kv/get` only on
+`xyz.tinycloud.listen/transcript/`). The registered expected parent CID must
+match the child exactly. The SDK then
+activates the signed delegation and Artifactory confirms the activated space.
+Registry status, identity, and current expiry are resolved again immediately
+before every SQL or KV read, so a mid-run revoke or expiry stops consumption.
+Each input authority remains named and separate from artifact/output authority.
+Only its non-secret lineage and access policy enter `TranscriptSourceRef`.
+
 The worker reconstructs published source refs from its trusted source pack and
 derives the artifact's `derivedAccess` from transcript sources plus the
 `derivedAccess` carried by every referenced artifact-pack input. Missing lineage

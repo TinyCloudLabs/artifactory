@@ -4,19 +4,24 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import type { SkillRunInput, TranscriptSourceRef } from "../../../skills/_shared/lib/feed-v1.ts";
+import {
+  LISTEN_SOURCE_HOST,
+  SourceAuthorityError,
+  authorityMetadata,
+  resolveRegisteredSourceAuthority,
+  validatePortableListenAuthority,
+  type RegisteredListenSourceAuthority,
+  type SourceAuthorityResolver,
+} from "./source-authority.ts";
 
-const DEFAULT_LISTEN_HOST = "https://node.tinycloud.xyz";
 const DEFAULT_NODE_SDK_DIST = resolve(
   import.meta.dir,
-  "../../../../../repositories/js-sdk/packages/node-sdk/dist/index.js",
+  "../../../../../js-sdk/packages/node-sdk/dist/index.js",
 );
 const LISTEN_CONVERSATIONS_DB = "xyz.tinycloud.listen/conversations";
 
 export type ListenResolverAuth = {
-  serializedDelegation: string;
-  privateKeyPath?: string;
-  privateKeyEnv?: string;
-  host?: string;
+  authorityName: string;
 };
 
 export type ListenResolutionQuery = {
@@ -54,6 +59,7 @@ export type ListenResolvedConversation = {
 };
 
 export type ListenResolverDriver = {
+  authority: NonNullable<TranscriptSourceRef["authority"]>;
   listRecent(limit: number, offset: number): Promise<ListenConversationRow[]>;
   loadMany(conversationIds: string[]): Promise<ListenConversationRow[]>;
   loadTranscript(conversationId: string): Promise<ListenTranscriptSegment[]>;
@@ -90,8 +96,10 @@ type TinyCloudNodeSdk = {
     autoCreateSpace?: boolean;
     prefix?: string;
   }) => {
+    readonly sessionDid: string;
     signIn(): Promise<void>;
     useDelegation(delegation: unknown): Promise<{
+      readonly spaceId: string;
       sql: {
         db(name?: string): {
           query<T = Record<string, unknown>>(
@@ -109,6 +117,8 @@ type TinyCloudNodeSdk = {
     }>;
   };
   deserializeDelegation(serialized: string): unknown;
+  isCapabilitySubset: import("./source-authority.ts").SourceAuthoritySdkHelpers["isCapabilitySubset"];
+  principalDidEquals: import("./source-authority.ts").SourceAuthoritySdkHelpers["principalDidEquals"];
 };
 
 export async function resolveListenResolution(
@@ -117,11 +127,18 @@ export async function resolveListenResolution(
   options: {
     driver?: ListenResolverDriver;
     loadSdk?: () => Promise<TinyCloudNodeSdk>;
+    resolveAuthority?: SourceAuthorityResolver;
     now?: () => Date;
     limits?: ListenSourcePackLimits;
   } = {},
 ): Promise<ListenResolutionResult> {
-  const driver = options.driver ?? (await createListenResolverDriver(resolution.auth, options.loadSdk));
+  validateListenResolverAuth(resolution.auth);
+  const driver = options.driver ?? (await createListenResolverDriver(
+    resolution.auth,
+    options.loadSdk,
+    options.resolveAuthority,
+    options.now,
+  ));
   const conversations = await resolveListenConversations(resolution.query, driver, options.now);
   return {
     conversations,
@@ -144,7 +161,7 @@ export async function resolveListenConversations(
       row,
       transcript,
       transcriptSource: source,
-      sourceRef: buildTranscriptSourceRef(row, transcript, source, now()),
+      sourceRef: buildTranscriptSourceRef(row, transcript, source, now(), driver.authority),
     });
   }
   return resolved;
@@ -209,20 +226,58 @@ export function buildSourcePackFromConversations(
 export async function createListenResolverDriver(
   auth: ListenResolverAuth,
   loadSdk: () => Promise<TinyCloudNodeSdk> = loadListenNodeSdk,
+  resolveAuthority?: SourceAuthorityResolver,
+  now: () => Date = () => new Date(),
 ): Promise<ListenResolverDriver> {
+  validateListenResolverAuth(auth);
   const sdk = await loadSdk();
-  const privateKey = await loadPrivateKey(auth);
+  const authority = await resolveRegisteredSourceAuthority(auth.authorityName, resolveAuthority, now);
+  const privateKey = await loadPrivateKey(authority);
   const node = new sdk.TinyCloudNode({
-    host: auth.host?.trim() || DEFAULT_LISTEN_HOST,
+    host: authority.host || LISTEN_SOURCE_HOST,
     privateKey,
     autoCreateSpace: false,
   });
-  await node.signIn();
-  const delegation = sdk.deserializeDelegation(portableDelegationJson(auth.serializedDelegation));
-  const access = await node.useDelegation(delegation);
+  try {
+    await node.signIn();
+  } catch {
+    throw new SourceAuthorityError("authority_unavailable", "agent identity could not be activated");
+  }
+  let delegation: unknown;
+  try {
+    delegation = sdk.deserializeDelegation(authority.serializedDelegation);
+  } catch {
+    throw new SourceAuthorityError("authority_transport_invalid", "portable delegation could not be deserialized");
+  }
+  const portableDelegation = delegation as import("@tinycloud/node-sdk").PortableDelegation;
+  validatePortableListenAuthority(
+    authority,
+    portableDelegation,
+    node.sessionDid,
+    sdk,
+    now(),
+  );
+  let access: Awaited<ReturnType<InstanceType<TinyCloudNodeSdk["TinyCloudNode"]>["useDelegation"]>>;
+  try {
+    access = await node.useDelegation(delegation);
+  } catch {
+    throw new SourceAuthorityError("authority_unavailable", "registered child delegation could not be activated");
+  }
+  if (access.spaceId !== authority.spaceId) {
+    throw new SourceAuthorityError("authority_cross_space", "activated authority targets a different space");
+  }
+  const guardSourceRead = async (): Promise<void> => {
+    const current = await resolveRegisteredSourceAuthority(auth.authorityName, resolveAuthority, now);
+    validatePortableListenAuthority(current, portableDelegation, node.sessionDid, sdk, now());
+    if (access.spaceId !== current.spaceId) {
+      throw new SourceAuthorityError("authority_cross_space", "activated authority targets a different space");
+    }
+  };
 
   return {
+    authority: authorityMetadata(authority, portableDelegation),
     async listRecent(limit, offset) {
+      await guardSourceRead();
       const result = await access.sql.db(LISTEN_CONVERSATIONS_DB).query<unknown>(
         "SELECT id, title, started_at, transcript_json, transcript_text FROM conversation ORDER BY rowid DESC LIMIT ? OFFSET ?",
         [limit, offset],
@@ -230,6 +285,7 @@ export async function createListenResolverDriver(
       return unwrapSqlRows(result, ["id", "title", "started_at", "transcript_json", "transcript_text"]);
     },
     async loadMany(conversationIds) {
+      await guardSourceRead();
       if (conversationIds.length === 0) return [];
       const placeholders = conversationIds.map(() => "?").join(", ");
       const result = await access.sql.db(LISTEN_CONVERSATIONS_DB).query<unknown>(
@@ -241,6 +297,7 @@ export async function createListenResolverDriver(
       return conversationIds.map((id) => byId.get(id)).filter((row): row is ListenConversationRow => Boolean(row));
     },
     async loadTranscript(conversationId) {
+      await guardSourceRead();
       const result = await access.kv.get<string>(`transcript/${conversationId}`, { raw: true });
       if (!result.ok || !result.data) {
         return [];
@@ -250,20 +307,17 @@ export async function createListenResolverDriver(
   };
 }
 
-function portableDelegationJson(serialized: string): string {
-  const trimmed = serialized.trim();
-  const parsed = parseJsonValue(trimmed);
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    !Array.isArray(parsed) &&
-    (parsed as Record<string, unknown>).kind === "tinycloud.auth.delegation"
-  ) {
-    const delegation = (parsed as Record<string, unknown>).delegation;
-    if (typeof delegation === "string") return delegation.trim();
-    if (delegation && typeof delegation === "object") return JSON.stringify(delegation);
+export function validateListenResolverAuth(value: unknown): asserts value is ListenResolverAuth {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new SourceAuthorityError("authority_name_missing", "workflow must name a registered source authority");
   }
-  return trimmed;
+  const auth = value as Record<string, unknown>;
+  if (Object.keys(auth).some((key) => key !== "authorityName")) {
+    throw new SourceAuthorityError("authority_transport_invalid", "workflow auth may only contain authorityName");
+  }
+  if (typeof auth.authorityName !== "string" || !auth.authorityName.trim()) {
+    throw new SourceAuthorityError("authority_name_missing", "workflow must name a registered source authority");
+  }
 }
 
 function normalizeTokenBudget(maxInputTokens: number): number {
@@ -332,6 +386,7 @@ function buildTranscriptSourceRef(
   transcript: ListenTranscriptSegment[],
   source: ListenResolvedConversation["transcriptSource"],
   observedAt: Date,
+  authority: NonNullable<TranscriptSourceRef["authority"]>,
 ): TranscriptSourceRef {
   const observedPath =
     source === "kv_transcript"
@@ -353,6 +408,7 @@ function buildTranscriptSourceRef(
     observedPath,
     observedHash,
     observedAt: observedAt.toISOString(),
+    authority: structuredClone(authority),
   };
 }
 
@@ -471,7 +527,7 @@ function unwrapSqlRows(
   columns: string[],
 ): ListenConversationRow[] {
   if (!result.ok || !result.data) {
-    throw new Error(`Listen SQL query failed${result.error ? `: ${JSON.stringify(result.error)}` : ""}`);
+    throw new SourceAuthorityError("source_unavailable", "Listen SQL query failed under registered authority");
   }
   return rowsToConversationRows(result.data.columns, result.data.rows, columns);
 }
@@ -527,7 +583,7 @@ function uniqueIds(ids: string[]): string[] {
   return Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
 }
 
-async function loadPrivateKey(auth: ListenResolverAuth): Promise<string> {
+async function loadPrivateKey(auth: RegisteredListenSourceAuthority): Promise<string> {
   if (auth.privateKeyPath?.trim()) {
     return normalizePrivateKey(await readFile(auth.privateKeyPath, "utf8"), `privateKeyPath:${auth.privateKeyPath}`);
   }

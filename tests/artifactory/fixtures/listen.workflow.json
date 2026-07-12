@@ -68,8 +68,7 @@
   },
   "listenResolution": {
     "auth": {
-      "privateKeyEnv": "ARTIFACTORY_LISTEN_PRIVATE_KEY",
-      "serializedDelegation": "delegation-fixture"
+      "authorityName": "listen-child"
     },
     "query": {
       "conversationId": "conversation-1"
