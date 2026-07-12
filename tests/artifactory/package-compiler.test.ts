@@ -204,6 +204,7 @@ describe("default reviewed bundle run", () => {
         summary?: string;
         body: { text: string };
         sourceRefs: typeof workflow.sourcePack.refs;
+        feedSurface: { mode: "artifact_preview" };
         quality: {
           criticPass: boolean;
           quotesVerified: boolean;
@@ -267,8 +268,8 @@ describe("default reviewed bundle run", () => {
       expect(payload.candidateOutput).toHaveLength(1);
       expect(payload.candidateOutput[0]?.title).toBe(expectedCandidate.title);
       expect(payload.publishedArtifactIds).toEqual(["run-reviewed-bundle:candidate-1"]);
-      expect(seenInput?.skillManifest.digest).toBe("sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6");
-      expect(seenInput?.skillManifest.workflowDigest).toBe("sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35");
+      expect(seenInput?.skillManifest.digest).toBe("sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49");
+      expect(seenInput?.skillManifest.workflowDigest).toBe("sha256:770a4971a4481732dd85e19ca83321113a8ae3754e9d61df06162999df35745d");
       expect(seenInput?.runtimePolicy.runtimeClass).toBe("stub");
     } finally {
       await teardown(runRoot);

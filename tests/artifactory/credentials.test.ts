@@ -42,6 +42,7 @@ function makeCandidate(overrides: Partial<CandidateArtifactEnvelope> = {}): Cand
         observedAt: "2026-07-02T00:00:00.000Z",
       },
     ],
+    feedSurface: { mode: "artifact_preview" },
     quality: { criticPass: true, quotesVerified: true, reasons: [], warnings: [] },
     idempotencyBasis: {
       sourceFingerprintMaterial: ["listen-noop", "sha256:src"],

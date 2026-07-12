@@ -2,14 +2,14 @@
   "workflowId": "default-reviewed-bundle",
   "packageId": "default-reviewed-bundle",
   "version": "0.1.0",
-  "digest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+  "digest": "sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49",
   "packageRoot": "./default-reviewed-bundle",
   "skillManifest": {
     "schemaVersion": "feed.skill_manifest.v1",
     "packageId": "default-reviewed-bundle",
     "displayName": "Default Reviewed Bundle",
     "version": "0.1.0",
-    "digest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+    "digest": "sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49",
     "source": "first_party",
     "tier": 1,
     "admissionState": "reviewed_first_party",
@@ -20,7 +20,7 @@
     "validatorRefs": [],
     "evaluatorRefs": ["evaluators/review.md"],
     "workflowRef": "workflows/default-reviewed-bundle.stub.json",
-    "workflowDigest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35",
+    "workflowDigest": "sha256:770a4971a4481732dd85e19ca83321113a8ae3754e9d61df06162999df35745d",
     "workflowExecutor": "stub",
     "stageCapabilities": [
       {

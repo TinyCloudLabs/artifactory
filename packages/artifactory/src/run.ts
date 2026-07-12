@@ -22,7 +22,6 @@ import {
 } from "./runtime-adapter.ts";
 import type { SourceLedger } from "./source-ledger.ts";
 import {
-  serializeTranscriptSourceRef,
   validateCandidates,
   type DropAudit,
   type DroppedCandidate,
@@ -32,7 +31,7 @@ import {
   type ListenResolverFactory,
   type ListenResolvedConversation,
 } from "./listen-resolver.ts";
-import type { WorkflowFixture } from "./workflow.ts";
+import { bindAdmittedArtifactPack, type WorkflowFixture } from "./workflow.ts";
 
 export type RunOptions = {
   runId: string;
@@ -62,6 +61,7 @@ export type RunResult = {
 export async function executeRun(options: RunOptions): Promise<RunResult> {
   const { runId, ownerId, workflow, now, leaseMs, runtime } = options;
   const nowIso = now.toISOString();
+  const boundArtifactPack = bindAdmittedArtifactPack(workflow);
 
   const gate = await resolveRunGates({
     ownerId,
@@ -179,6 +179,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       runId,
       skillManifest: workflow.skillManifest,
       sourcePack,
+      artifactPack: boundArtifactPack?.runtimePack,
       settings: workflow.settings,
       runtimePolicy: workflow.runtimePolicy,
       secretEnv: gate.secretEnv,
@@ -197,9 +198,14 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       runId,
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
-      sourceRefAllowlist: new Set(
-        sourcePack.refs.map(serializeTranscriptSourceRef),
-      ),
+      trustedSourceRefs: new Map(sourcePack.refs.map((ref) => [ref.sourceRefId, ref])),
+      trustedParentArtifacts: boundArtifactPack?.trustedParentArtifacts,
+      sourceExcerpts: new Map(sourcePack.refs.map((ref) => [
+        ref.sourceRefId,
+        sourcePack.excerpts
+          .filter((excerpt) => excerpt.sourceRefId === ref.sourceRefId)
+          .map((excerpt) => excerpt.text),
+      ])),
     });
 
     const producedBy = {
@@ -215,8 +221,13 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     };
 
     const published: FeedArtifact[] = [];
-    for (const candidate of outcome.accepted) {
-      const artifact = candidateToArtifact(candidate, producedBy, nowIso);
+    for (const accepted of outcome.accepted) {
+      const artifact = candidateToArtifact(
+        accepted.candidate,
+        producedBy,
+        nowIso,
+        accepted.verification,
+      );
       await options.publishWriter.publish(artifact);
       published.push(artifact);
     }

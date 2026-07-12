@@ -1,7 +1,7 @@
 {
-  "manifestDigest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
-  "workflowDigest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35",
-  "packageDigest": "sha256:0f5f8ef9566a58824e7f6008b2f047a4181d4be90a58f66aabe973b083e100b6",
+  "manifestDigest": "sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49",
+  "workflowDigest": "sha256:770a4971a4481732dd85e19ca83321113a8ae3754e9d61df06162999df35745d",
+  "packageDigest": "sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49",
   "materials": [
     {
       "path": "evaluators/review.md",
@@ -11,7 +11,12 @@
     {
       "path": "fixtures/expected-candidate.json",
       "kind": "json",
-      "digest": "sha256:d00c524035f57f96b99a2371bb79df15db761f70186cddbaa3e7c1948841d1f0"
+      "digest": "sha256:c804a47e89f1e720e45918035c9fccaab86cb4462e53c96cb25cc843da3960ee"
+    },
+    {
+      "path": "fixtures/parent-artifact-pack.json",
+      "kind": "json",
+      "digest": "sha256:b2561fc026f499263413a3626ce513ddf28c3670932a6f9dd25a6e9f0dca5161"
     },
     {
       "path": "fixtures/source-pack.json",
@@ -31,7 +36,7 @@
     {
       "path": "workflows/default-reviewed-bundle.stub.json",
       "kind": "json",
-      "digest": "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35"
+      "digest": "sha256:770a4971a4481732dd85e19ca83321113a8ae3754e9d61df06162999df35745d"
     }
   ]
 }

@@ -1,5 +1,6 @@
 {
   "workflowId": "default-reviewed-bundle",
+  "artifactPackRef": "fixtures/parent-artifact-pack.json",
   "stages": [
     {
       "stageId": "stub",

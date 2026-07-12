@@ -34,7 +34,7 @@ disallowed_tools = ["tinycloud", "shell", "network"]
 [workflow]
 executor = "stub"
 ref = "workflows/default-reviewed-bundle.stub.json"
-digest = "sha256:1949c691df27c44afc5818e88b0ce245b7c8de9e70583d1eff1a1d560f6a8f35"
+digest = "sha256:770a4971a4481732dd85e19ca83321113a8ae3754e9d61df06162999df35745d"
 
 [limits]
 max_accepted_artifacts = 1

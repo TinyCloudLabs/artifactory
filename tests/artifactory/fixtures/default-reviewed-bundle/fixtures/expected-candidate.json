@@ -18,6 +18,7 @@
       "observedAt": "2026-07-02T00:00:00.000Z"
     }
   ],
+  "feedSurface": { "mode": "artifact_preview" },
   "quality": {
     "criticPass": true,
     "quotesVerified": true,

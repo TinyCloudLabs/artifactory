@@ -52,6 +52,7 @@ describe("listen-backed artifactory run", () => {
               title: "resolved candidate",
               body: { text: "resolved" },
               sourceRefs: input.sourcePack.refs,
+              feedSurface: { mode: "artifact_preview" },
               quality: { criticPass: true, quotesVerified: true, reasons: [], warnings: [] },
               idempotencyBasis: {
                 sourceFingerprintMaterial: input.sourcePack.refs.map((ref) => ref.sourceRefId),
