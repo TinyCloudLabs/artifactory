@@ -3,11 +3,21 @@ import {
   type CandidateArtifactEnvelope,
   type FeedArtifact,
   type FeedArtifactProjection,
+  type FeedPost,
+  type FeedItemProjection,
+  type CandidateFeedPostEvidence,
+  type FeedPostEvidence,
+  type TranscriptSourceRef,
+  type TrustedCandidateVerification,
   type FeedWorkflowPackage,
   type FeedWorkflowRun,
   type HashString,
   validateCandidateArtifactEnvelope,
   validateFeedArtifact,
+  validateFeedItemProjection,
+  canonicalFeedPostIdentity,
+  canonicalEvidenceTextHash,
+  deriveAccessPolicy,
 } from "./feed-v1.ts";
 
 export type SqlSeedRow = {
@@ -86,6 +96,32 @@ export function projectionRow(projection: FeedArtifactProjection): SqlSeedRow {
   };
 }
 
+// Shared-spec serialization for migration fixtures only. Feed owns runtime
+// projection, ranking, dual-write, and reconciliation behavior.
+export function feedItemProjectionRow(projection: FeedItemProjection): SqlSeedRow {
+  const validated = validateFeedItemProjection(projection);
+  if (!validated.ok) throw new Error(`invalid FeedItemProjection: ${validated.errors.join("; ")}`);
+  const postId = projection.target.kind === "post" ? projection.target.postId : null;
+  return {
+    table: "feed_item_projection",
+    values: {
+      feed_item_id: projection.feedItemId,
+      target_kind: projection.target.kind,
+      artifact_id: projection.target.artifactId,
+      post_id: postId,
+      rank_score: projection.rankScore,
+      disposition: projection.disposition,
+      visibility: projection.visibility,
+      freshness_label: projection.freshnessLabel,
+      reason_codes_json: json(projection.reasonCodes),
+      package_id: projection.packageId,
+      source_fingerprint: projection.sourceFingerprint,
+      published_at: projection.publishedAt,
+      updated_at: projection.updatedAt,
+    },
+  };
+}
+
 export function packageStateRow(pkg: FeedWorkflowPackage, updatedAt: string): SqlSeedRow {
   return {
     table: "workflow_package_state",
@@ -129,15 +165,110 @@ function sha256(value: string): HashString {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function copyEvidence(
+  value: CandidateFeedPostEvidence,
+  sourceRefs: TranscriptSourceRef[],
+  verification: TrustedCandidateVerification,
+): FeedPostEvidence {
+  switch (value.kind) {
+    case "verified_quote":
+      const source = sourceRefs.find((ref) => ref.sourceRefId === value.sourceRefId);
+      if (!source) throw new Error(`verified quote source not observed: ${value.sourceRefId}`);
+      const proof = verification.verifiedQuotes.find((entry) =>
+        entry.evidenceId === value.evidenceId &&
+        entry.sourceRefId === value.sourceRefId &&
+        entry.sourceObservedHash === source.observedHash &&
+        entry.quoteHash === canonicalEvidenceTextHash(value.quote),
+      );
+      if (!proof) throw new Error(`verified quote lacks trusted worker proof: ${value.evidenceId}`);
+      return {
+        kind: value.kind,
+        evidenceId: value.evidenceId,
+        sourceRefId: value.sourceRefId,
+        quote: value.quote,
+        loc: value.loc,
+        verification: {
+          method: "worker_source_quote_match",
+          sourceObservedHash: source.observedHash,
+        },
+      };
+    case "located_source":
+      return {
+        kind: value.kind,
+        evidenceId: value.evidenceId,
+        sourceRefId: value.sourceRefId,
+        loc: value.loc,
+        excerpt: value.excerpt,
+      };
+    case "parent_artifact":
+      return {
+        kind: value.kind,
+        evidenceId: value.evidenceId,
+        artifactId: value.artifactId,
+        sectionId: value.sectionId,
+      };
+    case "analytic_inference":
+      return {
+        kind: value.kind,
+        evidenceId: value.evidenceId,
+        rationale: value.rationale,
+        supportedBy: [...value.supportedBy],
+      };
+  }
+}
+
+export function deriveFeedPosts(
+  candidate: CandidateArtifactEnvelope,
+  artifactId: string,
+  verification: TrustedCandidateVerification,
+): FeedPost[] | undefined {
+  const sourceRefs = verification.trustedSourceRefs ?? candidate.sourceRefs;
+  const parentArtifactRefs = verification.trustedParentArtifacts?.map(({ ref }) => ref) ?? candidate.parentArtifactRefs;
+  return candidate.posts?.map((post) => {
+    // Explicit construction is a trust boundary: unknown model-supplied
+    // fields (including storage/media keys and durable IDs) are discarded.
+    const safeFeedPost = {
+      kind: post.kind,
+      title: post.title,
+      body: post.body,
+      evidence: post.evidence.map((evidence) => copyEvidence(evidence, sourceRefs, verification)),
+    };
+    const identity = canonicalFeedPostIdentity(safeFeedPost, {
+      sourceRefs,
+      parentArtifactRefs,
+    });
+    return {
+      ...safeFeedPost,
+      ...identity,
+      expansionTarget: {
+        artifactId,
+        sectionId: post.sectionId,
+      },
+    };
+  });
+}
+
 // Worker-side idempotency assignment (spec §Idempotency): the skill supplies
 // fingerprint material only; the Worker derives the durable keys, and
 // dedupe_key = sha256(packageDigest + sourceFingerprint + artifactFingerprint).
 export function assignCandidateIdempotency(
   candidate: CandidateArtifactEnvelope,
   packageDigest: string,
+  verification: TrustedCandidateVerification = { verifiedQuotes: [] },
 ): FeedArtifact["idempotency"] {
+  const sourceRefs = verification.trustedSourceRefs ?? candidate.sourceRefs;
+  const parentArtifactRefs = verification.trustedParentArtifacts?.map(({ ref }) => ref) ?? candidate.parentArtifactRefs;
   const sourceFingerprint = sha256(JSON.stringify(candidate.idempotencyBasis.sourceFingerprintMaterial));
-  const artifactFingerprint = sha256(JSON.stringify(candidate.idempotencyBasis.artifactFingerprintMaterial));
+  const postFingerprints = (candidate.posts ?? [])
+    .map((post) => canonicalFeedPostIdentity(post, {
+      sourceRefs,
+      parentArtifactRefs,
+    }).postFingerprint)
+    .sort();
+  const artifactFingerprint = sha256(JSON.stringify({
+    artifactFingerprintMaterial: candidate.idempotencyBasis.artifactFingerprintMaterial,
+    postFingerprints,
+  }));
   return {
     sourceFingerprint,
     artifactFingerprint,
@@ -149,10 +280,25 @@ export function candidateToArtifact(
   candidate: CandidateArtifactEnvelope,
   producedBy: FeedArtifact["producedBy"],
   now: string,
+  verification: TrustedCandidateVerification = { verifiedQuotes: [] },
 ): FeedArtifact {
   const result = validateCandidateArtifactEnvelope(candidate);
   if (!result.ok) throw new Error(`invalid candidate artifact: ${result.errors.join("; ")}`);
   const artifactId = `${producedBy.runId}:${candidate.localCandidateId}`;
+  const sourceRefs = verification.trustedSourceRefs ?? candidate.sourceRefs;
+  const trustedParents = verification.trustedParentArtifacts ?? [];
+  const parentArtifactRefs = verification.trustedParentArtifacts
+    ? trustedParents.map(({ ref, derivedAccess }) => ({
+      artifactId: ref.artifactId,
+      artifactType: ref.artifactType,
+      observedHash: ref.observedHash,
+      derivedAccess,
+    }))
+    : candidate.parentArtifactRefs?.map((ref) => ({
+      artifactId: ref.artifactId,
+      artifactType: ref.artifactType,
+      observedHash: ref.observedHash,
+    }));
   return {
     schemaVersion: "feed.artifact.v1",
     artifactId,
@@ -162,15 +308,17 @@ export function candidateToArtifact(
     summary: candidate.summary,
     body: candidate.body,
     renderHints: candidate.renderHints,
-    sourceRefs: candidate.sourceRefs,
-    parentArtifactRefs: candidate.parentArtifactRefs?.map((ref) => ({
+    sourceRefs,
+    feedSurface: candidate.feedSurface,
+    derivedAccess: deriveAccessPolicy(sourceRefs, trustedParents.map(({ ref, derivedAccess }) => ({
       artifactId: ref.artifactId,
-      artifactType: ref.artifactType,
-      observedHash: ref.observedHash,
-    })),
+      derivedAccess,
+    }))),
+    posts: deriveFeedPosts(candidate, artifactId, verification),
+    parentArtifactRefs,
     producedBy,
     freshness: { label: "fresh", asOf: now },
-    idempotency: assignCandidateIdempotency(candidate, producedBy.packageDigest),
+    idempotency: assignCandidateIdempotency(candidate, producedBy.packageDigest, verification),
     storage: { docKey: `runs/${producedBy.runId}/${candidate.localCandidateId}.json` },
     createdAt: now,
     updatedAt: now,

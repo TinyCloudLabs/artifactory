@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { bootstrapFeedV1SplitSchema } from "../packages/artifactory/src/migration.ts";
 import { validateFeedArtifact } from "../skills/_shared/lib/feed-v1.ts";
+import {
+  FEED_V1_FEED_MIGRATIONS,
+  FEED_V1_LEGACY_PROJECTION_PARITY_SQL,
+  FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL,
+} from "../skills/_shared/lib/feed-v1-schema.ts";
 import {
   applyFeedV1MigrationPlan,
   buildFeedV1MigrationPlan,
@@ -107,7 +113,10 @@ describe("Feed v1 legacy migration", () => {
     expect(validateFeedArtifact(artifactDoc)).toEqual({ ok: true, value: artifactDoc });
     expect(artifactDoc.storage.docKey).toBe("xyz.tinycloud.artifacts/artifacts/legacy-card-1.json");
 
-    const projectionRow = plan.feedRows.find((row) => row.table === "feed_artifact_projection");
+    const projectionRow = plan.feedRows.find((row) => row.table === "feed_item_projection");
+    expect(projectionRow?.values.feed_item_id).toBe("legacy:legacy-card-1");
+    expect(projectionRow?.values.target_kind).toBe("artifact_preview");
+    expect(projectionRow?.values.post_id).toBeNull();
     expect(projectionRow?.values.disposition).toBe("hidden");
     expect(projectionRow?.values.visibility).toBe("hidden");
     expect(String(projectionRow?.values.reason_codes_json)).toContain("legacy_migrated");
@@ -205,9 +214,115 @@ describe("Feed v1 legacy migration", () => {
     const artifactsStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.artifacts/index");
     const feedStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.feed/index");
     expect(artifactsStatements).toHaveLength(7);
-    expect(feedStatements).toHaveLength(6);
+    expect(feedStatements).toHaveLength(9);
     expect(artifactsStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS artifact_index");
     expect(feedStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS feed_artifact_projection");
+    expect(feedStatements[6]?.sql).toContain("CREATE TABLE IF NOT EXISTS feed_item_projection");
+  });
+
+  test("migration 002 backfills legacy projections into the canonical post-aware table", () => {
+    const db = new Database(":memory:");
+    try {
+      for (const migration of FEED_V1_FEED_MIGRATIONS.slice(0, 1)) {
+        for (const statement of migration.sql) db.run(statement);
+      }
+      db.run(
+        `INSERT INTO feed_artifact_projection (
+          artifact_id, rank_score, disposition, visibility, freshness_label,
+          reason_codes_json, package_id, source_fingerprint, published_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          "artifact-old",
+          42,
+          "default",
+          "ranked",
+          "fresh",
+          "[]",
+          "package-old",
+          "sha256:source",
+          "2026-07-01T00:00:00.000Z",
+          "2026-07-01T00:00:00.000Z",
+        ],
+      );
+      for (const statement of FEED_V1_FEED_MIGRATIONS[1]!.sql) db.run(statement);
+
+      const row = db.query(
+        "SELECT feed_item_id, target_kind, artifact_id, post_id FROM feed_item_projection",
+      ).get() as { feed_item_id: string; target_kind: string; artifact_id: string; post_id: null };
+      expect(row).toEqual({
+        feed_item_id: "legacy:artifact-old",
+        target_kind: "artifact_preview",
+        artifact_id: "artifact-old",
+        post_id: null,
+      });
+      expect(() => db.run(
+        `INSERT INTO feed_item_projection
+        SELECT 'bad-preview', 'artifact_preview', artifact_id, 'dangling', rank_score,
+          disposition, visibility, freshness_label, reason_codes_json, package_id,
+          source_fingerprint, published_at, updated_at
+        FROM feed_artifact_projection WHERE artifact_id = 'artifact-old'`,
+      )).toThrow();
+      expect(() => db.run(
+        `INSERT INTO feed_targeted_interaction_event (
+          event_id, target_kind, artifact_id, post_id, feed_item_id,
+          reader_nonce, actor_id, signal, created_at
+        ) VALUES ('bad-target', 'post', 'artifact-old', NULL, NULL,
+          'nonce', 'actor', 'save', '2026-07-01T00:00:00.000Z')`,
+      )).toThrow();
+
+      // A legacy writer can insert after migration during rolling deployment;
+      // reconciliation must discover it and later propagate updates.
+      db.run(
+        `INSERT INTO feed_artifact_projection (
+          artifact_id, rank_score, disposition, visibility, freshness_label,
+          reason_codes_json, package_id, source_fingerprint, published_at, updated_at
+        ) SELECT 'artifact-late', rank_score, disposition, visibility, freshness_label,
+          reason_codes_json, package_id, source_fingerprint, published_at, updated_at
+          FROM feed_artifact_projection WHERE artifact_id = 'artifact-old'`,
+      );
+      expect(db.query(FEED_V1_LEGACY_PROJECTION_PARITY_SQL).get()).toEqual({ mismatch_count: 1 });
+      db.run(FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL);
+      expect(db.query("SELECT COUNT(*) AS count FROM feed_item_projection").get()).toEqual({ count: 2 });
+      expect(db.query(FEED_V1_LEGACY_PROJECTION_PARITY_SQL).get()).toEqual({ mismatch_count: 0 });
+
+      db.run("UPDATE feed_item_projection SET published_at = ? WHERE feed_item_id = ?", [
+        "2026-06-30T00:00:00.000Z",
+        "legacy:artifact-old",
+      ]);
+      expect(db.query(FEED_V1_LEGACY_PROJECTION_PARITY_SQL).get()).toEqual({ mismatch_count: 1 });
+      db.run("UPDATE feed_item_projection SET published_at = ? WHERE feed_item_id = ?", [
+        "2026-07-01T00:00:00.000Z",
+        "legacy:artifact-old",
+      ]);
+      expect(db.query(FEED_V1_LEGACY_PROJECTION_PARITY_SQL).get()).toEqual({ mismatch_count: 0 });
+
+      db.run("UPDATE feed_item_projection SET rank_score = 123, updated_at = ? WHERE feed_item_id = ?", [
+        "2026-07-03T00:00:00.000Z",
+        "legacy:artifact-old",
+      ]);
+      db.run("UPDATE feed_artifact_projection SET rank_score = 99, updated_at = ? WHERE artifact_id = ?", [
+        "2026-07-02T00:00:00.000Z",
+        "artifact-old",
+      ]);
+      db.run(FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL);
+      expect(db.query(
+        "SELECT rank_score, updated_at FROM feed_item_projection WHERE feed_item_id = 'legacy:artifact-old'",
+      ).get()).toEqual({ rank_score: 123, updated_at: "2026-07-03T00:00:00.000Z" });
+
+      db.run("UPDATE feed_artifact_projection SET rank_score = 100, updated_at = ? WHERE artifact_id = ?", [
+        "2026-07-04T00:00:00.000Z",
+        "artifact-old",
+      ]);
+      db.run(FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL);
+      expect(db.query(
+        "SELECT rank_score, updated_at FROM feed_item_projection WHERE feed_item_id = 'legacy:artifact-old'",
+      ).get()).toEqual({ rank_score: 100, updated_at: "2026-07-04T00:00:00.000Z" });
+
+      db.run("DELETE FROM feed_artifact_projection WHERE artifact_id = 'artifact-late'");
+      expect(db.query(FEED_V1_LEGACY_PROJECTION_PARITY_SQL).get()).toEqual({ mismatch_count: 1 });
+    } finally {
+      db.close();
+    }
   });
 });
 
@@ -255,8 +370,8 @@ function rowKey(row: SqlSeedRow): string {
   switch (row.table) {
     case "artifact_index":
       return String(row.values.artifact_id);
-    case "feed_artifact_projection":
-      return String(row.values.artifact_id);
+    case "feed_item_projection":
+      return String(row.values.feed_item_id);
     case "feedback_event":
       return String(row.values.event_id);
     case "control_intent_event":

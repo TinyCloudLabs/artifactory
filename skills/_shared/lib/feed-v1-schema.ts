@@ -128,6 +128,58 @@ export const FEED_V1_ARTIFACTS_MIGRATIONS: FeedV1SchemaMigration[] = [
   },
 ];
 
+// Feed owns this projection and should run reconciliation throughout a rolling
+// dual-read/write deployment, not only once when migration 002 is installed.
+export const FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL = `INSERT INTO feed_item_projection (
+  feed_item_id, target_kind, artifact_id, post_id, rank_score, disposition,
+  visibility, freshness_label, reason_codes_json, package_id,
+  source_fingerprint, published_at, updated_at
+)
+SELECT
+  'legacy:' || artifact_id, 'artifact_preview', artifact_id, NULL, rank_score,
+  disposition, visibility, freshness_label, reason_codes_json, package_id,
+  source_fingerprint, published_at, updated_at
+FROM feed_artifact_projection
+WHERE true
+ON CONFLICT(feed_item_id) DO UPDATE SET
+  rank_score = excluded.rank_score,
+  disposition = excluded.disposition,
+  visibility = excluded.visibility,
+  freshness_label = excluded.freshness_label,
+  reason_codes_json = excluded.reason_codes_json,
+  package_id = excluded.package_id,
+  source_fingerprint = excluded.source_fingerprint,
+  published_at = excluded.published_at,
+  updated_at = excluded.updated_at
+WHERE excluded.updated_at >= feed_item_projection.updated_at`;
+
+export const FEED_V1_LEGACY_PROJECTION_PARITY_SQL = `SELECT
+  (SELECT COUNT(*)
+   FROM feed_artifact_projection AS legacy
+   LEFT JOIN feed_item_projection AS item
+     ON item.feed_item_id = 'legacy:' || legacy.artifact_id
+   WHERE item.feed_item_id IS NULL
+      OR item.target_kind <> 'artifact_preview'
+      OR item.artifact_id <> legacy.artifact_id
+      OR item.post_id IS NOT NULL
+      OR item.updated_at < legacy.updated_at
+      OR item.published_at <> legacy.published_at
+      OR item.rank_score <> legacy.rank_score
+      OR item.disposition <> legacy.disposition
+      OR item.visibility <> legacy.visibility
+      OR item.freshness_label <> legacy.freshness_label
+      OR item.reason_codes_json <> legacy.reason_codes_json
+      OR item.package_id <> legacy.package_id
+      OR item.source_fingerprint <> legacy.source_fingerprint)
+  +
+  (SELECT COUNT(*)
+   FROM feed_item_projection AS item
+   LEFT JOIN feed_artifact_projection AS legacy
+     ON legacy.artifact_id = item.artifact_id
+   WHERE item.target_kind = 'artifact_preview'
+     AND item.feed_item_id LIKE 'legacy:%'
+     AND legacy.artifact_id IS NULL) AS mismatch_count`;
+
 export const FEED_V1_FEED_MIGRATIONS: FeedV1SchemaMigration[] = [
   {
     id: "001_feed_index",
@@ -196,6 +248,50 @@ export const FEED_V1_FEED_MIGRATIONS: FeedV1SchemaMigration[] = [
 )`,
     ],
   },
+  {
+    id: "002_post_feed_items",
+    description: "Create the Feed-owned item projection and targeted interaction ledger, then reconcile artifact-only v1 rows.",
+    sql: [
+      `CREATE TABLE IF NOT EXISTS feed_item_projection (
+  feed_item_id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL CHECK (target_kind IN ('post', 'artifact_preview')),
+  artifact_id TEXT NOT NULL,
+  post_id TEXT,
+  rank_score REAL NOT NULL,
+  disposition TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  freshness_label TEXT NOT NULL,
+  reason_codes_json TEXT NOT NULL DEFAULT '[]',
+  package_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  published_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (
+    (target_kind = 'post' AND post_id IS NOT NULL) OR
+    (target_kind = 'artifact_preview' AND post_id IS NULL)
+  )
+)`,
+      `CREATE TABLE IF NOT EXISTS feed_targeted_interaction_event (
+  event_id TEXT PRIMARY KEY,
+  target_kind TEXT NOT NULL CHECK (target_kind IN ('artifact', 'post', 'feed_item')),
+  artifact_id TEXT,
+  post_id TEXT,
+  feed_item_id TEXT,
+  reader_nonce TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  payload_json TEXT,
+  payload_hash TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (
+    (target_kind = 'artifact' AND artifact_id IS NOT NULL AND post_id IS NULL AND feed_item_id IS NULL) OR
+    (target_kind = 'post' AND artifact_id IS NOT NULL AND post_id IS NOT NULL AND feed_item_id IS NULL) OR
+    (target_kind = 'feed_item' AND artifact_id IS NULL AND post_id IS NULL AND feed_item_id IS NOT NULL)
+  )
+)`,
+      FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL,
+    ],
+  },
 ];
 
 export const FEED_V1_APP_SCHEMA: FeedV1AppSchema = {
@@ -218,7 +314,7 @@ export const FEED_V1_APP_SCHEMA: FeedV1AppSchema = {
         dbPath: FEED_V1_FEED_INDEX_DB_PATH,
         engine: "sqlite",
         schema: "schemas/feed-index.sql",
-        description: "Feed projection, feedback, preferences, generation requests, and control intents.",
+        description: "FeedPost-aware Feed item projection, feedback, preferences, generation requests, and control intents.",
         capabilities: ["tinycloud.sql/read", "tinycloud.sql/write", "tinycloud.sql/schema"],
         migrations: FEED_V1_FEED_MIGRATIONS,
         sensitivity: "derived",

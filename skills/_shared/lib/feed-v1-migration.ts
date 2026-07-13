@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   artifactIndexRow,
-  projectionRow,
+  feedItemProjectionRow,
   type SqlSeedRow,
 } from "./feed-v1-bootstrap.ts";
 import type {
   ControlIntentEvent,
   FeedArtifact,
-  FeedArtifactProjection,
+  FeedItemProjection,
   FeedbackEvent,
   GenerationRequest,
   TranscriptSourceRef,
@@ -125,7 +125,7 @@ type NormalizedLegacyInteractionRow = {
 type ArtifactPlan = {
   artifact: MigratedFeedArtifact;
   canonicalArtifact: FeedArtifact;
-  projection: FeedArtifactProjection;
+  projection: FeedItemProjection;
   feedbackRows: SqlSeedRow[];
   controlRows: SqlSeedRow[];
   generationRows: SqlSeedRow[];
@@ -234,7 +234,7 @@ export function buildFeedV1MigrationPlan(input: {
   }
 
   const artifactRows = artifactPlans.map((plan) => artifactIndexRow(plan.canonicalArtifact));
-  const feedRows = artifactPlans.flatMap((plan) => [projectionRow(plan.projection), ...plan.feedbackRows, ...plan.controlRows, ...plan.generationRows]);
+  const feedRows = artifactPlans.flatMap((plan) => [feedItemProjectionRow(plan.projection), ...plan.feedbackRows, ...plan.controlRows, ...plan.generationRows]);
   const artifactDocs = artifactPlans.map((plan) => ({
     docKey: plan.artifact.storage.docKey,
     value: plan.artifact,
@@ -476,8 +476,8 @@ function buildInteractionRows(
 function projectionForArtifact(
   artifact: FeedArtifact,
   interactions: NormalizedLegacyInteractionRow[],
-): FeedArtifactProjection {
-  let disposition: FeedArtifactProjection["disposition"] = "default";
+): FeedItemProjection {
+  let disposition: FeedItemProjection["disposition"] = "default";
   let savedCount = 0;
   let helpfulCount = 0;
   let unhelpfulCount = 0;
@@ -522,7 +522,8 @@ function projectionForArtifact(
   });
 
   return {
-    artifactId: artifact.artifactId,
+    feedItemId: `legacy:${artifact.artifactId}`,
+    target: { kind: "artifact_preview", artifactId: artifact.artifactId },
     rankScore,
     disposition,
     visibility: disposition === "hidden" ? "hidden" : "ranked",

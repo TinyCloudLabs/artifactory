@@ -3,10 +3,12 @@
 // reviewed-bundle pipeline.
 
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import type {
   ArtifactorySkillManifest,
+  HashString,
   RuntimePolicy,
+  SkillRunInput,
   TranscriptSourceRef,
 } from "../../../skills/_shared/lib/feed-v1.ts";
 import { compileSkillPackage, PackageSourceError } from "./package-compiler.ts";
@@ -16,6 +18,15 @@ import {
   PackageAdmissionError,
 } from "./package-policy.ts";
 import type { ListenResolution } from "./listen-resolver.ts";
+import { ArtifactPackValidationError, bindArtifactPack } from "./artifact-pack.ts";
+
+type ArtifactPackAnchor = {
+  packageDigest: string;
+  materialDigest: HashString;
+  materialRef: string;
+};
+
+const artifactPackAnchors = new WeakMap<WorkflowFixture, ArtifactPackAnchor>();
 
 export type WorkflowFixture = {
   workflowId: string;
@@ -29,6 +40,7 @@ export type WorkflowFixture = {
     excerpts: { sourceRefId: string; text: string; quoteLineRefs?: string[] }[];
     maxInputTokens: number;
   };
+  artifactPack?: NonNullable<SkillRunInput["artifactPack"]>;
   listenResolution?: ListenResolution;
   settings: unknown;
   maxAcceptedArtifacts: number;
@@ -54,6 +66,33 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
     compiled.package.version,
   );
 
+  let artifactPack: WorkflowFixture["artifactPack"];
+  let artifactPackAnchor: ArtifactPackAnchor | undefined;
+  const artifactPackRef = compiled.workflowPack.artifactPackRef;
+  if (artifactPackRef !== undefined) {
+    if (typeof artifactPackRef !== "string" || artifactPackRef.length === 0) {
+      throw new PackageSourceError("workflow artifactPackRef must be a non-empty package-relative path");
+    }
+    const materialRef = artifactPackRef.replace(/\\/g, "/").replace(/^\.\//, "");
+    const materialPath = resolve(packageRoot, materialRef);
+    const relativePath = relative(packageRoot, materialPath);
+    if (relativePath.startsWith("..") || resolve(packageRoot, relativePath) !== materialPath) {
+      throw new PackageSourceError(`artifactPackRef escapes package root: ${artifactPackRef}`);
+    }
+    const material = compiled.materials.find((entry) => entry.path === materialRef);
+    if (!material || material.kind !== "json") {
+      throw new PackageSourceError(`artifactPackRef is not reviewed JSON package material: ${materialRef}`);
+    }
+    const parsedPack = JSON.parse(await readFile(materialPath, "utf8")) as unknown;
+    const boundPack = bindArtifactPack(parsedPack, material.digest);
+    artifactPack = boundPack?.runtimePack;
+    artifactPackAnchor = {
+      packageDigest: compiled.package.digest,
+      materialDigest: material.digest,
+      materialRef,
+    };
+  }
+
   const compiledFixture: WorkflowFixture = {
     ...fixture,
     packageRoot,
@@ -63,7 +102,9 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
     workflowId: compiled.workflowPack.workflowId,
     skillManifest: compiled.manifest,
     maxAcceptedArtifacts: compiled.manifest.limits.maxAcceptedArtifacts,
+    artifactPack,
   };
+  if (artifactPackAnchor) artifactPackAnchors.set(compiledFixture, artifactPackAnchor);
   await assertWorkflowAdmitted(compiledFixture);
   return compiledFixture;
 }
@@ -75,6 +116,12 @@ export async function assertWorkflowAdmitted(fixture: WorkflowFixture): Promise<
     reasons.push(
       `skillManifest.admissionState=${fixture.skillManifest.admissionState} is not allowed at execution time`,
     );
+  }
+  try {
+    bindAdmittedArtifactPack(fixture);
+  } catch (error) {
+    if (error instanceof ArtifactPackValidationError) reasons.push(...error.errors);
+    else throw error;
   }
 
   const decision = admitReviewedBundle(
@@ -115,7 +162,25 @@ export function parseWorkflow(value: unknown, sourcePath = "workflow file"): Wor
   if ("packageRoot" in obj && typeof obj.packageRoot !== "string") {
     throw new Error(`${sourcePath} packageRoot must be a string when provided`);
   }
+  if ("artifactPack" in obj) {
+    throw new Error(`${sourcePath} artifactPack must come from reviewed package material`);
+  }
   return obj as unknown as WorkflowFixture;
+}
+
+export function bindAdmittedArtifactPack(fixture: WorkflowFixture) {
+  const anchor = artifactPackAnchors.get(fixture);
+  if (fixture.artifactPack === undefined) {
+    if (anchor) throw new ArtifactPackValidationError(["artifactPack: reviewed package material is missing"]);
+    return undefined;
+  }
+  if (!anchor) {
+    throw new ArtifactPackValidationError(["artifactPack: missing independent reviewed-package anchor"]);
+  }
+  if (fixture.digest !== anchor.packageDigest) {
+    throw new ArtifactPackValidationError(["artifactPack: admitted package digest no longer matches anchor"]);
+  }
+  return bindArtifactPack(fixture.artifactPack, anchor.materialDigest);
 }
 
 function assertCompatiblePackageFixture(

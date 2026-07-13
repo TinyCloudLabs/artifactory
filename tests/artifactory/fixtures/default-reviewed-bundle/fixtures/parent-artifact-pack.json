@@ -1,0 +1,65 @@
+{
+  "refs": [
+    {
+      "kind": "feed_artifact",
+      "artifactId": "parent-restricted",
+      "artifactType": "research_report",
+      "observedHash": "sha256:cb7483bb88cac6cf19197a45277ca5f1e024f8098726261cb543ca6b50a6cdbe",
+      "observedAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "artifacts": [
+    {
+      "artifactId": "parent-restricted",
+      "artifactType": "research_report",
+      "title": "Restricted parent",
+      "body": {},
+      "sourceRefs": [
+        {
+          "sourceRefId": "parent-source",
+          "sourceKind": "listen_conversation",
+          "sourceId": "parent-conversation",
+          "observedPath": "sql_transcript_text",
+          "observedHash": "sha256:parent-source",
+          "observedAt": "2026-07-01T00:00:00.000Z",
+          "authority": {
+            "lineageId": "cid:parent",
+            "releasePolicy": "delegated",
+            "audienceDids": ["did:example:reader"],
+            "expiresAt": "2026-07-03T00:00:00.000Z"
+          }
+        }
+      ],
+      "derivedAccess": {
+        "releasePolicy": "delegated",
+        "lineage": [
+          {
+            "sourceRefId": "parent-source",
+            "lineageId": "cid:parent",
+            "releasePolicy": "delegated"
+          }
+        ],
+        "parentArtifacts": [],
+        "audienceDids": ["did:example:reader"],
+        "expiresAt": "2026-07-03T00:00:00.000Z"
+      },
+      "producedBy": {
+        "packageId": "parent-package",
+        "packageVersion": "1.0.0",
+        "packageDigest": "sha256:parent-package",
+        "runId": "parent-run",
+        "runtimeClass": "stub",
+        "providerClass": "none",
+        "credentialOwner": "none",
+        "egressClass": "none",
+        "disclosure": {
+          "userCopy": "Trusted restricted parent fixture.",
+          "credentialOwner": "none",
+          "providerClass": "none",
+          "egressClass": "none"
+        }
+      }
+    }
+  ],
+  "maxInputTokens": 128
+}
