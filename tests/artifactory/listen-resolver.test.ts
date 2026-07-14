@@ -4,6 +4,7 @@ import {
   createListenResolverDriver,
   resolveListenConversations,
   resolveListenResolution,
+  resolveUnseenListenResolution,
   type ListenConversationRow,
   type ListenResolverDriver,
   type ListenResolvedConversation,
@@ -41,6 +42,64 @@ function portableDelegation(overrides: Partial<PortableDelegation> = {}): Portab
     ...overrides,
   };
 }
+
+describe("durable unseen Listen selection", () => {
+  test("uses a stable started-at/id cursor and never reselects committed conversations", async () => {
+    const rows: ListenConversationRow[] = [
+      { id: "conversation-3", started_at: "2026-07-03T00:00:00.000Z", transcript_text: "three" },
+      { id: "conversation-2", started_at: "2026-07-02T00:00:00.000Z", transcript_text: "two" },
+      { id: "conversation-1", started_at: "2026-07-01T00:00:00.000Z", transcript_text: "one" },
+    ];
+    const driver: ListenResolverDriver = {
+      authority: { lineageId: "child", releasePolicy: "private" },
+      async listRecent(limit, offset) {
+        return rows.slice(offset, offset + limit);
+      },
+      async listAfter(cursor, limit) {
+        return rows
+          .filter((row) =>
+            row.started_at! > cursor.startedAt ||
+            (row.started_at === cursor.startedAt && row.id > cursor.conversationId))
+          .sort((left, right) => left.started_at!.localeCompare(right.started_at!) || left.id.localeCompare(right.id))
+          .slice(0, limit);
+      },
+      async loadMany(ids) {
+        return rows.filter((row) => ids.includes(row.id));
+      },
+      async loadTranscript() {
+        return [];
+      },
+    };
+    const resolution = { auth: { authorityName: "listen-child" }, query: { mostRecent: 2 } };
+    const first = await resolveUnseenListenResolution(resolution, 1000, undefined, { driver });
+    expect(first.sourcePack.refs.map((ref) => ref.sourceRefId)).toEqual(["conversation-2", "conversation-3"]);
+
+    rows.unshift({ id: "conversation-4", started_at: "2026-07-04T00:00:00.000Z", transcript_text: "four" });
+    const second = await resolveUnseenListenResolution(resolution, 1000, first.cursorAfter, { driver });
+    expect(second.sourcePack.refs.map((ref) => ref.sourceRefId)).toEqual(["conversation-4"]);
+    expect(second.cursorBefore).toBe(first.cursorAfter);
+    expect(second.cursorAfter).not.toBe(first.cursorAfter);
+  });
+
+  test("advances past an empty transcript so it cannot poison every later run", async () => {
+    const row = { id: "empty", started_at: "2026-07-05T00:00:00.000Z" };
+    const driver: ListenResolverDriver = {
+      authority: { lineageId: "child", releasePolicy: "private" },
+      async listRecent() { return [row]; },
+      async listAfter() { return []; },
+      async loadMany() { return [row]; },
+      async loadTranscript() { return []; },
+    };
+    const result = await resolveUnseenListenResolution(
+      { auth: { authorityName: "listen-child" }, query: { mostRecent: 1 } },
+      1000,
+      undefined,
+      { driver },
+    );
+    expect(result.sourcePack.refs).toEqual([]);
+    expect(result.cursorAfter).toContain("empty");
+  });
+});
 
 function subset(requested: readonly PermissionEntry[], granted: readonly PermissionEntry[]) {
   const actionMatches = (requestedAction: string, grantedAction: string) =>

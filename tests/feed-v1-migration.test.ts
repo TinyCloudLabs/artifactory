@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import { bootstrapFeedV1SplitSchema } from "../packages/artifactory/src/migration.ts";
 import { validateFeedArtifact } from "../skills/_shared/lib/feed-v1.ts";
 import {
+  FEED_V1_ARTIFACTS_MIGRATIONS,
   FEED_V1_FEED_MIGRATIONS,
   FEED_V1_LEGACY_PROJECTION_PARITY_SQL,
   FEED_V1_LEGACY_PROJECTION_RECONCILIATION_SQL,
@@ -213,8 +214,12 @@ describe("Feed v1 legacy migration", () => {
 
     const artifactsStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.artifacts/index");
     const feedStatements = statements.filter((statement) => statement.db === "xyz.tinycloud.feed/index");
-    expect(artifactsStatements).toHaveLength(7);
-    expect(feedStatements).toHaveLength(9);
+    expect(artifactsStatements).toHaveLength(
+      FEED_V1_ARTIFACTS_MIGRATIONS.reduce((total, migration) => total + migration.sql.length, 0),
+    );
+    expect(feedStatements).toHaveLength(
+      FEED_V1_FEED_MIGRATIONS.reduce((total, migration) => total + migration.sql.length, 0),
+    );
     expect(artifactsStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS artifact_index");
     expect(feedStatements[0]?.sql).toContain("CREATE TABLE IF NOT EXISTS feed_artifact_projection");
     expect(feedStatements[6]?.sql).toContain("CREATE TABLE IF NOT EXISTS feed_item_projection");

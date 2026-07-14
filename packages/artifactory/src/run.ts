@@ -46,6 +46,7 @@ export type RunOptions = {
   publishWriter: PublishWriter;
   dropAudit: DropAudit;
   listenResolverFactory?: ListenResolverFactory;
+  priorContext?: SkillRunInput["priorContext"];
 };
 
 export type RunResult = {
@@ -183,6 +184,7 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       settings: workflow.settings,
       runtimePolicy: workflow.runtimePolicy,
       secretEnv: gate.secretEnv,
+      priorContext: options.priorContext,
     };
 
     const rawRuntimeOutput = await invokeRuntimeSafely(

@@ -61,6 +61,7 @@ export type ListenResolvedConversation = {
 export type ListenResolverDriver = {
   authority: NonNullable<TranscriptSourceRef["authority"]>;
   listRecent(limit: number, offset: number): Promise<ListenConversationRow[]>;
+  listAfter?(cursor: ListenUnseenCursor, limit: number): Promise<ListenConversationRow[]>;
   loadMany(conversationIds: string[]): Promise<ListenConversationRow[]>;
   loadTranscript(conversationId: string): Promise<ListenTranscriptSegment[]>;
 };
@@ -87,6 +88,16 @@ export type ListenSourcePackLimits = {
 export type ListenResolutionResult = {
   conversations: ListenResolvedConversation[];
   sourcePack: SkillRunInput["sourcePack"];
+};
+
+export type ListenUnseenCursor = {
+  startedAt: string;
+  conversationId: string;
+};
+
+export type ListenUnseenResolutionResult = ListenResolutionResult & {
+  cursorBefore: string;
+  cursorAfter: string;
 };
 
 type TinyCloudNodeSdk = {
@@ -146,12 +157,86 @@ export async function resolveListenResolution(
   };
 }
 
+export async function resolveUnseenListenResolution(
+  resolution: ListenResolution,
+  maxInputTokens: number,
+  cursor: string | undefined,
+  options: {
+    driver?: ListenResolverDriver;
+    loadSdk?: () => Promise<TinyCloudNodeSdk>;
+    resolveAuthority?: SourceAuthorityResolver;
+    now?: () => Date;
+    limits?: ListenSourcePackLimits;
+  } = {},
+): Promise<ListenUnseenResolutionResult> {
+  validateListenResolverAuth(resolution.auth);
+  const limit = resolution.query.mostRecent;
+  if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0) {
+    throw new Error("unseen Listen resolution requires a positive mostRecent limit");
+  }
+  const driver = options.driver ?? (await createListenResolverDriver(
+    resolution.auth,
+    options.loadSdk,
+    options.resolveAuthority,
+    options.now,
+  ));
+  const parsedCursor = cursor ? decodeListenUnseenCursor(cursor) : undefined;
+  let rows: ListenConversationRow[];
+  if (parsedCursor) {
+    if (!driver.listAfter) throw new Error("Listen resolver does not support durable unseen cursors");
+    rows = await driver.listAfter(parsedCursor, Math.floor(limit));
+  } else {
+    rows = (await driver.listRecent(Math.floor(limit), 0)).sort(compareListenRowsAscending);
+  }
+  const cursorRows = rows.filter(hasDurableListenCursor);
+  const conversations = await resolveConversationRows(cursorRows, driver, options.now);
+  const cursorBefore = cursor ?? "";
+  const last = cursorRows.at(-1);
+  const cursorAfter = last
+    ? encodeListenUnseenCursor({ startedAt: last.started_at!, conversationId: last.id })
+    : cursorBefore;
+  return {
+    conversations,
+    sourcePack: buildSourcePackFromConversations(conversations, maxInputTokens, options.limits),
+    cursorBefore,
+    cursorAfter,
+  };
+}
+
+export function encodeListenUnseenCursor(cursor: ListenUnseenCursor): string {
+  if (!isIso(cursor.startedAt) || !cursor.conversationId.trim()) throw new Error("Listen cursor is invalid");
+  return JSON.stringify({ startedAt: cursor.startedAt, conversationId: cursor.conversationId });
+}
+
+export function decodeListenUnseenCursor(value: string): ListenUnseenCursor {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Listen cursor is invalid");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Listen cursor is invalid");
+  const cursor = parsed as Record<string, unknown>;
+  if (typeof cursor.startedAt !== "string" || !isIso(cursor.startedAt) || typeof cursor.conversationId !== "string" || !cursor.conversationId.trim()) {
+    throw new Error("Listen cursor is invalid");
+  }
+  return { startedAt: cursor.startedAt, conversationId: cursor.conversationId };
+}
+
 export async function resolveListenConversations(
   query: ListenResolutionQuery,
   driver: ListenResolverDriver,
   now: () => Date = () => new Date(),
 ): Promise<ListenResolvedConversation[]> {
   const rows = await selectConversationRows(query, driver);
+  return resolveConversationRows(rows, driver, now);
+}
+
+async function resolveConversationRows(
+  rows: ListenConversationRow[],
+  driver: ListenResolverDriver,
+  now: () => Date = () => new Date(),
+): Promise<ListenResolvedConversation[]> {
   const resolved: ListenResolvedConversation[] = [];
   for (const row of rows) {
     const { transcript, source } = await resolveTranscript(row, driver);
@@ -281,6 +366,19 @@ export async function createListenResolverDriver(
       const result = await access.sql.db(LISTEN_CONVERSATIONS_DB).query<unknown>(
         "SELECT id, title, started_at, transcript_json, transcript_text FROM conversation ORDER BY rowid DESC LIMIT ? OFFSET ?",
         [limit, offset],
+      );
+      return unwrapSqlRows(result, ["id", "title", "started_at", "transcript_json", "transcript_text"]);
+    },
+    async listAfter(cursor, limit) {
+      await guardSourceRead();
+      const result = await access.sql.db(LISTEN_CONVERSATIONS_DB).query<unknown>(
+        `SELECT id, title, started_at, transcript_json, transcript_text
+           FROM conversation
+          WHERE started_at IS NOT NULL
+            AND (started_at > ? OR (started_at = ? AND id > ?))
+          ORDER BY started_at ASC, id ASC
+          LIMIT ?`,
+        [cursor.startedAt, cursor.startedAt, cursor.conversationId, limit],
       );
       return unwrapSqlRows(result, ["id", "title", "started_at", "transcript_json", "transcript_text"]);
     },
@@ -581,6 +679,22 @@ async function selectConversationRows(
 
 function uniqueIds(ids: string[]): string[] {
   return Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)));
+}
+
+function hasDurableListenCursor(row: ListenConversationRow): row is ListenConversationRow & { started_at: string } {
+  return typeof row.id === "string" && row.id.trim().length > 0 && typeof row.started_at === "string" && isIso(row.started_at);
+}
+
+function compareListenRowsAscending(left: ListenConversationRow, right: ListenConversationRow): number {
+  const leftStarted = left.started_at ?? "";
+  const rightStarted = right.started_at ?? "";
+  const started = leftStarted.localeCompare(rightStarted);
+  return started !== 0 ? started : left.id.localeCompare(right.id);
+}
+
+function isIso(value: string): boolean {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
 async function loadPrivateKey(auth: RegisteredListenSourceAuthority): Promise<string> {
