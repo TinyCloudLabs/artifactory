@@ -513,7 +513,14 @@ export type ControlIntentEvent = {
   eventId: string;
   actorId: string;
   readerNonce: string;
-  intentKind: "enable_package" | "pause_package" | "disable_package" | "tune_package" | "reset_package" | "ask_feed";
+  intentKind:
+    | "enable_package"
+    | "pause_package"
+    | "disable_package"
+    | "tune_package"
+    | "reset_package"
+    | "generate_new_request"
+    | "ask_feed";
   status: "accepted" | "pending" | "blocked" | "rejected" | "consumed";
   targetRef: string;
   payload?: unknown;
