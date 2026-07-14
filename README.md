@@ -368,7 +368,8 @@ bun run artifact:inflate
 ```
 
 That initializes `submodules/feed`, installs the root distillery dependencies,
-and installs the feed dependencies.
+installs the feed dependencies, and links the checkout's canonical shared
+contracts into the sibling path consumed by Feed. No contract copy is created.
 
 The Artifactory dev scripts run the vendored submodule, not the sibling
 `../feed` checkout. If both repos are present and their HEAD commits differ,

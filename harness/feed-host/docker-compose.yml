@@ -1,0 +1,21 @@
+services:
+  feed-host:
+    # Refuse mutable/default tags. Production supplies the published linux/amd64
+    # digest before `phala deploy`; see DEPLOY.md.
+    image: ${FEED_HOST_IMAGE:?set FEED_HOST_IMAGE to an immutable GHCR digest}
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      FEED_HOST_HOSTNAME: "0.0.0.0"
+      FEED_HOST_PORT: "8787"
+      FEED_HOST_STATE_DIR: "/home/bun/.tinycloud-feed-host"
+      FEED_HOST_ALLOWED_ORIGINS: "https://feed.tinycloud.xyz,https://tinyfeed.pages.dev"
+      FEED_HOST_SEED: "0"
+      FEED_HOST_DEV_PUBLISH: "0"
+      TINYCLOUD_HOST: "https://node.tinycloud.xyz"
+    volumes:
+      - feed-host-state:/home/bun/.tinycloud-feed-host
+
+volumes:
+  feed-host-state:

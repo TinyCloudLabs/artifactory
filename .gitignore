@@ -56,6 +56,10 @@ artifacts-v2/
 # delegation activates). Identity-bearing — same stance as artifacts/.
 /harness/agent/.agent-state/
 
+# Local contract bridge for the Feed submodule's sibling-repo imports. Created
+# by ensure_feed_deps; points only at this checkout's tracked skills directory.
+/submodules/artifactory/
+
 # tc delegation/host hand-off artifacts (runtime, identity-bearing) + Listen corpus
 listen-read-request.json
 listen-read-grant.json

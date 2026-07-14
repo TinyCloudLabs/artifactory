@@ -49,29 +49,11 @@ describe("renderTypeFor — §4.2 mapping", () => {
 });
 
 describe("artifact schema — §1 DDL", () => {
-  function embeddedFeedClientSource(): string {
+  function feedHostStorageSource(): string {
     return readFileSync(
-      join(import.meta.dir, "..", "submodules", "feed", "web", "src", "feedClient.ts"),
+      join(import.meta.dir, "..", "submodules", "feed", "host", "storage.ts"),
       "utf8",
     );
-  }
-
-  function extractTemplateConst(source: string, name: string): string {
-    const start = source.indexOf(`const ${name} = \``);
-    if (start < 0) throw new Error(`could not find ${name}`);
-    const bodyStart = source.indexOf("`", start) + 1;
-    const bodyEnd = source.indexOf("`;", bodyStart);
-    if (bodyStart <= 0 || bodyEnd < 0) throw new Error(`could not parse ${name}`);
-    return source.slice(bodyStart, bodyEnd);
-  }
-
-  function extractTemplateArrayConst(source: string, name: string): string[] {
-    const start = source.indexOf(`const ${name} = [`);
-    if (start < 0) throw new Error(`could not find ${name}`);
-    const bodyStart = source.indexOf("[", start) + 1;
-    const bodyEnd = source.indexOf("];", bodyStart);
-    if (bodyStart <= 0 || bodyEnd < 0) throw new Error(`could not parse ${name}`);
-    return [...source.slice(bodyStart, bodyEnd).matchAll(/`([\s\S]*?)`/g)].map((m) => m[1]!);
   }
 
   test("defines the three application-space databases", () => {
@@ -104,11 +86,11 @@ describe("artifact schema — §1 DDL", () => {
     expect(feed).toMatch(/video_url\s+TEXT/);
   });
 
-  test("embedded Feed bootstrap DDL mirrors the producer schema", () => {
-    const source = embeddedFeedClientSource();
-    expect(extractTemplateConst(source, "FEED_DDL")).toBe(ARTIFACT_DBS[0]!.tables[0]!);
-    expect(extractTemplateConst(source, "INTERACTION_DDL")).toBe(ARTIFACT_DBS[1]!.tables[0]!);
-    expect(extractTemplateArrayConst(source, "FEED_MIGRATIONS")).toEqual(ARTIFACT_DBS[0]!.migrations);
+  test("Feed Host imports the canonical producer schema instead of embedding DDL", () => {
+    const source = feedHostStorageSource();
+    expect(source).toContain('from "../../artifactory/skills/_shared/lib/feed-v1-schema.ts"');
+    expect(source).toContain("feedV1MigrationApplyPlans");
+    expect(source).not.toMatch(/const\s+(FEED_DDL|INTERACTION_DDL|FEED_MIGRATIONS)/);
   });
 
   test("interaction carries nonce + recorded_at for replay protection", () => {

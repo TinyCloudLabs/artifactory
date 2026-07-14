@@ -28,8 +28,23 @@ ensure_feed_submodule() {
 ensure_feed_deps() {
   local root="$1"
   ensure_feed_submodule "$root"
+  ensure_feed_contracts "$root"
   if [ ! -d "$root/submodules/feed/node_modules" ] || [ ! -x "$root/submodules/feed/node_modules/.bin/portless" ]; then
     (cd "$root/submodules/feed" && bun install)
+  fi
+}
+
+ensure_feed_contracts() {
+  local root="$1"
+  local contract_root="$root/submodules/artifactory"
+  local skills_link="$contract_root/skills"
+  if [ -e "$skills_link" ] && [ ! -L "$skills_link" ]; then
+    echo "$skills_link must be a symlink to the Artifactory skills directory" >&2
+    exit 1
+  fi
+  mkdir -p "$contract_root"
+  if [ ! -L "$skills_link" ]; then
+    ln -s ../../skills "$skills_link"
   fi
 }
 
