@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "feed.starter_workflow.v1",
+  "workflowId": "feed-short-insights",
+  "format": "short_insights",
+  "trigger": {
+    "kind": "source_event",
+    "cadence": "on_new_authorized_content"
+  },
+  "sourcePolicy": {
+    "window": "unseen_incremental",
+    "quietResult": "zero_artifacts"
+  },
+  "continuity": {
+    "keyTemplate": "{actorId}:feed-short-insights",
+    "cursor": "listen_started_at_conversation_id",
+    "usesPriorArtifacts": true
+  },
+  "feedPostContract": {
+    "minPosts": 2,
+    "maxPosts": 6,
+    "distinctBodies": true,
+    "evidencePerPost": true
+  },
+  "stages": [
+    {
+      "stageId": "stub",
+      "capabilities": [],
+      "authority": "none",
+      "egressClass": "none",
+      "spendClass": "none"
+    }
+  ]
+}

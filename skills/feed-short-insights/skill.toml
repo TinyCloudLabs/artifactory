@@ -1,0 +1,54 @@
+schema = "feed.skill.v1"
+id = "feed-short-insights"
+display_name = "Short Insights"
+version = "0.1.0"
+source = "first_party"
+
+[admission]
+tier = 1
+default_state = "enabled"
+review_status = "reviewed"
+
+[[produces]]
+artifact_type = "insight_collection"
+render_shape = "longform"
+label = "Insight Collection"
+output_schema = "schemas/output.schema.json"
+outward = false
+
+[requires]
+source_kinds = ["listen_conversation"]
+artifact_kinds = []
+max_source_refs = 1
+max_input_tokens = 12000
+needs_media = false
+
+[runtime]
+runtime_class = "stub"
+provider_class = "none"
+credential_mode = "none"
+egress_class = "none"
+allowed_tools = []
+disallowed_tools = ["tinycloud", "shell", "network"]
+
+[workflow]
+executor = "stub"
+ref = "workflows/feed-short-insights.stub.json"
+digest = "sha256:61d6fed576448c643b38d6e014fde758cd3d22124c554a6728a2663321d02fff"
+
+[limits]
+max_accepted_artifacts = 1
+timeout_ms = 1000
+max_output_bytes = 4096
+max_model_calls = 0
+
+[settings]
+schema = "schemas/settings.schema.json"
+
+[validation]
+validator_refs = ["schema", "source_refs", "critic_pass"]
+evaluator_refs = ["evaluators/quality.md"]
+require_quote_anchoring = false
+
+[disclosure]
+user_copy = "Reads only unseen authorized transcript content and creates distinct evidence-backed insights and Feed posts."

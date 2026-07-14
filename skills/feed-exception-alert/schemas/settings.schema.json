@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["monitorKey", "expectedBaseline"],
+  "properties": {
+    "monitorKey": { "type": "string", "minLength": 1 },
+    "expectedBaseline": { "type": "string", "minLength": 1 },
+    "minimumUrgency": {
+      "enum": ["low", "medium", "high", "critical"],
+      "default": "medium"
+    }
+  },
+  "additionalProperties": false
+}

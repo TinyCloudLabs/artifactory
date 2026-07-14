@@ -31,7 +31,12 @@ import {
   type ListenResolverFactory,
   type ListenResolvedConversation,
 } from "./listen-resolver.ts";
-import { bindAdmittedArtifactPack, type WorkflowFixture } from "./workflow.ts";
+import { compileOutputBodySchema } from "./output-schema.ts";
+import {
+  bindAdmittedArtifactPack,
+  bindAdmittedExecutionBundle,
+  type WorkflowFixture,
+} from "./workflow.ts";
 
 export type RunOptions = {
   runId: string;
@@ -47,6 +52,7 @@ export type RunOptions = {
   dropAudit: DropAudit;
   listenResolverFactory?: ListenResolverFactory;
   priorContext?: SkillRunInput["priorContext"];
+  requestContext?: SkillRunInput["requestContext"];
 };
 
 export type RunResult = {
@@ -63,6 +69,10 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
   const { runId, ownerId, workflow, now, leaseMs, runtime } = options;
   const nowIso = now.toISOString();
   const boundArtifactPack = bindAdmittedArtifactPack(workflow);
+  const executionBundle = bindAdmittedExecutionBundle(workflow);
+  const validateOutputBody = executionBundle
+    ? compileOutputBodySchema(executionBundle.outputSchema)
+    : undefined;
 
   const gate = await resolveRunGates({
     ownerId,
@@ -179,6 +189,8 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
     const skillInput: SkillRunInput = {
       runId,
       skillManifest: workflow.skillManifest,
+      executionBundle,
+      requestContext: options.requestContext,
       sourcePack,
       artifactPack: boundArtifactPack?.runtimePack,
       settings: workflow.settings,
@@ -200,6 +212,10 @@ export async function executeRun(options: RunOptions): Promise<RunResult> {
       runId,
       audit: options.dropAudit,
       maxAccepted: workflow.maxAcceptedArtifacts,
+      allowedArtifactTypes: new Set(workflow.skillManifest.artifactTypes),
+      allowedRenderShapes: new Set(workflow.skillManifest.renderShapes),
+      validateOutputBody,
+      requireQuoteAnchoring: executionBundle?.validation.requireQuoteAnchoring ?? false,
       trustedSourceRefs: new Map(sourcePack.refs.map((ref) => [ref.sourceRefId, ref])),
       trustedParentArtifacts: boundArtifactPack?.trustedParentArtifacts,
       sourceExcerpts: new Map(sourcePack.refs.map((ref) => [

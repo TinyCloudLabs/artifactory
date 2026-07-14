@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "feed.starter_workflow.v1",
+  "workflowId": "feed-exception-alert",
+  "format": "exception_alert",
+  "trigger": {
+    "kind": "source_event",
+    "cadence": "on_new_authorized_content"
+  },
+  "sourcePolicy": {
+    "window": "since_previous_success",
+    "quietResult": "zero_artifacts"
+  },
+  "continuity": {
+    "keyTemplate": "{actorId}:feed-exception-alert:{monitorKey}",
+    "cursor": "listen_started_at_conversation_id",
+    "usesPriorArtifacts": true
+  },
+  "feedPostContract": {
+    "minPosts": 1,
+    "maxPosts": 3,
+    "distinctBodies": true,
+    "evidencePerPost": true
+  },
+  "stages": [
+    {
+      "stageId": "stub",
+      "capabilities": [],
+      "authority": "none",
+      "egressClass": "none",
+      "spendClass": "none"
+    }
+  ]
+}

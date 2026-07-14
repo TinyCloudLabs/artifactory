@@ -35,7 +35,11 @@ function sourcePack(id = "conversation-1"): SkillRunInput["sourcePack"] {
   };
 }
 
-async function enqueue(store: ReturnType<typeof createInMemoryWorkflowSpineStore>, now: Date): Promise<void> {
+async function enqueue(
+  store: ReturnType<typeof createInMemoryWorkflowSpineStore>,
+  now: Date,
+  requestContext?: SkillRunInput["requestContext"],
+): Promise<void> {
   await store.enqueue({
     requestId: REQUEST,
     runId: RUN,
@@ -43,6 +47,7 @@ async function enqueue(store: ReturnType<typeof createInMemoryWorkflowSpineStore
     workflowId: WORKFLOW,
     packageId: "xyz.tinycloud.generic-insight",
     maxAttempts: 2,
+    requestContext,
   }, now);
 }
 
@@ -140,6 +145,31 @@ describe("durable generic workflow spine", () => {
     expect(result?.run.phase).toBe("zero_artifacts");
     expect(result?.run.publishedArtifactIds).toEqual([]);
     expect(await store.committedCursor(ACTOR, WORKFLOW)).toBe("1");
+  });
+
+  test("carries the human request prompt and scope into generic workflow execution", async () => {
+    const store = createInMemoryWorkflowSpineStore();
+    const now = () => new Date("2026-07-14T00:01:30.000Z");
+    const requestContext = {
+      scope: { packageId: "xyz.tinycloud.generic-insight", sourceRefId: "conversation-1" },
+      prompt: "Prepare a decision memo about the unresolved choice.",
+    };
+    await enqueue(store, now(), requestContext);
+    await processNextWorkflowRun({
+      store,
+      ports: ports({
+        store,
+        now,
+        execute: async (input) => {
+          expect(input.requestContext).toEqual(requestContext);
+          expect(input.run.requestContext).toEqual(requestContext);
+          return { artifacts: [] };
+        },
+      }),
+      ownerId: "worker-request-context",
+      leaseMs: 60_000,
+      now,
+    });
   });
 
   test("honors cancellation before publish and leaves the cursor unchanged", async () => {

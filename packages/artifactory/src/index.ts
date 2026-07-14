@@ -12,6 +12,7 @@ export * from "./runtime-adapter.ts";
 export * from "./listen-resolver.ts";
 export * from "./package-compiler.ts";
 export * from "./package-policy.ts";
+export * from "./output-schema.ts";
 export { createArtifactory, type Artifactory, type ArtifactoryOptions } from "./artifactory.ts";
 export { runCli } from "./cli-entry.ts";
 export { runMigrationCommand } from "./migration.ts";

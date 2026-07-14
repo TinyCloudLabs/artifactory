@@ -14,6 +14,8 @@ type FeedHostRequest = {
   actorId: string;
   status: string;
   packageId: string | null;
+  scope?: unknown;
+  prompt?: string | null;
   runId: string | null;
   workflowId: string | null;
   claimOwner: string | null;
@@ -265,6 +267,7 @@ function fromFeedHostRequest(value: FeedHostRequest, options: FeedHostWorkerOpti
     actorId: value.actorId,
     workflowId: value.workflowId,
     packageId: value.packageId ?? options.packageId,
+    requestContext: feedRequestContext(value.scope, value.prompt),
     phase: workflowPhase(value.phase),
     attempt: value.attemptCount,
     maxAttempts: value.maxAttempts,
@@ -289,6 +292,23 @@ function fromFeedHostRequest(value: FeedHostRequest, options: FeedHostWorkerOpti
       : [],
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+  };
+}
+
+function feedRequestContext(
+  scopeValue: unknown,
+  promptValue: unknown,
+): DurableWorkflowRun["requestContext"] {
+  const source = object(scopeValue);
+  if (!source) return undefined;
+  const scope = {
+    ...(optionalString(source.artifactType) ? { artifactType: optionalString(source.artifactType) } : {}),
+    ...(optionalString(source.packageId) ? { packageId: optionalString(source.packageId) } : {}),
+    ...(optionalString(source.sourceRefId) ? { sourceRefId: optionalString(source.sourceRefId) } : {}),
+  };
+  return {
+    scope,
+    ...(optionalString(promptValue) ? { prompt: optionalString(promptValue) } : {}),
   };
 }
 

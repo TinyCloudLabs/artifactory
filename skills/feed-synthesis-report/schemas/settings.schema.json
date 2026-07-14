@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["topicKey", "question"],
+  "properties": {
+    "topicKey": { "type": "string", "minLength": 1 },
+    "question": { "type": "string", "minLength": 1 },
+    "audienceRole": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

@@ -45,6 +45,10 @@ describe("Feed Host workflow bridge", () => {
 
     const claim = await bridge.store.claimNext("worker-1", 60_000, new Date());
     expect(claim?.run.runId).toBe("request-1");
+    expect(claim?.run.requestContext).toEqual({
+      scope: { packageId: "package.insights", sourceRefId: "conversation-1" },
+      prompt: "Compare the two options.",
+    });
     expect(await bridge.store.committedCursor("did:example:reader", "workflow.insights")).toBe("cursor-previous");
     const fence = claim!.fence;
     await bridge.store.checkpoint(fence, {
@@ -102,6 +106,8 @@ function requestRecord() {
     actorId: "did:example:reader",
     status: "pending",
     packageId: "package.insights",
+    scope: { packageId: "package.insights", sourceRefId: "conversation-1" },
+    prompt: "Compare the two options.",
     runId: "request-1",
     workflowId: "workflow.insights",
     claimOwner: "worker-1",

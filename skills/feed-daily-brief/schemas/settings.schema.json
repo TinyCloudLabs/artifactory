@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["audienceRole"],
+  "properties": {
+    "audienceRole": { "type": "string", "minLength": 1 },
+    "deliveryTime": {
+      "type": "string",
+      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+      "default": "07:00"
+    },
+    "timezone": { "type": "string", "minLength": 1, "default": "UTC" }
+  },
+  "additionalProperties": false
+}

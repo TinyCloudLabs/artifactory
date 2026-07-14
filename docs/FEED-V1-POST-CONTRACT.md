@@ -78,6 +78,31 @@ Typed artifact-to-artifact relationships remain on the artifact through
 `parentArtifactRefs` (`artifactId`, `artifactType`, and optional observed hash).
 The Feed projection does not own or duplicate that relationship graph.
 
+## Reviewed starter workflows
+
+The first reviewed workflow set proves that the post contract is a presentation
+layer, not a permanent content taxonomy. Artifactory owns six independent
+packages: short insights, daily brief, exception alert, synthesis report,
+decision memo, and playbook. Each package keeps its instructions, settings,
+artifact-body schema, evaluator, trigger metadata, and continuity policy inside
+the package. Feed continues to receive only generic artifacts and posts.
+
+A successful starter run publishes at most one durable artifact and one or more
+distinct posts that deep-link to declared artifact sections. The exception-alert
+workflow is intentionally different: when the selected authorized sources do
+not directly support both an expected state and a deviation, the correct result
+is zero artifacts and therefore zero Feed items. Human-triggered synthesis and
+decision workflows receive the request prompt and scope as worker-bound runtime
+input; scheduled workflows declare their cadence but scheduling remains outside
+the artifact contract.
+
+Reviewed package identity is bound to an exact digest. The worker delivers the
+digest-bound instructions, output schema, evaluator instructions, and material
+digests to the runtime, then independently validates artifact type, render shape,
+body schema, critic success, source provenance, and evidence before publication.
+Runtime claims such as `quotesVerified` are never treated as verification
+authority.
+
 ## Authority and surface policy
 
 Source refs may carry non-secret authority lineage metadata: a lineage ID,

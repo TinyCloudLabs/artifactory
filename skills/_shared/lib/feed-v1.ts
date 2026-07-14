@@ -571,9 +571,39 @@ export type ArtifactInputRef = {
   observedAt: IsoDateString;
 };
 
+export type SkillExecutionBundle = {
+  schemaVersion: "feed.skill_execution_bundle.v1";
+  packageDigest: HashString;
+  bundleDigest: HashString;
+  instructions: string;
+  instructionsDigest: HashString;
+  outputSchema: unknown;
+  outputSchemaRef: string;
+  evaluators: Array<{
+    ref: string;
+    instructions: string;
+    digest: HashString;
+  }>;
+  materialDigests: Array<{
+    path: string;
+    kind: "json" | "toml" | "text" | "binary";
+    digest: HashString;
+  }>;
+  validation: {
+    requireQuoteAnchoring: boolean;
+  };
+};
+
+export type SkillRequestContext = {
+  scope: GenerationRequest["scope"];
+  prompt?: string;
+};
+
 export type SkillRunInput = {
   runId: string;
   skillManifest: ArtifactorySkillManifest;
+  executionBundle?: SkillExecutionBundle;
+  requestContext?: SkillRequestContext;
   sourcePack: {
     refs: TranscriptSourceRef[];
     excerpts: { sourceRefId: string; text: string; quoteLineRefs?: string[] }[];

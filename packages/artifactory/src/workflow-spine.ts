@@ -31,6 +31,7 @@ export type DurableWorkflowRun = {
   actorId: string;
   workflowId: string;
   packageId: string;
+  requestContext?: SkillRunInput["requestContext"];
   phase: WorkflowRunPhase;
   attempt: number;
   maxAttempts: number;
@@ -53,7 +54,7 @@ export type DurableWorkflowRun = {
 
 export type WorkflowRunEnqueue = Pick<
   DurableWorkflowRun,
-  "requestId" | "runId" | "actorId" | "workflowId" | "packageId" | "maxAttempts"
+  "requestId" | "runId" | "actorId" | "workflowId" | "packageId" | "maxAttempts" | "requestContext"
 >;
 
 export type WorkflowRunClaim = {
@@ -126,6 +127,7 @@ export type WorkflowSpinePorts = {
       sourcePack: SkillRunInput["sourcePack"];
       publicationKey: string;
       priorContext?: SkillRunInput["priorContext"];
+      requestContext?: SkillRunInput["requestContext"];
     }): Promise<{ artifacts: FeedArtifact[] }>;
   };
   publisher: {
@@ -234,6 +236,7 @@ export async function processNextWorkflowRun(input: {
         sourcePack: selection.sourcePack,
         publicationKey,
         priorContext,
+        requestContext: run.requestContext,
       }),
     );
     const validatedAt = now();

@@ -1,0 +1,54 @@
+schema = "feed.skill.v1"
+id = "feed-decision-memo"
+display_name = "Decision Memo"
+version = "0.1.0"
+source = "first_party"
+
+[admission]
+tier = 1
+default_state = "enabled"
+review_status = "reviewed"
+
+[[produces]]
+artifact_type = "decision_memo"
+render_shape = "longform"
+label = "Decision Memo"
+output_schema = "schemas/output.schema.json"
+outward = false
+
+[requires]
+source_kinds = ["listen_conversation"]
+artifact_kinds = []
+max_source_refs = 1
+max_input_tokens = 12000
+needs_media = false
+
+[runtime]
+runtime_class = "stub"
+provider_class = "none"
+credential_mode = "none"
+egress_class = "none"
+allowed_tools = []
+disallowed_tools = ["tinycloud", "shell", "network"]
+
+[workflow]
+executor = "stub"
+ref = "workflows/feed-decision-memo.stub.json"
+digest = "sha256:de877625018ee11322a8c7dd7cbc1483acde26c1d6a0ae4bf3cb8c68a474ca3c"
+
+[limits]
+max_accepted_artifacts = 1
+timeout_ms = 1000
+max_output_bytes = 4096
+max_model_calls = 0
+
+[settings]
+schema = "schemas/settings.schema.json"
+
+[validation]
+validator_refs = ["schema", "source_refs", "critic_pass"]
+evaluator_refs = ["evaluators/quality.md"]
+require_quote_anchoring = false
+
+[disclosure]
+user_copy = "Creates an on-demand decision memo from selected authorized context with options, tradeoffs, evidence, and open questions."

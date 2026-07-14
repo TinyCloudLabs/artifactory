@@ -1,5 +1,14 @@
 {
   "name": "reviewed-bundle-default",
+  "reviewedPackagePins": {
+    "default-reviewed-bundle": ["sha256:e805f1bfe701394bd056d77ba8540ff8a65c9708f6439a89dd97042c3dde2b49"],
+    "feed-short-insights": ["sha256:89e7989ffb9c5e23e2479269884db30caa11b3f96e3fdf023e44e222b18b227c"],
+    "feed-daily-brief": ["sha256:f58716ce1654c91eee24abd4b768cd5cbf8275620af15c8d4a78f1740f82a9be"],
+    "feed-exception-alert": ["sha256:f3318540de3311fb3087345b9958a3735a6e3e41b3620c1f579b95a69ddffe57"],
+    "feed-synthesis-report": ["sha256:5fab0ac3798b5ba4a03c996f5273643f2a7c132207a4a4f59daf6bf3532f73cd"],
+    "feed-decision-memo": ["sha256:0afb13be1f99854ca9c501f365d97f72a2a5e5a74d7b0a631ab8847190b24fa1"],
+    "feed-playbook": ["sha256:22d416f1d04906f9b4f86937f54c5dcbca333b3af6b354c7738288d809ad96d5"]
+  },
   "allowedRuntimeClasses": ["stub"],
   "allowedProviderClasses": ["none"],
   "allowedCredentialModes": ["none"],

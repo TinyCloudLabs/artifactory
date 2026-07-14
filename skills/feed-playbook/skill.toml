@@ -1,0 +1,54 @@
+schema = "feed.skill.v1"
+id = "feed-playbook"
+display_name = "Playbook"
+version = "0.1.0"
+source = "first_party"
+
+[admission]
+tier = 1
+default_state = "enabled"
+review_status = "reviewed"
+
+[[produces]]
+artifact_type = "playbook"
+render_shape = "longform"
+label = "Playbook"
+output_schema = "schemas/output.schema.json"
+outward = false
+
+[requires]
+source_kinds = ["listen_conversation"]
+artifact_kinds = []
+max_source_refs = 1
+max_input_tokens = 12000
+needs_media = false
+
+[runtime]
+runtime_class = "stub"
+provider_class = "none"
+credential_mode = "none"
+egress_class = "none"
+allowed_tools = []
+disallowed_tools = ["tinycloud", "shell", "network"]
+
+[workflow]
+executor = "stub"
+ref = "workflows/feed-playbook.stub.json"
+digest = "sha256:ce5b5ab58946bef9adc30b0f40392e469eda053b0e36ca603a8fa863eef06ce1"
+
+[limits]
+max_accepted_artifacts = 1
+timeout_ms = 1000
+max_output_bytes = 4096
+max_model_calls = 0
+
+[settings]
+schema = "schemas/settings.schema.json"
+
+[validation]
+validator_refs = ["schema", "source_refs", "critic_pass"]
+evaluator_refs = ["evaluators/quality.md"]
+require_quote_anchoring = false
+
+[disclosure]
+user_copy = "Turns an operational process from selected authorized conversations into an evidence-backed playbook and actionable Feed posts."
