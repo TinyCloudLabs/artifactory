@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "harness/feed-host/**"
+      - "harness/feed-host/Dockerfile"
       - "skills/_shared/lib/**"
       - "submodules/feed"
       - ".github/workflows/feed-host-image.yml"
