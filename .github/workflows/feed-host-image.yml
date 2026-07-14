@@ -53,18 +53,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Allow the Phala CVM to pull the image
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify the Phala CVM can pull anonymously
         run: |
-          for attempt in 1 2 3 4 5; do
-            echo "Package visibility attempt ${attempt}"
-            if gh api --method PATCH /orgs/TinyCloudLabs/packages/container/feed-host -f visibility=public; then
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
+          docker logout ghcr.io
+          docker pull '${{ steps.meta.outputs.tags }}'
 
       - name: Record immutable image digest
         run: echo '${{ steps.build.outputs.digest }}'
