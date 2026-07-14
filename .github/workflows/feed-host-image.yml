@@ -1,0 +1,70 @@
+name: Feed Host image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "harness/feed-host/**"
+      - "skills/_shared/lib/**"
+      - "submodules/feed"
+      - ".github/workflows/feed-host-image.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve source revisions
+        id: revisions
+        run: echo "feed=$(git -C submodules/feed rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/tinycloudlabs/feed-host
+          tags: type=sha,format=long
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: harness/feed-host/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            ARTIFACTORY_COMMIT=${{ github.sha }}
+            FEED_COMMIT=${{ steps.revisions.outputs.feed }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Allow the Phala CVM to pull the image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            echo "Package visibility attempt ${attempt}"
+            if gh api --method PATCH /orgs/TinyCloudLabs/packages/container/feed-host -f visibility=public; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Record immutable image digest
+        run: echo '${{ steps.build.outputs.digest }}'

@@ -33,7 +33,7 @@
     "smithers:video-smoke": "bunx smithers-orchestrator workflow run video-generation-smoke",
     "smithers:media-smoke": "bunx smithers-orchestrator workflow run full-media-generation-smoke",
     "smithers:composition": "bunx smithers-orchestrator workflow run feed-composition-smoke",
-    "test": "bun test --preload ./tests/no-spend-setup.ts",
+    "test": "bun test ./tests ./harness --preload ./tests/no-spend-setup.ts",
     "typecheck": "bunx tsc --noEmit"
   },
   "devDependencies": {
