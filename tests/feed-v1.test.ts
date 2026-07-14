@@ -173,7 +173,10 @@ describe("Feed v1 contracts", () => {
     if (result.ok) {
       expect(result.value.posts).toHaveLength(2);
       expect(result.value.posts?.[0]?.expansionTarget.artifactId).toBe(result.value.artifactId);
-      expect(result.value.posts?.[1]?.expansionTarget).toEqual({ artifactId: result.value.artifactId });
+      expect(result.value.posts?.[1]?.expansionTarget).toEqual({
+        artifactId: result.value.artifactId,
+        sectionId: "invite-preview",
+      });
     }
   });
 

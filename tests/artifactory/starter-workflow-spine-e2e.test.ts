@@ -205,9 +205,57 @@ function bodyFor(starter: Starter, input: SkillRunInput): unknown {
   }
 }
 
+function sectionTargetsFor(starter: Starter): Array<{
+  sectionId: string;
+  title: string;
+  bodyPath: string;
+}> {
+  switch (starter.packageId) {
+    case "feed-short-insights":
+      return [
+        { sectionId: "primary", title: "Checklist gate", bodyPath: "/insights/0/claim" },
+        { sectionId: "secondary", title: "Verification owner", bodyPath: "/insights/1/claim" },
+      ];
+    case "feed-daily-brief":
+      return [
+        { sectionId: "primary", title: "Priority", bodyPath: "/priorities/0/development" },
+        { sectionId: "secondary", title: "Implication", bodyPath: "/priorities/0/implication" },
+      ];
+    case "feed-exception-alert":
+      return [
+        { sectionId: "primary", title: "Deviation", bodyPath: "/deviation" },
+        { sectionId: "secondary", title: "Impact", bodyPath: "/impact" },
+      ];
+    case "feed-synthesis-report":
+      return [
+        { sectionId: "primary", title: "Assessment", bodyPath: "/assessment" },
+        { sectionId: "secondary", title: "Finding", bodyPath: "/findings/0/finding" },
+      ];
+    case "feed-decision-memo":
+      return [
+        { sectionId: "primary", title: "Decision", bodyPath: "/decision" },
+        { sectionId: "secondary", title: "Option", bodyPath: "/options/0/description" },
+      ];
+    case "feed-playbook":
+      return [
+        { sectionId: "primary", title: "Outcome", bodyPath: "/outcome" },
+        { sectionId: "secondary", title: "First step", bodyPath: "/steps/0/instruction" },
+      ];
+  }
+}
+
+function valueAtBodyPath(body: unknown, path: string): unknown {
+  let current = body;
+  for (const part of path.slice(1).split("/")) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
 function candidateFor(starter: Starter, input: SkillRunInput): CandidateArtifactEnvelope {
   const ref = input.sourcePack.refs[0]!;
-  const sections = ["primary", "secondary"];
+  const sectionTargets = sectionTargetsFor(starter);
   return {
     schemaVersion: "feed.candidate_artifact.v1",
     localCandidateId: `${starter.packageId}-candidate`,
@@ -216,10 +264,13 @@ function candidateFor(starter: Starter, input: SkillRunInput): CandidateArtifact
     title: `${starter.packageId} artifact`,
     summary: "A durable, evidence-backed starter workflow artifact.",
     body: bodyFor(starter, input),
-    renderHints: { sectionIds: sections },
+    renderHints: {
+      sectionIds: sectionTargets.map((target) => target.sectionId),
+      sectionTargets,
+    },
     sourceRefs: [ref],
     feedSurface: { mode: "posts" },
-    posts: sections.map((sectionId, index) => ({
+    posts: sectionTargets.map(({ sectionId }, index) => ({
       kind: index === 0 ? "insight" : "follow_up",
       title: index === 0 ? "Primary finding" : "What to check next",
       body: index === 0
@@ -399,9 +450,21 @@ describe("starter packages through the durable generic workflow spine", () => {
       expect(new Set(artifact.posts?.map((post) => post.body)).size).toBe(2);
       expect(result.feedItemIds.size).toBe(2);
 
-      const sectionIds = new Set(artifact.renderHints?.sectionIds as string[]);
+      const sectionTargets = artifact.renderHints?.sectionTargets as Array<{
+        sectionId: string;
+        title: string;
+        bodyPath: string;
+      }>;
+      expect(sectionTargets).toHaveLength(artifact.posts!.length);
       for (const post of artifact.posts ?? []) {
-        expect(sectionIds.has(post.expansionTarget.sectionId!)).toBe(true);
+        const sectionTarget = sectionTargets.find(
+          (target) => target.sectionId === post.expansionTarget.sectionId,
+        );
+        expect(sectionTarget).toBeDefined();
+        expect(sectionTarget?.title.length).toBeGreaterThan(0);
+        expect(sectionTarget?.bodyPath.startsWith("/")).toBe(true);
+        expect(valueAtBodyPath(artifact.body, sectionTarget!.bodyPath)).toBeString();
+        expect(String(valueAtBodyPath(artifact.body, sectionTarget!.bodyPath)).length).toBeGreaterThan(0);
         expect(post.evidence).toHaveLength(1);
         expect(post.evidence[0]).toMatchObject({
           kind: "verified_quote",
