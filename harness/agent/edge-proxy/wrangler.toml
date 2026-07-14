@@ -3,6 +3,10 @@ main = "worker.mjs"
 account_id = "9959301f03d2db1a5fcf5e004278d467"
 compatibility_date = "2025-01-01"
 
+[vars]
+AGENT_ORIGIN = "https://ad9fd8859b5777e84c79e25721b423b85ee3e20a-4097.dstack-pha-prod5.phala.network"
+FEED_HOST_ORIGIN = "https://1de7413de0a2c483b00c75e7cb3ece691ce4375f-8787.dstack-pha-prod5.phala.network"
+
 routes = [
   { pattern = "api.feed.tinycloud.xyz", custom_domain = true }
 ]
