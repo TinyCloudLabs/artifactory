@@ -1,8 +1,8 @@
-# edge-proxy — api.feed.tinycloud.xyz → the agent CVM
+# edge-proxy — api.feed.tinycloud.xyz → Feed services
 
 A tiny Cloudflare Worker that gives the feed a clean, stable API host
 (`https://api.feed.tinycloud.xyz`) instead of the long Phala dstack gateway URL
-(`https://<app-id>-4097.dstack-pha-prod5.phala.network`).
+(`https://<app-id>-<port>.dstack-pha-prod5.phala.network`).
 
 ## Why a Worker (not a plain CNAME or the dstack-ingress)
 
@@ -18,11 +18,11 @@ A tiny Cloudflare Worker that gives the feed a clean, stable API host
 
 ## What it does
 
-`worker.mjs` forwards every request (method, headers incl. `Origin`/`Authorization`,
-body) to the agent origin and returns the agent's response verbatim — including the
-agent's own CORS headers (the agent's `AGENT_ALLOWED_ORIGIN` still gates the browser
-origins). `api.feed…` is only the API *host*, not a browser origin, so it doesn't
-need to be in the CORS allowlist.
+`worker.mjs` sends `/agent` and `/agent/*` to the existing Artifactory agent.
+Every other path goes to Feed Host. It forwards method, query, headers, and body,
+and returns the selected service's response verbatim, including its CORS and
+`Set-Cookie` headers. `api.feed…` is only the API host, not a browser origin, so
+the user-facing Feed origins remain the services' CORS allowlists.
 
 ## Deploy / update
 
@@ -33,6 +33,5 @@ CLOUDFLARE_ACCOUNT_ID=9959301f03d2db1a5fcf5e004278d467 wrangler deploy
 ```
 
 The `routes` entry with `custom_domain = true` provisions the DNS record + cert for
-`api.feed.tinycloud.xyz` automatically. To point at a different agent CVM, change
-`ORIGIN` in `worker.mjs` and redeploy (or just change the feed's `agent-config.json`
-host — the DID is auto-discovered from `/agent/info`).
+`api.feed.tinycloud.xyz` automatically. Update `AGENT_ORIGIN` or
+`FEED_HOST_ORIGIN` in `wrangler.toml` when a CVM endpoint changes, then redeploy.

@@ -19,11 +19,11 @@ docker buildx build \
   --push .
 ```
 
-Confirm the GHCR package is public, resolve its manifest digest, and set the
-complete immutable image reference locally:
+Confirm the GHCR package is public, resolve its manifest digest, and update the
+complete immutable `image:` reference in `docker-compose.yml`. Phala stores the
+Compose source without local shell interpolation. Then validate it:
 
 ```sh
-export FEED_HOST_IMAGE='ghcr.io/tinycloudlabs/feed-host@sha256:<digest>'
 docker compose -f harness/feed-host/docker-compose.yml config --quiet
 ```
 

@@ -1,13 +1,19 @@
-// Edge proxy: api.feed.tinycloud.xyz -> the distillery agent on its Phala CVM.
-// Gives the feed a stable, clean API host instead of the long dstack gateway URL.
+// Edge proxy: api.feed.tinycloud.xyz -> the Feed Host or Artifactory agent.
+// Gives both services a stable API host instead of dstack gateway URLs.
 // A Worker fetch() uses the ORIGIN's own SNI/Host, so the dstack gateway routes
 // correctly — a plain Cloudflare CNAME proxy fails here (525, SNI mismatch).
 // Transparent passthrough: method, headers (incl. Origin/Authorization), body,
 // and the agent's own CORS response all flow through unchanged. No secrets.
-const ORIGIN = "https://ad9fd8859b5777e84c79e25721b423b85ee3e20a-4097.dstack-pha-prod5.phala.network";
+export function originForPath(pathname, env) {
+  return pathname === "/agent" || pathname.startsWith("/agent/")
+    ? env.AGENT_ORIGIN
+    : env.FEED_HOST_ORIGIN;
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
-    return fetch(new Request(ORIGIN + url.pathname + url.search, request));
+    const origin = originForPath(url.pathname, env);
+    return fetch(new Request(origin + url.pathname + url.search, request));
   },
 };
