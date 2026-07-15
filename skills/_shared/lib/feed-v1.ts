@@ -223,6 +223,26 @@ export type WorkflowDisclosure = {
   egressClass: EgressClass;
 };
 
+// Human-readable routine copy for workflow controls (TC-182). Presentation is
+// display-only: it never grants or describes authority, and stays separate
+// from the runtime/authority fields on FeedWorkflowPackage. Every field is
+// plain user language — no hashes, DIDs, cron, or capability paths.
+export type WorkflowPresentation = {
+  schemaVersion: "feed.workflow_presentation.v1";
+  // One or two sentences on what this routine makes for the user.
+  purpose: string;
+  // When it runs, in user language ("Runs once a day").
+  triggerLabel: string;
+  // Cadence copy shown next to controls ("Daily", "As new content arrives").
+  cadenceLabel: string;
+  // What it reads, in user language ("New conversations you've authorized").
+  sourcesLabel: string;
+  // Who sees the output ("Private to you").
+  audienceLabel: string;
+  // Short sample output titles so an unrun routine still feels concrete.
+  exampleTitles: string[];
+};
+
 export type FeedWorkflowPackage = {
   schemaVersion: "feed.workflow_package.v1";
   packageId: string;
@@ -234,6 +254,8 @@ export type FeedWorkflowPackage = {
   workflowDigest: HashString;
   admissionState: "candidate" | "enabled_local" | "reviewed_first_party" | "blocked";
   disclosure: WorkflowDisclosure;
+  // Optional so existing compiled packages and stored rows stay valid.
+  presentation?: WorkflowPresentation;
 };
 
 export type FeedArtifact = {
@@ -491,7 +513,14 @@ export type ControlIntentEvent = {
   eventId: string;
   actorId: string;
   readerNonce: string;
-  intentKind: "enable_package" | "pause_package" | "disable_package" | "tune_package" | "reset_package" | "ask_feed";
+  intentKind:
+    | "enable_package"
+    | "pause_package"
+    | "disable_package"
+    | "tune_package"
+    | "reset_package"
+    | "generate_new_request"
+    | "ask_feed";
   status: "accepted" | "pending" | "blocked" | "rejected" | "consumed";
   targetRef: string;
   payload?: unknown;
