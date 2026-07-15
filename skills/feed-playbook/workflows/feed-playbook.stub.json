@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "feed.starter_workflow.v1",
+  "workflowId": "feed-playbook",
+  "format": "playbook",
+  "category": "operations",
+  "trigger": {
+    "kind": "on_demand",
+    "cadence": "human_or_authorized_agent"
+  },
+  "sourcePolicy": {
+    "window": "selected_authorized_conversations",
+    "quietResult": "zero_artifacts"
+  },
+  "continuity": {
+    "keyTemplate": "{actorId}:feed-playbook:{processKey}",
+    "cursor": "request_source_snapshot",
+    "usesPriorArtifacts": true
+  },
+  "feedPostContract": {
+    "minPosts": 1,
+    "maxPosts": 6,
+    "distinctBodies": true,
+    "evidencePerPost": true,
+    "sectionTargetPerPost": true
+  },
+  "stages": [
+    {
+      "stageId": "stub",
+      "capabilities": [],
+      "authority": "none",
+      "egressClass": "none",
+      "spendClass": "none"
+    }
+  ]
+}

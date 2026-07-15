@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["outcome", "owner", "prerequisites", "steps", "validationChecks"],
+  "properties": {
+    "outcome": { "type": "string", "minLength": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "prerequisites": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["instruction", "evidenceSourceIds"],
+        "properties": {
+          "instruction": { "type": "string", "minLength": 1 },
+          "caution": { "type": "string", "minLength": 1 },
+          "evidenceSourceIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "validationChecks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "additionalProperties": false
+}

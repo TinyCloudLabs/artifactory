@@ -10,6 +10,7 @@ import type {
   ProviderClass,
   RenderShape,
   RuntimePolicy,
+  SkillExecutionBundle,
   SpendClass,
   RuntimeClass,
 } from "../../../skills/_shared/lib/feed-v1.ts";
@@ -23,6 +24,7 @@ import {
   type ReviewedExternalCapability,
   type ReviewedStageCapability,
 } from "./package-policy.ts";
+import { compileOutputBodySchema } from "./output-schema.ts";
 
 export type PackageMaterial = {
   path: string;
@@ -45,6 +47,7 @@ export type SkillPackageCompileOptions = {
 export type CompiledSkillPackage = {
   manifest: ArtifactorySkillManifest;
   package: FeedWorkflowPackage;
+  executionBundle: SkillExecutionBundle;
   workflowPack: WorkflowPack;
   materials: PackageMaterial[];
   policyDecision: PackageAdmissionDecision;
@@ -176,6 +179,31 @@ export async function compileSkillPackage(
   for (const path of explicitMaterialPaths) materialPaths.add(path);
 
   const materials = await digestMaterials(sourceRoot, Array.from(materialPaths).sort());
+  const outputSchema = await loadJsonMaterial(outputSchemaPath, "output schema");
+  try {
+    compileOutputBodySchema(outputSchema);
+  } catch (error) {
+    throw new PackageSourceError(error instanceof Error ? error.message : "invalid package output schema", {
+      packageId: contract.id,
+      sourcePath: outputSchemaPath,
+    });
+  }
+  const evaluators = await Promise.all((contract.validation?.evaluator_refs ?? []).map(async (ref) => {
+    const normalizedRef = normalizeRefPath(ref);
+    const evaluatorPath = resolvePackagePath(sourceRoot, ref);
+    const material = materials.find((entry) => entry.path === normalizedRef);
+    if (!material) {
+      throw new PackageSourceError(`evaluator is missing from package materials: ${normalizedRef}`, {
+        packageId: contract.id,
+        sourcePath: evaluatorPath,
+      });
+    }
+    return {
+      ref: normalizedRef,
+      instructions: normalizeText(await readFile(evaluatorPath, "utf8")),
+      digest: material.digest,
+    };
+  }));
 
   const runtimePolicy: RuntimePolicy = {
     runtimeClass: contract.runtime.runtime_class,
@@ -232,6 +260,27 @@ export async function compileSkillPackage(
   };
   const digest = digestJson(digestInput);
 
+  const executionMaterial = {
+    schemaVersion: "feed.skill_execution_bundle.v1" as const,
+    instructions: skillMarkdown,
+    instructionsDigest: sha256(skillMarkdown),
+    outputSchema,
+    outputSchemaRef: normalizeRefPath(contract.produces[0]!.output_schema),
+    evaluators,
+    materialDigests: [
+      { path: "SKILL.md", kind: "text" as const, digest: sha256(skillMarkdown) },
+      ...materials.map((material) => ({ ...material })),
+    ],
+    validation: {
+      requireQuoteAnchoring: contract.validation?.require_quote_anchoring ?? false,
+    },
+  };
+  const executionBundle: SkillExecutionBundle = {
+    ...executionMaterial,
+    packageDigest: digest,
+    bundleDigest: digestJson(executionMaterial),
+  };
+
   const manifest: ArtifactorySkillManifest = {
     ...manifestBase,
     digest,
@@ -253,6 +302,7 @@ export async function compileSkillPackage(
   const policyDecision = admitReviewedBundle(
     {
       packageId: packageState.packageId,
+      packageDigest: packageState.digest,
       workflowExecutor: manifest.workflowExecutor,
       runtimePolicy,
       limits: manifest.limits,
@@ -268,11 +318,20 @@ export async function compileSkillPackage(
   return {
     manifest,
     package: packageState,
+    executionBundle,
     workflowPack,
     materials,
     policyDecision,
     manifestJson: `${JSON.stringify(manifest, null, 2)}\n`,
   };
+}
+
+async function loadJsonMaterial(path: string, label: string): Promise<unknown> {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    throw new PackageSourceError(`${label} must be valid JSON`, { sourcePath: path });
+  }
 }
 
 export async function compileSkillPackageManifestJson(

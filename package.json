@@ -4,6 +4,9 @@
   "description": "Agent-agnostic skills that distill meeting transcripts into artifacts (insight cards, articles, micro-podcasts).",
   "type": "module",
   "private": true,
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
   "scripts": {
     "artifact:inflate": "bash scripts/artifact-inflate.sh",
     "artifact:dev": "bash scripts/artifact-dev.sh",

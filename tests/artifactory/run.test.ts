@@ -312,10 +312,10 @@ describe("artifactory run", () => {
     const candidate: CandidateArtifactEnvelope = {
       schemaVersion: "feed.candidate_artifact.v1",
       localCandidateId: "c-parent-synthesis",
-      artifactType: "noop",
+      artifactType: "stub_artifact",
       renderShape: "short_form",
       title: "Restricted synthesis",
-      body: {},
+      body: { text: "Restricted parent synthesis" },
       sourceRefs: workflow.sourcePack.refs,
       parentArtifactRefs: [parentRef],
       feedSurface: { mode: "artifact_preview" },
@@ -485,7 +485,7 @@ describe("artifactory run", () => {
 
   test("rejects package-backed workflows that are not reviewed at execution time", async () => {
     const artifactory = createArtifactory();
-    const workflow = await readWorkflowFixture(PACKAGE_FIXTURE);
+    const workflow = await loadWorkflowFile(PACKAGE_FIXTURE);
     workflow.skillManifest.admissionState = "candidate";
 
     let error: unknown;

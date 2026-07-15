@@ -8,6 +8,7 @@ import type {
   ArtifactorySkillManifest,
   HashString,
   RuntimePolicy,
+  SkillExecutionBundle,
   SkillRunInput,
   TranscriptSourceRef,
 } from "../../../skills/_shared/lib/feed-v1.ts";
@@ -27,6 +28,7 @@ type ArtifactPackAnchor = {
 };
 
 const artifactPackAnchors = new WeakMap<WorkflowFixture, ArtifactPackAnchor>();
+const executionBundleAnchors = new WeakMap<WorkflowFixture, SkillExecutionBundle>();
 
 export type WorkflowFixture = {
   workflowId: string;
@@ -105,6 +107,7 @@ export async function loadWorkflowFile(path: string): Promise<WorkflowFixture> {
     artifactPack,
   };
   if (artifactPackAnchor) artifactPackAnchors.set(compiledFixture, artifactPackAnchor);
+  executionBundleAnchors.set(compiledFixture, structuredClone(compiled.executionBundle));
   await assertWorkflowAdmitted(compiledFixture);
   return compiledFixture;
 }
@@ -119,6 +122,7 @@ export async function assertWorkflowAdmitted(fixture: WorkflowFixture): Promise<
   }
   try {
     bindAdmittedArtifactPack(fixture);
+    bindAdmittedExecutionBundle(fixture);
   } catch (error) {
     if (error instanceof ArtifactPackValidationError) reasons.push(...error.errors);
     else throw error;
@@ -127,6 +131,7 @@ export async function assertWorkflowAdmitted(fixture: WorkflowFixture): Promise<
   const decision = admitReviewedBundle(
     {
       packageId: fixture.packageId,
+      packageDigest: fixture.packageRoot ? fixture.digest : undefined,
       workflowExecutor: fixture.skillManifest.workflowExecutor,
       runtimePolicy: fixture.skillManifest.runtimePolicy,
       limits: fixture.skillManifest.limits,
@@ -181,6 +186,30 @@ export function bindAdmittedArtifactPack(fixture: WorkflowFixture) {
     throw new ArtifactPackValidationError(["artifactPack: admitted package digest no longer matches anchor"]);
   }
   return bindArtifactPack(fixture.artifactPack, anchor.materialDigest);
+}
+
+export function bindAdmittedExecutionBundle(fixture: WorkflowFixture): SkillExecutionBundle | undefined {
+  const bundle = executionBundleAnchors.get(fixture);
+  if (!fixture.packageRoot) {
+    if (bundle) throw new PackageSourceError("inline workflow unexpectedly has a compiled execution bundle");
+    return undefined;
+  }
+  if (!bundle) {
+    throw new PackageSourceError("package-backed workflow is missing its trusted execution bundle", {
+      packageId: fixture.packageId,
+    });
+  }
+  if (bundle.packageDigest !== fixture.digest || bundle.packageDigest !== fixture.skillManifest.digest) {
+    throw new PackageSourceError("execution bundle no longer matches the admitted package digest", {
+      packageId: fixture.packageId,
+    });
+  }
+  if (bundle.outputSchemaRef !== fixture.skillManifest.outputSchemaRef) {
+    throw new PackageSourceError("execution bundle output schema no longer matches the admitted manifest", {
+      packageId: fixture.packageId,
+    });
+  }
+  return structuredClone(bundle);
 }
 
 function assertCompatiblePackageFixture(

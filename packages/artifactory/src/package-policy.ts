@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type {
   CredentialMode,
   EgressClass,
+  HashString,
   ProviderClass,
   RuntimeClass,
   SpendClass,
@@ -10,6 +11,9 @@ import type {
 
 export type ReviewedBundlePolicy = {
   name: string;
+  /** Optional deployment trust registry. When present, every admitted package
+   * must match one of the exact content-addressed digests pinned for its id. */
+  reviewedPackagePins?: Record<string, HashString[]>;
   allowedRuntimeClasses: RuntimeClass[];
   allowedProviderClasses: ProviderClass[];
   allowedCredentialModes: CredentialMode[];
@@ -49,6 +53,7 @@ export type ReviewedStageCapability = {
 
 export type PackageAdmissionTarget = {
   packageId: string;
+  packageDigest?: HashString;
   workflowExecutor: "smithers" | "stub";
   runtimePolicy: {
     runtimeClass: RuntimeClass;
@@ -115,6 +120,9 @@ export function normalizePolicy(value: unknown, policyPath = DEFAULT_REVIEWED_BU
   const policyName = readString(obj.name, "name", policyPath);
   return {
     name: policyName,
+    reviewedPackagePins: obj.reviewedPackagePins === undefined
+      ? undefined
+      : readPackagePins(obj.reviewedPackagePins, "reviewedPackagePins", policyPath),
     allowedRuntimeClasses: readStringArray(obj.allowedRuntimeClasses, "allowedRuntimeClasses", policyPath) as RuntimeClass[],
     allowedProviderClasses: readStringArray(obj.allowedProviderClasses, "allowedProviderClasses", policyPath) as ProviderClass[],
     allowedCredentialModes: readStringArray(obj.allowedCredentialModes, "allowedCredentialModes", policyPath) as CredentialMode[],
@@ -143,6 +151,18 @@ export function admitReviewedBundle(
   policy: ReviewedBundlePolicy,
 ): PackageAdmissionDecision {
   const reasons: string[] = [];
+
+  // Inline legacy fixtures have no independently compiled package binding and
+  // omit packageDigest. Pins apply whenever the caller presents a compiled
+  // digest; this preserves those fixtures without weakening package admission.
+  if (policy.reviewedPackagePins && target.packageDigest !== undefined) {
+    const pinnedDigests = policy.reviewedPackagePins[target.packageId];
+    if (!pinnedDigests) {
+      reasons.push(`packageId=${target.packageId} is not present in the reviewed package pin registry`);
+    } else if (!pinnedDigests.includes(target.packageDigest)) {
+      reasons.push(`packageDigest=${target.packageDigest} is not pinned for ${target.packageId}`);
+    }
+  }
 
   if (!policy.allowedWorkflowExecutors.includes(target.workflowExecutor)) {
     reasons.push(
@@ -298,6 +318,20 @@ function readStringArray(value: unknown, field: string, policyPath: string): str
     }
     return entry.trim();
   });
+}
+
+function readPackagePins(value: unknown, field: string, policyPath: string): Record<string, HashString[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${policyPath}.${field} must be an object keyed by package id`);
+  }
+  const pins: Record<string, HashString[]> = {};
+  for (const [packageId, digests] of Object.entries(value as Record<string, unknown>)) {
+    if (!packageId.trim()) throw new Error(`${policyPath}.${field} contains an empty package id`);
+    const parsed = readStringArray(digests, `${field}.${packageId}`, policyPath);
+    if (parsed.length === 0) throw new Error(`${policyPath}.${field}.${packageId} must not be empty`);
+    pins[packageId] = [...new Set(parsed)].sort();
+  }
+  return pins;
 }
 
 function normalizeExternalCapability(

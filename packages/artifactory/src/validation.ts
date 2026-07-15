@@ -8,6 +8,7 @@ import {
   type CandidateArtifactEnvelope,
   type ArtifactInputRef,
   type DerivedAccessPolicy,
+  type RenderShape,
   type TranscriptSourceRef,
   type TrustedCandidateVerification,
 } from "../../../skills/_shared/lib/feed-v1.ts";
@@ -74,6 +75,10 @@ export function validateCandidates(
     runId: string;
     audit: DropAudit;
     maxAccepted: number;
+    allowedArtifactTypes: ReadonlySet<string>;
+    allowedRenderShapes: ReadonlySet<RenderShape>;
+    validateOutputBody?: (body: unknown) => string[];
+    requireQuoteAnchoring?: boolean;
     /** Trusted refs the worker actually observed. Candidate refs must match
      * these exactly, including authority metadata, and are reconstructed from
      * this map before publication. */
@@ -105,6 +110,28 @@ export function validateCandidates(
         reason: `validation:${result.errors.join(";")}`,
         localCandidateId: readLocalId(raw),
         title: readTitle(raw),
+      };
+      dropped.push(drop);
+      options.audit.record(options.runId, drop);
+      continue;
+    }
+    const contractErrors: string[] = [];
+    if (!options.allowedArtifactTypes.has(result.value.artifactType)) {
+      contractErrors.push(`artifactType: not declared by admitted package (${result.value.artifactType})`);
+    }
+    if (!options.allowedRenderShapes.has(result.value.renderShape)) {
+      contractErrors.push(`renderShape: not declared by admitted package (${result.value.renderShape})`);
+    }
+    if (result.value.quality.criticPass !== true) {
+      contractErrors.push("quality.criticPass: must be true");
+    }
+    contractErrors.push(...(options.validateOutputBody?.(result.value.body)
+      .map((error) => `body${error.startsWith("/") ? "" : ": "}${error}`) ?? []));
+    if (contractErrors.length > 0) {
+      const drop: DroppedCandidate = {
+        reason: `validation:${contractErrors.join(";")}`,
+        localCandidateId: result.value.localCandidateId,
+        title: result.value.title,
       };
       dropped.push(drop);
       options.audit.record(options.runId, drop);
@@ -145,6 +172,7 @@ export function validateCandidates(
       result.value,
       options.trustedSourceRefs,
       options.sourceExcerpts,
+      options.requireQuoteAnchoring ?? false,
     );
     if (!verification.ok) {
       const drop: DroppedCandidate = {
@@ -177,9 +205,11 @@ function verifyCandidateQuotes(
   candidate: CandidateArtifactEnvelope,
   trustedSourceRefs: ReadonlyMap<string, TranscriptSourceRef> | undefined,
   sourceExcerpts: ReadonlyMap<string, readonly string[]> | undefined,
+  requireQuoteAnchoring: boolean,
 ): { ok: true; value: TrustedCandidateVerification } | { ok: false; reason: string } {
   const verifiedQuotes: TrustedCandidateVerification["verifiedQuotes"] = [];
-  for (const post of candidate.posts ?? []) {
+  for (const [postIndex, post] of (candidate.posts ?? []).entries()) {
+    let postVerifiedQuotes = 0;
     for (const evidence of post.evidence) {
       if (evidence.kind !== "verified_quote") continue;
       const source = trustedSourceRefs?.get(evidence.sourceRefId);
@@ -196,6 +226,10 @@ function verifyCandidateQuotes(
         sourceObservedHash: source.observedHash,
         quoteHash: canonicalEvidenceTextHash(evidence.quote),
       });
+      postVerifiedQuotes += 1;
+    }
+    if (requireQuoteAnchoring && postVerifiedQuotes === 0) {
+      return { ok: false, reason: `post_without_verified_quote:${postIndex}` };
     }
   }
   return { ok: true, value: { verifiedQuotes } };

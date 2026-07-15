@@ -32,6 +32,8 @@ export type ArtifactoryRunInput = {
   workflow: WorkflowFixture;
   now?: Date;
   leaseMs?: number;
+  priorContext?: import("../../../skills/_shared/lib/feed-v1.ts").SkillRunInput["priorContext"];
+  requestContext?: import("../../../skills/_shared/lib/feed-v1.ts").SkillRunInput["requestContext"];
 };
 
 export type ArtifactoryStatusInput = {
@@ -81,6 +83,8 @@ export function createArtifactory(options: ArtifactoryOptions = {}): Artifactory
         publishWriter,
         dropAudit,
         listenResolverFactory,
+        priorContext: input.priorContext,
+        requestContext: input.requestContext,
       };
       return executeRun(runOptions);
     },

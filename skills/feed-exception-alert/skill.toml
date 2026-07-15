@@ -1,0 +1,54 @@
+schema = "feed.skill.v1"
+id = "feed-exception-alert"
+display_name = "Exception Alert"
+version = "0.1.0"
+source = "first_party"
+
+[admission]
+tier = 1
+default_state = "enabled"
+review_status = "reviewed"
+
+[[produces]]
+artifact_type = "exception_alert"
+render_shape = "longform"
+label = "Exception Alert"
+output_schema = "schemas/output.schema.json"
+outward = false
+
+[requires]
+source_kinds = ["listen_conversation"]
+artifact_kinds = ["exception_alert"]
+max_source_refs = 1
+max_input_tokens = 12000
+needs_media = false
+
+[runtime]
+runtime_class = "stub"
+provider_class = "none"
+credential_mode = "none"
+egress_class = "none"
+allowed_tools = []
+disallowed_tools = ["tinycloud", "shell", "network"]
+
+[workflow]
+executor = "stub"
+ref = "workflows/feed-exception-alert.stub.json"
+digest = "sha256:3a57a28dd5bebe9d29c89458da3b0a681ffc929907800620867823c7aa28eee3"
+
+[limits]
+max_accepted_artifacts = 1
+timeout_ms = 1000
+max_output_bytes = 4096
+max_model_calls = 0
+
+[settings]
+schema = "schemas/settings.schema.json"
+
+[validation]
+validator_refs = ["schema", "source_refs", "critic_pass"]
+evaluator_refs = ["evaluators/quality.md"]
+require_quote_anchoring = false
+
+[disclosure]
+user_copy = "Checks authorized context for meaningful deviations and stays silent when nothing requires attention."

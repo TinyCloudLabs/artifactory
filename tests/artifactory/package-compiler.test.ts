@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { createArtifactory } from "../../packages/artifactory/src/artifactory.ts";
 import { runCli } from "../../packages/artifactory/src/cli-entry.ts";
 import { compileSkillPackage } from "../../packages/artifactory/src/package-compiler.ts";
-import { PackageAdmissionError } from "../../packages/artifactory/src/package-policy.ts";
+import {
+  loadReviewedBundlePolicy,
+  PackageAdmissionError,
+} from "../../packages/artifactory/src/package-policy.ts";
 import { loadWorkflowFile } from "../../packages/artifactory/src/workflow.ts";
 import type {
   ArtifactSkillRuntime,
@@ -175,7 +178,10 @@ describe("package compiler", () => {
   test("resolves validator refs as platform ids before package files", async () => {
     const root = await makeValidatorRefBundleCopy();
     try {
-      const compiled = await compileSkillPackage(root);
+      const policy = await loadReviewedBundlePolicy();
+      const compiled = await compileSkillPackage(root, {
+        policy: { ...policy, reviewedPackagePins: undefined },
+      });
       expect(compiled.manifest.validatorRefs).toEqual(["schema@1", "validators/custom.ts"]);
       expect(compiled.materials.some((material) => material.path === "validators/custom.ts")).toBe(true);
       expect(compiled.materials.some((material) => material.path === "schema@1")).toBe(false);
