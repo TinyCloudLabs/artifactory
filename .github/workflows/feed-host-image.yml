@@ -17,6 +17,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,3 +62,64 @@ jobs:
 
       - name: Record immutable image digest
         run: echo '${{ steps.build.outputs.digest }}'
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FEED_HOST_ORIGIN: https://1de7413de0a2c483b00c75e7cb3ece691ce4375f-8787.dstack-pha-prod5.phala.network
+      PHALA_API_TOKEN: ${{ secrets.PHALA_CLOUD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Phala CLI
+        run: npm install --global phala@1.1.12
+
+      - name: Verify deployment credentials
+        run: |
+          if [[ -z "$PHALA_API_TOKEN" ]]; then
+            echo "::error::PHALA_CLOUD_API_KEY must be configured as an Actions secret."
+            exit 1
+          fi
+
+      - name: Record Feed Host identity
+        id: before
+        run: |
+          echo "delegate_did=$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')" >> "$GITHUB_OUTPUT"
+
+      - name: Render immutable production compose file
+        run: |
+          cp harness/feed-host/docker-compose.yml /tmp/feed-host-compose.yml
+          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-host@sha256:.*$|    image: ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.image_digest }}|" /tmp/feed-host-compose.yml
+          grep -F "ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.image_digest }}" /tmp/feed-host-compose.yml
+          docker compose -f /tmp/feed-host-compose.yml config --quiet
+
+      - name: Deploy Feed Host to Phala
+        run: |
+          phala deploy \
+            --api-token "$PHALA_API_TOKEN" \
+            --cvm-id feed-host \
+            --compose /tmp/feed-host-compose.yml \
+            --no-public-logs \
+            --no-public-sysinfo \
+            --wait
+
+      - name: Verify Feed Host rollout
+        run: |
+          for _ in {1..24}; do
+            if curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health"; then
+              delegate_did="$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')"
+              test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
+              curl --fail --silent --show-error --max-time 15 https://api.feed.tinycloud.xyz/health
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Feed Host did not become healthy after deployment."
+          exit 1
