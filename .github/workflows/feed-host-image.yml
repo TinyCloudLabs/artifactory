@@ -70,7 +70,7 @@ jobs:
       contents: read
     env:
       FEED_HOST_ORIGIN: https://1de7413de0a2c483b00c75e7cb3ece691ce4375f-8787.dstack-pha-prod5.phala.network
-      PHALA_API_TOKEN: ${{ secrets.PHALA_CLOUD_API_KEY }}
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +83,7 @@ jobs:
 
       - name: Verify deployment credentials
         run: |
-          if [[ -z "$PHALA_API_TOKEN" ]]; then
+          if [[ -z "$PHALA_CLOUD_API_KEY" ]]; then
             echo "::error::PHALA_CLOUD_API_KEY must be configured as an Actions secret."
             exit 1
           fi
@@ -103,11 +103,8 @@ jobs:
       - name: Deploy Feed Host to Phala
         run: |
           phala deploy \
-            --api-token "$PHALA_API_TOKEN" \
             --cvm-id feed-host \
-            --compose /tmp/feed-host-compose.yml \
-            --no-public-logs \
-            --no-public-sysinfo
+            --compose /tmp/feed-host-compose.yml
 
       - name: Verify Feed Host rollout
         run: |
