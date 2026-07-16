@@ -71,6 +71,7 @@ jobs:
     env:
       FEED_HOST_ORIGIN: https://1de7413de0a2c483b00c75e7cb3ece691ce4375f-8787.dstack-pha-prod5.phala.network
       PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+      FEED_HOST_DIAGNOSTICS_TOKEN: ${{ secrets.FEED_HOST_DIAGNOSTICS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -104,7 +105,8 @@ jobs:
         run: |
           phala deploy \
             --cvm-id feed-host \
-            --compose /tmp/feed-host-compose.yml
+            --compose /tmp/feed-host-compose.yml \
+            -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN"
 
       - name: Verify Feed Host rollout
         run: |
