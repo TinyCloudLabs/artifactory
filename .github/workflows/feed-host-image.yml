@@ -107,12 +107,11 @@ jobs:
             --cvm-id feed-host \
             --compose /tmp/feed-host-compose.yml \
             --no-public-logs \
-            --no-public-sysinfo \
-            --wait
+            --no-public-sysinfo
 
       - name: Verify Feed Host rollout
         run: |
-          for _ in {1..24}; do
+          for _ in {1..90}; do
             if curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health"; then
               delegate_did="$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')"
               test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
