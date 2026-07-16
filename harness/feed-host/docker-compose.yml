@@ -2,7 +2,7 @@ services:
   feed-host:
     # Phala stores Compose without shell interpolation, so production pins the
     # published linux/amd64 digest directly.
-    image: ghcr.io/tinycloudlabs/feed-host@sha256:353a6242a10981149890fb7b2f1936822caa3c138d652e0d8d6823cab5ccbfd6
+    image: ghcr.io/tinycloudlabs/feed-host@sha256:a6785b9c1c6e393ee41873c971a7e7c0971cc7c8b3b8105238b4806aadef9c1d
     restart: unless-stopped
     ports:
       - "8787:8787"
