@@ -108,8 +108,13 @@ jobs:
 
       - name: Verify Feed Host rollout
         run: |
+          saw_update=0
           for _ in {1..90}; do
-            if curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health"; then
+            status="$(phala cvms get feed-host --json | jq --raw-output --exit-status '.status')"
+            if [[ "$status" = "updating" ]]; then
+              saw_update=1
+            fi
+            if [[ "$saw_update" = 1 && "$status" = "running" ]] && curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health"; then
               delegate_did="$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')"
               test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
               curl --fail --silent --show-error --max-time 15 https://api.feed.tinycloud.xyz/health
