@@ -18,6 +18,7 @@ RUN mkdir -p /home/bun/.tinycloud-feed-host \
   && chown -R bun:bun /app /home/bun/.tinycloud-feed-host
 
 USER bun
+ENV FEED_HOST_BUILD_SHA=$FEED_COMMIT
 ENV FEED_HOST_HOSTNAME=0.0.0.0 \
     FEED_HOST_PORT=8787 \
     FEED_HOST_STATE_DIR=/home/bun/.tinycloud-feed-host \

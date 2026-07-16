@@ -1,0 +1,41 @@
+name: Feed Host monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FEED_HOST_ORIGIN: https://api.feed.tinycloud.xyz
+    steps:
+      - name: Health
+        run: |
+          curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health" | jq -e '.ok == true and .serviceReady == true'
+
+      - name: Diagnostics alerts
+        env:
+          TOKEN: ${{ secrets.FEED_HOST_DIAGNOSTICS_TOKEN }}
+        run: |
+          if [[ -z "$TOKEN" ]]; then
+            echo "::warning::FEED_HOST_DIAGNOSTICS_TOKEN secret not set; skipping diagnostics probe."
+            exit 0
+          fi
+          status="$(curl --silent --output /tmp/diag.json --write-out '%{http_code}' --max-time 15 \
+            -H "Authorization: Bearer $TOKEN" "$FEED_HOST_ORIGIN/admin/diagnostics")"
+          if [[ "$status" == "404" ]]; then
+            echo "::warning::diagnostics endpoint not enabled on the deployed host yet (404); skipping."
+            exit 0
+          fi
+          test "$status" == "200"
+          firing="$(jq '[.actors[]?.alerts // {} | to_entries[] | select(.value == true) | .key] | unique' /tmp/diag.json)"
+          echo "alerts firing: $firing"
+          test "$(jq 'length' <<<"$firing")" -eq 0 || {
+            echo "::error::feed-host diagnostics alerts firing: $firing"
+            exit 1
+          }
