@@ -35,7 +35,18 @@ jobs:
           test "$status" == "200"
           firing="$(jq '[.actors[]?.alerts // {} | to_entries[] | select(.value == true) | .key] | unique' /tmp/diag.json)"
           echo "alerts firing: $firing"
-          test "$(jq 'length' <<<"$firing")" -eq 0 || {
-            echo "::error::feed-host diagnostics alerts firing: $firing"
+          # Acknowledged alerts (known, tracked issues) downgrade to warnings so the
+          # monitor only FAILS on new/unacknowledged alerts. Manage the list with:
+          #   gh variable set FEED_MONITOR_ACKED_ALERTS --body "alertA,alertB"
+          # Clear it the moment the tracked fix ships.
+          acked="${{ vars.FEED_MONITOR_ACKED_ALERTS }}"
+          acked_json="$(jq -Rc 'split(",") | map(gsub("\\s";"")) | map(select(length > 0))' <<<"$acked")"
+          unacked="$(jq --argjson acked "$acked_json" '[.[] | select(. as $a | $acked | index($a) | not)]' <<<"$firing")"
+          acked_firing="$(jq --argjson acked "$acked_json" '[.[] | select(. as $a | $acked | index($a))]' <<<"$firing")"
+          if [[ "$(jq 'length' <<<"$acked_firing")" -gt 0 ]]; then
+            echo "::warning::acknowledged alerts still firing (tracked, fix in flight): $acked_firing"
+          fi
+          test "$(jq 'length' <<<"$unacked")" -eq 0 || {
+            echo "::error::feed-host diagnostics alerts firing (unacknowledged): $unacked"
             exit 1
           }
