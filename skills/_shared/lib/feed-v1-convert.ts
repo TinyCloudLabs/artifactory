@@ -5,7 +5,14 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Artifact } from "./artifact.ts";
-import type { FeedArtifact, TranscriptSourceRef } from "./feed-v1.ts";
+import type {
+  CredentialMode,
+  EgressClass,
+  FeedArtifact,
+  ProviderClass,
+  RuntimeClass,
+  TranscriptSourceRef,
+} from "./feed-v1.ts";
 import { validateFeedArtifact } from "./feed-v1.ts";
 
 export type FeedV1ConvertOptions = {
@@ -15,6 +22,19 @@ export type FeedV1ConvertOptions = {
   runId?: string;
   // Disclosure copy shown to the user for this producer path.
   disclosureCopy?: string;
+  // Production workers pass the authoritative Listen refs returned by the
+  // fenced source API. Local dev imports may omit this and hash local files.
+  sourceRefs?: TranscriptSourceRef[];
+  packageId?: string;
+  packageVersion?: string;
+  packageDigest?: string;
+  model?: string;
+  producer?: {
+    runtimeClass: RuntimeClass;
+    providerClass: ProviderClass;
+    credentialOwner: CredentialMode;
+    egressClass: EgressClass;
+  };
 };
 
 function sha256(value: string): string {
@@ -40,10 +60,15 @@ function normalizeArtifactType(type: string): string {
 function bodyForFeed(artifact: Artifact): Record<string, unknown> {
   return {
     markdown: artifact.body ?? artifact.quote ?? "",
+    headline: artifact.headline,
+    body: artifact.body,
+    ...(artifact.hero_image ? { hero_image: artifact.hero_image } : {}),
     quote: artifact.quote,
     attribution: artifact.attribution,
     tags: artifact.tags,
     sourceQuotes: artifact.source_quotes ?? [],
+    quality: artifact.quality,
+    generation_model: artifact.generation_model,
     legacyArtifactId: artifact.id,
     legacyArtifactType: artifact.type,
   };
@@ -76,13 +101,20 @@ async function sourceRefsFor(artifact: Artifact, observedAt: string): Promise<Tr
 
 export async function toFeedArtifact(artifact: Artifact, options: FeedV1ConvertOptions = {}): Promise<FeedArtifact> {
   const skill = options.skill ?? "extract-insights";
-  const packageId = `artifactory.${skill}`;
+  const packageId = options.packageId ?? `artifactory.${skill}`;
+  const packageVersion = options.packageVersion ?? "dev";
   const now = new Date().toISOString();
   const createdAt = Number.isNaN(Date.parse(artifact.generated_at)) ? now : artifact.generated_at;
   const runId = options.runId ?? `run-dev-${skill}-${compactId(`${artifact.id}:${createdAt}`)}`;
-  const packageDigest = sha256(`${packageId}@dev`);
-  const sourceRefs = await sourceRefsFor(artifact, createdAt);
+  const packageDigest = options.packageDigest ?? sha256(`${packageId}@${packageVersion}`);
+  const sourceRefs = options.sourceRefs ?? await sourceRefsFor(artifact, createdAt);
   const body = bodyForFeed(artifact);
+  const producer = options.producer ?? {
+    runtimeClass: "local" as const,
+    providerClass: "local" as const,
+    credentialOwner: "none" as const,
+    egressClass: "none" as const,
+  };
   const sourceFingerprint = sha256(JSON.stringify(sourceRefs.map((source) => [source.sourceId, source.observedHash])));
   const artifactFingerprint = sha256(JSON.stringify({ headline: artifact.headline, body, generatedAt: artifact.generated_at }));
   const feedArtifact: FeedArtifact = {
@@ -93,22 +125,23 @@ export async function toFeedArtifact(artifact: Artifact, options: FeedV1ConvertO
     title: artifact.headline,
     summary: summaryFor(artifact),
     body,
-    renderHints: { legacySkill: skill },
+    renderHints: {
+      legacySkill: skill,
+      generationModel: options.model ?? artifact.generation_model ?? "unknown",
+      quality: artifact.quality,
+    },
     sourceRefs,
     producedBy: {
       packageId,
-      packageVersion: "dev",
+      packageVersion,
       packageDigest,
       runId,
-      runtimeClass: "local",
-      providerClass: "none",
-      credentialOwner: "none",
-      egressClass: "none",
+      ...producer,
       disclosure: {
         userCopy: options.disclosureCopy ?? `Local dev import from the Artifactory ${skill} skill.`,
-        credentialOwner: "none",
-        providerClass: "none",
-        egressClass: "none",
+        credentialOwner: producer.credentialOwner,
+        providerClass: producer.providerClass,
+        egressClass: producer.egressClass,
       },
     },
     freshness: {

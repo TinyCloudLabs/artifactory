@@ -160,6 +160,12 @@ describe("Feed v1 contracts", () => {
     expect(result.ok).toBe(true);
   });
 
+  test("accepts the fenced Host source API when the underlying storage path is abstracted", () => {
+    const value = artifact();
+    value.sourceRefs[0] = { ...value.sourceRefs[0]!, observedPath: "host_source_api" };
+    expect(validateFeedArtifact(value)).toEqual({ ok: true, value });
+  });
+
   test("keeps pre-post feed.artifact.v1 documents valid as an explicit additive compatibility policy", () => {
     const oldArtifact = artifact();
     expect(oldArtifact.posts).toBeUndefined();
