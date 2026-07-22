@@ -10,8 +10,10 @@ import { join } from "node:path";
 import { toFeedArtifact } from "../../skills/_shared/lib/feed-v1-convert.ts";
 import type { FeedArtifact, TranscriptSourceRef } from "../../skills/_shared/lib/feed-v1.ts";
 import {
+  ArtifactQualityRejectedError,
   generateInsightArtifact,
   HeroGenerationError,
+  preflightFfmpeg,
   sourceTranscriptPath,
   type GenerationInput,
   type GenerationSource,
@@ -35,7 +37,7 @@ export type WorkerConfig = {
   claimOwner: string;
   leaseSeconds: number;
   heartbeatMs: number;
-  requireHero: boolean;
+  ffmpegPath: string;
   packageVersion: string;
   packageDigest?: string;
   once: boolean;
@@ -231,7 +233,7 @@ export function configFromEnv(argv: string[] = []): WorkerConfig {
       1,
       Math.max(1, leaseSeconds * 1_000 - 1),
     ),
-    requireHero: process.env.FEED_WORKER_REQUIRE_HERO !== "0",
+    ffmpegPath: process.env.FEED_WORKER_FFMPEG_PATH?.trim() || Bun.which("ffmpeg") || "ffmpeg",
     packageVersion: requiredEnv("FEED_WORKER_PACKAGE_VERSION"),
     packageDigest: requiredEnv("FEED_WORKER_PACKAGE_DIGEST"),
     once: process.env.FEED_WORKER_ONCE === "1",
@@ -671,55 +673,75 @@ export async function processRequest(
       const feedArtifacts: FeedArtifact[] = [];
       if (config.sourceMode === "local" || (generationSources?.length ?? 0) > 0) {
         const startedAt = performance.now();
-        const artifact = await generate({
-          requestId,
-          prompt: request.prompt,
-          transcriptDirs: config.transcriptDirs,
-          sources: generationSources,
-          model: config.model,
-          generator: config.generator,
-          requireHero: config.requireHero,
-          log: (message, fields, level = "info") => logLine(level, message, { requestId, ...fields }),
-        });
-        heartbeat.throwIfFailed();
-        await ledger.event(requestId, "generated", {
-          quotesVerified: artifact.quality.quotes_verified,
-          criticPass: artifact.quality.critic_pass,
-          heroAttached: Boolean(artifact.hero_image),
-          ms: Math.round(performance.now() - startedAt),
-        });
+        try {
+          const artifact = await generate({
+            requestId,
+            prompt: request.prompt,
+            transcriptDirs: config.transcriptDirs,
+            sources: generationSources,
+            model: config.model,
+            generator: config.generator,
+            ffmpegPath: config.ffmpegPath,
+            log: (message, fields, level = "info") => logLine(level, message, { requestId, ...fields }),
+          });
+          heartbeat.throwIfFailed();
+          await ledger.event(requestId, "generated", {
+            quotesVerified: artifact.quality.quotes_verified,
+            criticPass: artifact.quality.critic_pass,
+            heroAttached: Boolean(artifact.hero_image),
+            ms: Math.round(performance.now() - startedAt),
+          });
 
-        if (!request.runId) throw new Error(`claimed request ${requestId} has no runId`);
-        const sourceRefs = sources ? sourceRefsForBatch(sources, artifact, request.createdAt) : undefined;
-        if (sources) cursorAfter = committedCursorForArtifact(sources, artifact);
-        const feedArtifact = await toFeedArtifact(artifact, {
-          skill: "extract-insights",
-          runId: request.runId,
-          sourceRefs,
-          packageId: request.packageId ?? config.workflowId,
-          packageVersion: config.packageVersion,
-          packageDigest: config.packageDigest,
-          producer: config.generator === "stub"
-            ? {
-                runtimeClass: "stub",
-                providerClass: "none",
-                credentialOwner: "none",
-                egressClass: "none",
-              }
+          if (!request.runId) throw new Error(`claimed request ${requestId} has no runId`);
+          const sourceRefs = sources ? sourceRefsForBatch(sources, artifact, request.createdAt) : undefined;
+          if (sources) cursorAfter = committedCursorForArtifact(sources, artifact);
+          const feedArtifact = await toFeedArtifact(artifact, {
+            skill: "extract-insights",
+            runId: request.runId,
+            sourceRefs,
+            packageId: request.packageId ?? config.workflowId,
+            packageVersion: config.packageVersion,
+            packageDigest: config.packageDigest,
+            producer: config.generator === "stub"
+              ? {
+                  runtimeClass: "stub",
+                  providerClass: "none",
+                  credentialOwner: "none",
+                  egressClass: "none",
+                }
+              : {
+                  runtimeClass: config.sourceMode === "host" ? "hosted_private" : "local",
+                  providerClass: "user_byok",
+                  credentialOwner: workerCredentialMode(),
+                  egressClass: "media_provider",
+                },
+            model: artifact.generation_model ?? config.model,
+            disclosureCopy: config.sourceMode === "host"
+              ? "Generated privately by the Feed worker from delegated Listen sources using configured model providers."
+              : "Generated by the explicitly selected local transcript fallback.",
+          });
+          feedArtifacts.push(feedArtifact);
+          if (config.sourceMode === "local") {
+            cursorAfter = { completedRequestId: requestId, generatedAt: artifact.generated_at, source: "local" };
+          }
+        } catch (error) {
+          if (!(error instanceof ArtifactQualityRejectedError)) throw error;
+          // A twice-rejected card is a valid typed completion, not an
+          // operational failure. Consume the fenced batch so a later request
+          // does not loop over the same below-floor generation indefinitely.
+          cursorAfter = sources
+            ? committedCursorForSourcePaths(sources, error.sourceTranscripts)
             : {
-                runtimeClass: config.sourceMode === "host" ? "hosted_private" : "local",
-                providerClass: "user_byok",
-                credentialOwner: workerCredentialMode(),
-                egressClass: artifact.hero_image ? "media_provider" : "model_provider",
-              },
-          model: artifact.generation_model ?? config.model,
-          disclosureCopy: config.sourceMode === "host"
-            ? "Generated privately by the Feed worker from delegated Listen sources using configured model providers."
-            : "Generated by the explicitly selected local transcript fallback.",
-        });
-        feedArtifacts.push(feedArtifact);
-        if (config.sourceMode === "local") {
-          cursorAfter = { completedRequestId: requestId, generatedAt: artifact.generated_at, source: "local" };
+                completedRequestId: requestId,
+                generatedAt: new Date().toISOString(),
+                source: "local",
+              };
+          await ledger.event(requestId, "quality_zero_artifacts", {
+            attempts: 2,
+            issueCount: error.issues.length,
+            detail: "quality_attempts_exhausted",
+            ms: Math.round(performance.now() - startedAt),
+          });
         }
       }
       await client.phase(request, "validating", {
@@ -809,11 +831,15 @@ export async function processRequest(
     }
 
     const failureInfo = classifyFailure(failure);
+    const finalAttempt = request.attemptCount >= request.maxAttempts;
     try {
       const terminal = await client.retry(request, {
         errorCode: failureInfo.code,
         errorMessage: note,
-        retryable: failureInfo.retryable,
+        // Never rely on the Host to infer exhaustion from a claim it already
+        // handed out. The last attempt explicitly requests dead-lettering so
+        // dedupe can release the terminal request.
+        retryable: finalAttempt ? false : failureInfo.retryable,
         retryAfterSeconds: Math.max(1, Math.ceil(config.pollMs / 1_000)),
       });
       const state = terminal.status === "dead_letter" ? "dead_letter" : terminal.status === "cancelled" ? "cancelled" : "retry_wait";
@@ -825,6 +851,7 @@ export async function processRequest(
       await ledger.event(requestId, "attempt_failed", {
         attempt: request.attemptCount,
         errorCode: failureInfo.code,
+        detail: failureInfo.detail,
         terminalStatus: terminal.status,
       });
       return true;
@@ -910,7 +937,14 @@ function committedCursorForArtifact(
   batch: ListenSourceBatch,
   artifact: Awaited<ReturnType<typeof generateInsightArtifact>>,
 ): ListenSourceCursor | null {
-  const usedPaths = new Set(artifact.source_transcripts);
+  return committedCursorForSourcePaths(batch, artifact.source_transcripts);
+}
+
+function committedCursorForSourcePaths(
+  batch: ListenSourceBatch,
+  sourcePaths: string[],
+): ListenSourceCursor | null {
+  const usedPaths = new Set(sourcePaths);
   let lastUsedIndex = -1;
   for (const [index, source] of batch.items.entries()) {
     if (usedPaths.has(sourceTranscriptPath(source.conversationId))) lastUsedIndex = index;
@@ -1007,13 +1041,21 @@ function isLeaseLost(error: unknown): boolean {
   return error instanceof WorkerApiError && error.status === 409 && error.code === "stale_generation_lease";
 }
 
-function classifyFailure(error: unknown): { code: string; retryable: boolean } {
-  if (error instanceof HeroGenerationError) return { code: error.code, retryable: error.retryable };
-  if (error instanceof PublicationConflictError || error instanceof ArtifactPayloadError) {
-    return { code: error.code, retryable: error.retryable };
+function classifyFailure(error: unknown): { code: string; retryable: boolean; detail: string } {
+  if (error instanceof HeroGenerationError) {
+    return { code: error.code, retryable: error.retryable, detail: error.detail };
   }
-  if (error instanceof WorkerApiError) return { code: error.code.replace(/[^a-z0-9_.-]/gi, "_").slice(0, 100), retryable: error.retryable };
-  return { code: "generation_failed", retryable: true };
+  if (error instanceof PublicationConflictError || error instanceof ArtifactPayloadError) {
+    return { code: error.code, retryable: error.retryable, detail: scrubErrorNote(error) };
+  }
+  if (error instanceof WorkerApiError) {
+    return {
+      code: error.code.replace(/[^a-z0-9_.-]/gi, "_").slice(0, 100),
+      retryable: error.retryable,
+      detail: scrubErrorNote(error),
+    };
+  }
+  return { code: "generation_failed", retryable: true, detail: scrubErrorNote(error) };
 }
 
 export async function runWorker(config: WorkerConfig): Promise<void> {
@@ -1022,6 +1064,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
   }
   if (!config.actorId) throw new Error("FEED_ACTOR_ID is required for the Feed Host worker API");
   if (!config.token) throw new Error("FEED_HOST_TOKEN is required for the Feed Host worker API");
+  await preflightFfmpeg(config.ffmpegPath);
 
   const client = new FeedHostClient(config);
   const ledger = new LedgerWriter(config.runsDir);
@@ -1036,7 +1079,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
     ...(config.sourceMode === "local" ? { transcriptDirCount: config.transcriptDirs.length } : {}),
     pollMs: config.pollMs,
     leaseSeconds: config.leaseSeconds,
-    requireHero: config.requireHero,
+    ffmpegPath: config.ffmpegPath,
     once: config.once,
   });
 

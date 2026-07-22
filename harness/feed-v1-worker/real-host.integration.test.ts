@@ -155,7 +155,7 @@ function integrationConfig(hostUrl: string, runsDir: string): WorkerConfig {
     claimOwner: "real-host-worker",
     leaseSeconds: 15,
     heartbeatMs: 5,
-    requireHero: true,
+    ffmpegPath: Bun.which("ffmpeg") || "ffmpeg",
     packageVersion: "worker-integration-v1",
     packageDigest: "sha256:worker-integration-package",
     once: true,
