@@ -1,17 +1,22 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "../../skills/_shared/lib/artifact.ts";
 import { validateFeedArtifact } from "../../skills/_shared/lib/feed-v1.ts";
 import {
+  ArtifactQualityRejectedError,
   attachHeroImage,
   claudeCommand,
+  criticCommand,
   generateInsightArtifact,
   HeroGenerationError,
+  markdownWordCount,
   parseDraft,
+  resizeHeroImage,
   STUB_HERO_DATA_URI,
+  type DraftCard,
 } from "./generate.ts";
 import {
   FeedHostClient,
@@ -19,6 +24,7 @@ import {
   LedgerWriter,
   PublicationConflictError,
   processRequest,
+  runWorker,
   scrubErrorNote,
   WorkerApiError,
   type ListenSourceItem,
@@ -254,7 +260,7 @@ function workerConfig(baseDir: string): WorkerConfig {
     claimOwner: "worker-test",
     leaseSeconds: 15,
     heartbeatMs: 5,
-    requireHero: true,
+    ffmpegPath: Bun.which("ffmpeg") || "ffmpeg",
     packageVersion: "worker-test-v1",
     packageDigest: "sha256:worker-test-package",
     once: true,
@@ -280,8 +286,34 @@ function heroFixture(): Artifact {
   };
 }
 
+const EXACT_SOURCE_QUOTE = "The interesting part is that nobody else has noticed the projection reconciliation cost grows with every artifact we publish.";
+const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function webpBytes(size = 12): Uint8Array {
+  const bytes = new Uint8Array(Math.max(12, size));
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8);
+  return bytes;
+}
+
+function floorBody(): string {
+  return Array.from({ length: 160 }, (_, index) => `grounded${index + 1}`).join(" ");
+}
+
+function aboveFloorDraft(overrides: Partial<DraftCard> = {}): DraftCard {
+  return {
+    headline: "Reconciliation becomes the hidden scaling boundary",
+    body: floorBody(),
+    quote: EXACT_SOURCE_QUOTE,
+    attribution: "Bob",
+    tags: ["reconciliation", "operations"],
+    source_quotes: [{ transcript: "listen:listen-conversation-1", quote: EXACT_SOURCE_QUOTE }],
+    ...overrides,
+  };
+}
+
 describe("feed-v1 worker hero policy", () => {
-  test("stub generation always includes a deterministic valid inline PNG hero", async () => {
+  test("stub generation meets the floor with a deterministic critic and compressed WebP hero", async () => {
     const dir = await makeTranscriptDir();
     const artifact = await generateInsightArtifact({
       requestId: "req-gen-1",
@@ -291,14 +323,17 @@ describe("feed-v1 worker hero policy", () => {
       generator: "stub",
     });
     expect(artifact.quality.quotes_verified).toBe(true);
-    expect(artifact.quality.critic_pass).toBe(false);
+    expect(artifact.quality.critic_pass).toBe(true);
+    expect(markdownWordCount(artifact.body!)).toBeGreaterThanOrEqual(150);
+    expect(markdownWordCount(artifact.body!)).toBeLessThanOrEqual(300);
+    expect(artifact.tags).toHaveLength(2);
     expect(artifact.hero_image).toBe(STUB_HERO_DATA_URI);
-    expect(Buffer.from(artifact.hero_image!.split(",", 2)[1]!, "base64").subarray(1, 4).toString()).toBe("PNG");
+    expect(Buffer.from(artifact.hero_image!.split(",", 2)[1]!, "base64").subarray(0, 4).toString()).toBe("RIFF");
   });
 
-  test("an unverifiable card-face pull quote is not published or marked verified", async () => {
-    const sourceQuote = "The interesting part is that nobody else has noticed the projection reconciliation cost grows with every artifact we publish.";
-    const artifact = await generateInsightArtifact({
+  test("an unverifiable pull quote triggers one feedback regeneration and typed quality rejection", async () => {
+    const calls: Array<{ attempt: number; feedback: string[] }> = [];
+    const generation = generateInsightArtifact({
       requestId: "req-unverified-pull-quote",
       prompt: null,
       transcriptDirs: [],
@@ -312,21 +347,19 @@ describe("feed-v1 worker hero policy", () => {
       }],
       model: "test-model",
       generator: "stub",
-      draftGenerator: async () => ({
-        headline: "Grounded body, fabricated pull quote",
-        body: "The body is grounded by an exact source quote.",
-        quote: "This sentence does not occur in the source.",
-        attribution: "Alice",
-        tags: ["verification"],
-        source_quotes: [{ transcript: "listen:listen-conversation-1", quote: sourceQuote }],
-      }),
+      draftGenerator: async ({ attempt, feedback }) => {
+        calls.push({ attempt, feedback });
+        return aboveFloorDraft({
+          quote: "This sentence does not occur in the source.",
+          attribution: undefined,
+          source_quotes: [],
+        });
+      },
     });
-    expect(artifact.quote).toBeUndefined();
-    expect(artifact.attribution).toBeUndefined();
-    expect(artifact.source_quotes).toEqual([
-      { transcript: "listen:listen-conversation-1", quote: sourceQuote },
-    ]);
-    expect(artifact.quality.quotes_verified).toBe(false);
+    await expect(generation).rejects.toBeInstanceOf(ArtifactQualityRejectedError);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({ attempt: 1, feedback: [] });
+    expect(calls[1]!.feedback.join(" ")).toContain("pull quote");
   });
 
   test("required hero failures are typed, while opt-out logs a warning and returns text-only", async () => {
@@ -335,7 +368,7 @@ describe("feed-v1 worker hero policy", () => {
     };
     await expect(attachHeroImage(heroFixture(), { requireHero: true, generate: failingSource })).rejects.toMatchObject({
       name: "HeroGenerationError",
-      code: "hero_generation_failed",
+      code: "provider_error",
       reason: "provider_error",
     } satisfies Partial<HeroGenerationError>);
 
@@ -357,13 +390,13 @@ describe("feed-v1 worker hero policy", () => {
       requireHero: true,
       generate: async ({ prompt }) => {
         prompts.push(prompt);
-        return { mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) };
+        return { mimeType: "image/png", bytes: PNG_SIGNATURE };
       },
       process: async ({ width, quality }) => {
         profiles.push({ width, quality });
         return profiles.length === 1
-          ? { mimeType: "image/png", bytes: new Uint8Array(800_000) }
-          : { mimeType: "image/webp", bytes: new Uint8Array([1, 2, 3]) };
+          ? { mimeType: "image/webp", bytes: webpBytes(800_000) }
+          : { mimeType: "image/webp", bytes: webpBytes() };
       },
     });
     expect(prompts).toHaveLength(1);
@@ -379,6 +412,70 @@ describe("feed-v1 worker hero policy", () => {
     expect(args).toContain("--mcp-config");
     expect(args).toContain("--tools");
     expect(args.join(" ")).not.toContain("transcript");
+    expect(criticCommand()).toContain("sonnet");
+  });
+
+  test("an above-floor card obeys a separately spawned Sonnet critic mocked at the process boundary", async () => {
+    const processCalls: Array<{ command: string[]; stdin: string; operation: string }> = [];
+    const draftFeedback: string[][] = [];
+
+    const artifact = await generateInsightArtifact({
+      requestId: "real-critic-boundary",
+      prompt: null,
+      transcriptDirs: [],
+      sources: [{
+        sourceId: "listen-conversation-1",
+        title: "Weekly sync",
+        startedAt: "2026-07-17T12:00:00.000Z",
+        transcript: TRANSCRIPT,
+        transcriptSha256: `sha256:${createHash("sha256").update(TRANSCRIPT).digest("hex")}`,
+        truncated: false,
+      }],
+      model: "generator-model",
+      generator: "claude",
+      draftGenerator: async ({ feedback }) => {
+        draftFeedback.push(feedback);
+        return aboveFloorDraft();
+      },
+      criticProcessRunner: async (command, stdin, operation) => {
+        processCalls.push({ command, stdin, operation });
+        return processCalls.length === 1
+          ? '{"verdict":"reject","feedback":["make the editorial angle sharper"],"notes":"needs focus"}'
+          : '{"verdict":"pass","feedback":[],"notes":"grounded and sharp"}';
+      },
+      heroImageGenerator: async () => ({ mimeType: "image/png", bytes: PNG_SIGNATURE }),
+      heroImageProcessor: async () => ({ mimeType: "image/webp", bytes: webpBytes() }),
+    });
+    expect(artifact.quality).toMatchObject({ critic_pass: true, quotes_verified: true });
+    expect(artifact.hero_image).toStartWith("data:image/webp;base64,");
+    expect(processCalls).toHaveLength(2);
+    expect(draftFeedback).toHaveLength(2);
+    expect(draftFeedback[1]).toEqual(["make the editorial angle sharper"]);
+    expect(processCalls[0]!.operation).toBe("critic");
+    expect(processCalls[0]!.command.join(" ")).toContain("--model sonnet");
+    expect(processCalls[0]!.command.join(" ")).not.toContain("projection reconciliation cost");
+    expect(processCalls[0]!.stdin).toContain("projection reconciliation cost");
+  });
+
+  test("hero failures expose bounded distinct reasons and logged details", async () => {
+    const invalidLogs: Array<Record<string, unknown>> = [];
+    await expect(attachHeroImage(heroFixture(), {
+      requireHero: true,
+      generate: async () => ({ mimeType: "application/octet-stream", bytes: new Uint8Array([1]) }),
+      log: (_event, fields) => invalidLogs.push(fields ?? {}),
+    })).rejects.toMatchObject({ reason: "invalid_image", code: "invalid_image" });
+    expect(invalidLogs.at(-1)).toMatchObject({ reason: "invalid_image", detail: expect.any(String) });
+
+    const oversizeLogs: Array<Record<string, unknown>> = [];
+    await expect(attachHeroImage(heroFixture(), {
+      requireHero: true,
+      generate: async () => ({ mimeType: "image/png", bytes: PNG_SIGNATURE }),
+      process: async () => ({ mimeType: "image/webp", bytes: webpBytes(600_000) }),
+      log: (_event, fields) => oversizeLogs.push(fields ?? {}),
+    })).rejects.toMatchObject({ reason: "media_too_large", code: "media_too_large" });
+    const failure = oversizeLogs.at(-1)!;
+    expect(failure).toMatchObject({ reason: "media_too_large", detail: expect.any(String) });
+    expect(String(failure.detail).length).toBeLessThanOrEqual(300);
   });
 });
 
@@ -474,7 +571,9 @@ describe("Feed Host worker API client", () => {
     const config = workerConfig(dir);
     const host = mockWorkerHost({ unauthorized: true });
     const client = clientFor(host, config);
-    const error = await client.claim().catch((value) => value as WorkerApiError);
+    const result = await client.claim().catch((value: unknown) => value);
+    if (!(result instanceof WorkerApiError)) throw new Error("expected claim to fail with WorkerApiError");
+    const error = result;
     expect(error).toBeInstanceOf(WorkerApiError);
     expect(error).toMatchObject({ status: 401, code: "unauthorized", retryable: false });
     expect(error.message).toContain("missing or invalid worker bearer token");
@@ -522,9 +621,9 @@ describe("feed-v1 worker flow", () => {
         observedHash: `sha256:${createHash("sha256").update(TRANSCRIPT).digest("hex")}`,
       });
       expect((published.value.body as Record<string, unknown>).quality).toEqual({
-        critic_pass: false,
+        critic_pass: true,
         quotes_verified: true,
-        notes: expect.stringContaining("critic not run"),
+        notes: expect.stringContaining("critic passed"),
       });
       expect((published.value.body as Record<string, unknown>).hero_image).toBe(STUB_HERO_DATA_URI);
     }
@@ -584,7 +683,85 @@ describe("feed-v1 worker flow", () => {
       generate: async () => { throw new Error("provider failed"); },
     });
     expect(host.calls.filter((call) => call.action === "retry")).toHaveLength(1);
+    expect(host.calls.find((call) => call.action === "retry")?.body.retryable).toBe(false);
     expect(host.request).toMatchObject({ status: "dead_letter", phase: "dead_letter", leaseExpiresAt: null });
+  });
+
+  test("two below-floor drafts complete as terminal zero_artifacts with regeneration feedback", async () => {
+    const dir = await makeTranscriptDir();
+    const config = workerConfig(dir);
+    const host = mockWorkerHost();
+    const client = clientFor(host, config);
+    const claim = await client.claim();
+    const draftCalls: Array<{ attempt: number; feedback: string[] }> = [];
+    await processRequest(claim.request!, claim.committedCursor, client, new LedgerWriter(config.runsDir), config, {
+      generate: (input) => generateInsightArtifact({
+        ...input,
+        draftGenerator: async ({ attempt, feedback }) => {
+          draftCalls.push({ attempt, feedback });
+          return aboveFloorDraft({ quote: undefined, attribution: undefined, source_quotes: [] });
+        },
+      }),
+    });
+
+    expect(draftCalls).toHaveLength(2);
+    expect(draftCalls[0]!.feedback).toEqual([]);
+    expect(draftCalls[1]!.feedback.join(" ")).toContain("source quote");
+    expect(host.calls.some((call) => call.action === "retry")).toBe(false);
+    expect(host.calls.find((call) => call.action === "artifacts")?.body.artifacts).toEqual([]);
+    expect(host.calls.find((call) => call.action === "complete")?.body.outcome).toBe("zero_artifacts");
+    expect(host.request).toMatchObject({ status: "consumed", phase: "zero_artifacts", artifactIds: [] });
+    const events = await readFile(join(config.runsDir, "events.jsonl"), "utf8");
+    expect(events).toContain('"event":"quality_zero_artifacts"');
+  });
+
+  test("a dead ffmpeg stdin is typed, bounded, and completes the attempt lifecycle without crashing", async () => {
+    const dir = await makeTranscriptDir();
+    const fakeFfmpeg = join(dir, "ffmpeg-exits-now");
+    await writeFile(fakeFfmpeg, "#!/bin/sh\necho 'fake ffmpeg closed input' >&2\nexit 17\n");
+    await chmod(fakeFfmpeg, 0o755);
+    const config = workerConfig(dir);
+    config.ffmpegPath = fakeFfmpeg;
+    const host = mockWorkerHost();
+    const client = clientFor(host, config);
+    const claim = await client.claim();
+
+    const processed = await processRequest(
+      claim.request!,
+      claim.committedCursor,
+      client,
+      new LedgerWriter(config.runsDir),
+      config,
+      {
+        generate: async () => {
+          await resizeHeroImage({
+            image: { mimeType: "image/png", bytes: new Uint8Array(8 * 1024 * 1024) },
+            width: 768,
+            quality: 82,
+            executable: fakeFfmpeg,
+          });
+          throw new Error("unreachable");
+        },
+      },
+    );
+
+    expect(processed).toBe(true);
+    expect(host.calls.find((call) => call.action === "retry")?.body).toMatchObject({
+      errorCode: "image_processing_failed",
+      retryable: false,
+    });
+    expect(host.request).toMatchObject({ status: "dead_letter", phase: "dead_letter" });
+    const events = await readFile(join(config.runsDir, "events.jsonl"), "utf8");
+    expect(events).toContain('"errorCode":"image_processing_failed"');
+    expect(events).toContain('"detail":"fake ffmpeg closed input"');
+    expect(events).not.toContain("89504e47");
+  });
+
+  test("worker startup fails before polling when the named ffmpeg binary is missing", async () => {
+    const dir = await makeTranscriptDir();
+    const config = workerConfig(dir);
+    config.ffmpegPath = join(dir, "missing-ffmpeg-binary");
+    await expect(runWorker(config)).rejects.toThrow(`ffmpeg preflight failed for binary ${config.ffmpegPath}`);
   });
 
   test("cancellation at the publication boundary stops without reconciliation or completion", async () => {

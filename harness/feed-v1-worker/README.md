@@ -1,9 +1,9 @@
 # Feed v1 worker
 
 This worker claims Feed Host generation requests, reads bounded Listen source
-batches through the request's live fencing identity, generates one artifact,
-checkpoints an immutable publication manifest, reconciles the Feed projection,
-and completes the request.
+batches through the request's live fencing identity, generates and independently
+critiques one artifact, checkpoints an immutable publication manifest,
+reconciles the Feed projection, and completes the request.
 
 ## Required production environment
 
@@ -14,24 +14,38 @@ and completes the request.
   `FEED_HOST_WORKER_TOKEN`.
 - `FEED_WORKER_PACKAGE_VERSION`: exact reviewed worker package version.
 - `FEED_WORKER_PACKAGE_DIGEST`: immutable digest for that reviewed build.
-- One Claude credential inherited by the headless subprocess:
+- One Claude credential inherited by the separate generator and Sonnet critic
+  subprocesses:
   `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
 - One Gemini image credential from the shared secrets precedence chain:
   `GOOGLE_AI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`.
 - `ffmpeg` on `PATH`, with WebP encoding support, for the mandatory local
-  resize/compression pass.
+  resize/compression pass. `FEED_WORKER_FFMPEG_PATH` can name an explicit
+  binary. Startup runs that binary with `-version` once and fails before
+  polling if it is missing or unhealthy.
 
 `FEED_WORKER_SOURCE=host` is the default and production setting. The worker
 requests at most `FEED_WORKER_SOURCE_BATCH_LIMIT` sources per claimed request
 (default 5, Host maximum 10) and carries the returned cursor into completion.
 
-`FEED_WORKER_REQUIRE_HERO=1` is the default. Set it to `0` only for explicit
-CI/no-key runs; the worker emits a warning and publishes text-only output.
-`FEED_WORKER_GENERATOR=stub` uses deterministic text and a tiny PNG without a
-provider call.
+Every published card has a sharp headline, a 150-300 word markdown body, an
+exact verified pull quote with attribution, at least one exact verified source
+quote, 2-5 tags, a passing independent critic verdict, and a bounded WebP hero.
+A below-floor draft is regenerated once with critic/floor feedback. A second
+rejection completes the queue request as `zero_artifacts`; provider and
+subprocess transport failures retain the normal attempt retry lifecycle.
+`FEED_WORKER_GENERATOR=stub` uses deterministic text, a deterministic no-spend
+critic, and a tiny WebP without provider calls.
 
 Both package provenance values are mandatory. The worker fails at startup when
 either is absent rather than publishing a placeholder version or derived label.
+
+Host follow-up for the architect: the claim endpoint should emit a Host-owned
+event when it skips an already exhausted request. An empty claim response does
+not expose skipped request IDs or attempt counts, so the worker cannot truthfully
+produce that diagnostic. The worker does explicitly send `retryable=false` for
+the final claimed attempt, which drives that request to `dead_letter` and frees
+dedupe without guessing about unobserved claim candidates.
 
 ## Explicit local-source fallback
 
@@ -49,12 +63,13 @@ copying the file or its values into this repository.
 
 ## Transcript privacy boundary
 
-Listen transcript bytes remain in memory. They are sent to `claude -p` only on
-stdin, never argv. The subprocess inherits its container credential environment
-and runs with no tools, no MCP servers, `--no-session-persistence`, and explicit
-network/shell/file-tool denials. Logs and run-directory metadata contain only
-counts, sizes, timing, artifact IDs, and publication hashes. Provider stderr,
-model output excerpts, source text, and raw transcript bytes are not recorded.
+Listen transcript bytes remain in memory. They are sent to both `claude -p`
+subprocesses only on stdin, never argv. Each subprocess inherits its container
+credential environment and runs with no tools, no MCP servers,
+`--no-session-persistence`, and explicit network/shell/file-tool denials. Logs
+and run-directory metadata contain only counts, sizes, timing, bounded typed
+failure detail, artifact IDs, and publication hashes. Provider stderr, model
+output excerpts, source text, and raw transcript bytes are not recorded.
 
 ## Real Host integration
 

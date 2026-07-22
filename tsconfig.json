@@ -24,6 +24,7 @@
   "include": [
     "skills/**/*.ts",
     "harness/feed-run/**/*.ts",
+    "harness/feed-v1-worker/**/*.ts",
     "harness/index-corpus/**/*.ts",
     "harness/query-corpus/**/*.ts",
     "harness/distill-preferences/**/*.ts",
