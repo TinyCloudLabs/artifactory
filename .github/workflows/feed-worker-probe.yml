@@ -1,0 +1,57 @@
+name: Feed Worker image probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Worker image ref (digest-pinned)"
+        required: true
+        default: "ghcr.io/tinycloudlabs/feed-worker@sha256:074aea73d7ff08b4525e2e815f0c8692b0799a52b584e816c64460919fecebd9"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull worker image
+        run: docker pull "${{ inputs.image }}"
+
+      - name: ffmpeg preflight inside image
+        run: |
+          docker run --rm "${{ inputs.image }}" ffmpeg -version | head -1
+
+      - name: claude CLI version + auth-free sanity
+        run: |
+          docker run --rm "${{ inputs.image }}" claude --version
+
+      - name: claude -p with API key (the prod judgment path)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.FEED_ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          out=$(timeout 180 docker run --rm -e ANTHROPIC_API_KEY \
+            "${{ inputs.image }}" \
+            claude -p "Reply with exactly: CONTAINER_OK" --model sonnet 2>&1)
+          code=$?
+          echo "exit=$code"
+          echo "$out" | head -20
+          exit $code
+
+      - name: Gemini key reachability (models list, no content)
+        env:
+          GEMINI_API_KEY: ${{ secrets.FEED_GEMINI_API_KEY }}
+        run: |
+          status=$(curl -s -o /tmp/gem.json -w '%{http_code}' \
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1" \
+            -H "x-goog-api-key: $GEMINI_API_KEY")
+          echo "gemini_models_http=$status"
+          test "$status" = "200"
