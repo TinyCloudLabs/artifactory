@@ -134,7 +134,7 @@ export type TranscriptSourceRef = {
   sourceRefId: string;
   sourceKind: "listen_conversation";
   sourceId: string;
-  observedPath: "kv_transcript" | "sql_transcript_json" | "sql_transcript_text";
+  observedPath: "kv_transcript" | "sql_transcript_json" | "sql_transcript_text" | "host_source_api";
   observedHash: HashString;
   observedAt: IsoDateString;
   quoteLineRefs?: string[];
@@ -867,7 +867,7 @@ export function validateTranscriptSourceRef(value: unknown): ValidationResult<Tr
     addRequired(errors, obj, field, "string");
   }
   if (obj.sourceKind !== "listen_conversation") errors.push("sourceKind: must be listen_conversation");
-  if (!["kv_transcript", "sql_transcript_json", "sql_transcript_text"].includes(String(obj.observedPath))) {
+  if (!["kv_transcript", "sql_transcript_json", "sql_transcript_text", "host_source_api"].includes(String(obj.observedPath))) {
     errors.push("observedPath: invalid transcript path kind");
   }
   addIso(errors, obj.observedAt, "observedAt");

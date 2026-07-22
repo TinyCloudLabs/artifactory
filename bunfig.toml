@@ -1,0 +1,10 @@
+[test]
+preload = ["./tests/no-spend-setup.ts"]
+
+# Only suites that actually bind local ports are excluded from the sandboxed
+# root gate. The rest of harness/feed remains part of `bun test`.
+pathIgnorePatterns = [
+  "harness/feed/tests/server.test.ts",
+  "harness/agent/edge-proxy/worker.test.ts",
+  "harness/feed-v1-worker/real-host.integration.test.ts",
+]

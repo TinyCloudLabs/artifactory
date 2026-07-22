@@ -19,6 +19,8 @@ export interface GenerateImageOptions {
   prompt: string;
   /** e.g. "16:9" (default), "1:1", "9:16". */
   aspectRatio?: string;
+  /** Gemini image output size. The worker uses the smallest supported size. */
+  imageSize?: "1K" | "2K" | "4K";
   apiKey?: string;
 }
 
@@ -38,7 +40,10 @@ export async function generateImage(
     contents: [{ role: "user", parts: [{ text: opts.prompt }] }],
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: { aspectRatio: aspect },
+      imageConfig: {
+        aspectRatio: aspect,
+        ...(opts.imageSize ? { imageSize: opts.imageSize } : {}),
+      },
     },
   };
 
@@ -57,7 +62,7 @@ export async function generateImage(
       lastError = `${res.status}: ${text}`;
       if (
         attempt === 0 &&
-        (text.includes("imageConfig") || text.includes("aspectRatio"))
+        (text.includes("imageConfig") || text.includes("aspectRatio") || text.includes("imageSize"))
       ) {
         const cfg = { ...(baseBody.generationConfig as Record<string, unknown>) };
         delete cfg.imageConfig;
