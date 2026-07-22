@@ -1,0 +1,37 @@
+name: Feed Host logs
+
+on:
+  workflow_dispatch:
+    inputs:
+      container:
+        description: "Container to read (compose service name substring)"
+        required: false
+        default: "feed-worker"
+      tail:
+        description: "Lines from end"
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    env:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Phala CLI
+        run: npm install --global phala@1.1.12
+
+      - name: Fetch container logs
+        run: |
+          phala cvms logs feed-host \
+            --api-key "$PHALA_CLOUD_API_KEY" \
+            --container "${{ inputs.container }}" \
+            --tail "${{ inputs.tail }}" \
+            --timestamps
