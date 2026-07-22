@@ -16,8 +16,31 @@ services:
       TINYCLOUD_HOST: "https://node.tinycloud.xyz"
       # Injected as an encrypted Phala env at deploy; empty ⇒ /admin/diagnostics stays 404.
       FEED_HOST_DIAGNOSTICS_TOKEN: "${FEED_HOST_DIAGNOSTICS_TOKEN:-}"
+      # The same encrypted token is supplied to feed-worker below.
+      FEED_HOST_WORKER_TOKEN: "${FEED_HOST_WORKER_TOKEN:-}"
+      # Public actor DID. Empty keeps the proactive scheduler inert.
+      FEED_PROACTIVE_ACTOR_ID: "${FEED_PROACTIVE_ACTOR_ID:-}"
     volumes:
       - feed-host-state:/home/bun/.tinycloud-feed-host
 
+  feed-worker:
+    # Fail-closed bootstrap pin: CI replaces it with the just-published worker
+    # digest and verifies the rendered reference before every deployment.
+    image: ghcr.io/tinycloudlabs/feed-worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    restart: unless-stopped
+    depends_on:
+      feed-host:
+        condition: service_healthy
+    environment:
+      FEED_HOST_URL: "http://feed-host:8787"
+      FEED_ACTOR_ID: "${FEED_ACTOR_ID:-}"
+      FEED_HOST_TOKEN: "${FEED_HOST_WORKER_TOKEN:-}"
+      FEED_WORKER_SOURCE: "host"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    volumes:
+      - feed-worker-state:/home/feed-worker/.feed-v1-worker
+
 volumes:
   feed-host-state:
+  feed-worker-state:
