@@ -1,11 +1,19 @@
-name: Feed Host image
+name: Feed Host and Worker images
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "harness/feed-host/**"
+      - "harness/feed-v1-worker/**"
+      - "skills/_shared/lib/**"
+      - "submodules/feed"
+      - ".github/workflows/feed-host-image.yml"
   push:
     branches: [main]
     paths:
-      - "harness/feed-host/Dockerfile"
+      - "harness/feed-host/**"
+      - "harness/feed-v1-worker/**"
       - "skills/_shared/lib/**"
       - "submodules/feed"
       - ".github/workflows/feed-host-image.yml"
@@ -18,32 +26,54 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     outputs:
-      image_digest: ${{ steps.build.outputs.digest }}
+      host_image_digest: ${{ steps.build_host.outputs.digest }}
+      worker_image_digest: ${{ steps.build_worker.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.12
+
+      - name: Install worker test dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck worker source
+        run: bun run typecheck
+
+      - name: Test worker
+        run: bun test ./harness/feed-v1-worker/worker.test.ts --preload ./tests/no-spend-setup.ts
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Resolve source revisions
         id: revisions
-        run: echo "feed=$(git -C submodules/feed rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "feed=$(git -C submodules/feed rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "worker_version=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          worker_digest="$(git archive --format=tar HEAD harness/feed-v1-worker skills/_shared | sha256sum | awk '{print $1}')"
+          echo "worker_digest=sha256:$worker_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Validate production compose
+        run: docker compose -f harness/feed-host/docker-compose.yml config --quiet
 
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
-        id: meta
+        id: meta_host
         with:
           images: ghcr.io/tinycloudlabs/feed-host
           tags: type=sha,format=long
 
       - uses: docker/build-push-action@v6
-        id: build
+        id: build_host
         with:
           context: .
           file: harness/feed-host/Dockerfile
@@ -51,20 +81,45 @@ jobs:
           build-args: |
             ARTIFACTORY_COMMIT=${{ github.sha }}
             FEED_COMMIT=${{ steps.revisions.outputs.feed }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta_host.outputs.tags }}
+          labels: ${{ steps.meta_host.outputs.labels }}
+
+      - uses: docker/metadata-action@v5
+        id: meta_worker
+        with:
+          images: ghcr.io/tinycloudlabs/feed-worker
+          tags: type=sha,format=long
+
+      - uses: docker/build-push-action@v6
+        id: build_worker
+        with:
+          context: .
+          file: harness/feed-v1-worker/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            ARTIFACTORY_COMMIT=${{ github.sha }}
+            FEED_WORKER_PACKAGE_VERSION=${{ steps.revisions.outputs.worker_version }}
+            FEED_WORKER_PACKAGE_DIGEST=${{ steps.revisions.outputs.worker_digest }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta_worker.outputs.tags }}
+          labels: ${{ steps.meta_worker.outputs.labels }}
 
       - name: Verify the Phala CVM can pull anonymously
+        if: github.event_name != 'pull_request'
         run: |
           docker logout ghcr.io
-          docker pull '${{ steps.meta.outputs.tags }}'
+          docker pull '${{ steps.meta_host.outputs.tags }}'
+          docker pull '${{ steps.meta_worker.outputs.tags }}'
 
-      - name: Record immutable image digest
-        run: echo '${{ steps.build.outputs.digest }}'
+      - name: Record immutable image digests
+        run: |
+          echo 'feed-host ${{ steps.build_host.outputs.digest }}'
+          echo 'feed-worker ${{ steps.build_worker.outputs.digest }}'
 
   deploy:
     needs: publish
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -72,6 +127,10 @@ jobs:
       FEED_HOST_ORIGIN: https://1de7413de0a2c483b00c75e7cb3ece691ce4375f-8787.dstack-pha-prod5.phala.network
       PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
       FEED_HOST_DIAGNOSTICS_TOKEN: ${{ secrets.FEED_HOST_DIAGNOSTICS_TOKEN }}
+      FEED_HOST_WORKER_TOKEN: ${{ secrets.FEED_HOST_WORKER_TOKEN }}
+      FEED_PROACTIVE_ACTOR: ${{ vars.FEED_PROACTIVE_ACTOR }}
+      GEMINI_API_KEY: ${{ secrets.FEED_GEMINI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.FEED_ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -84,10 +143,12 @@ jobs:
 
       - name: Verify deployment credentials
         run: |
-          if [[ -z "$PHALA_CLOUD_API_KEY" ]]; then
-            echo "::error::PHALA_CLOUD_API_KEY must be configured as an Actions secret."
-            exit 1
-          fi
+          for name in PHALA_CLOUD_API_KEY FEED_HOST_DIAGNOSTICS_TOKEN FEED_HOST_WORKER_TOKEN FEED_PROACTIVE_ACTOR; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name must be configured for the colocated deployment."
+              exit 1
+            fi
+          done
 
       - name: Record Feed Host identity
         id: before
@@ -97,8 +158,10 @@ jobs:
       - name: Render immutable production compose file
         run: |
           cp harness/feed-host/docker-compose.yml /tmp/feed-host-compose.yml
-          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-host@sha256:.*$|    image: ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.image_digest }}|" /tmp/feed-host-compose.yml
-          grep -F "ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.image_digest }}" /tmp/feed-host-compose.yml
+          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-host@sha256:.*$|    image: ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.host_image_digest }}|" /tmp/feed-host-compose.yml
+          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-worker@sha256:.*$|    image: ghcr.io/tinycloudlabs/feed-worker@${{ needs.publish.outputs.worker_image_digest }}|" /tmp/feed-host-compose.yml
+          grep -F "ghcr.io/tinycloudlabs/feed-host@${{ needs.publish.outputs.host_image_digest }}" /tmp/feed-host-compose.yml
+          grep -F "ghcr.io/tinycloudlabs/feed-worker@${{ needs.publish.outputs.worker_image_digest }}" /tmp/feed-host-compose.yml
           docker compose -f /tmp/feed-host-compose.yml config --quiet
 
       - name: Deploy Feed Host to Phala
@@ -106,7 +169,12 @@ jobs:
           phala deploy \
             --cvm-id feed-host \
             --compose /tmp/feed-host-compose.yml \
-            -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN"
+            -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN" \
+            -e FEED_HOST_WORKER_TOKEN="$FEED_HOST_WORKER_TOKEN" \
+            -e FEED_PROACTIVE_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
+            -e FEED_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
+            -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+            -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
 
       - name: Verify Feed Host rollout
         run: |
@@ -119,10 +187,21 @@ jobs:
             if [[ "$saw_update" = 1 && "$status" = "running" ]] && curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health"; then
               delegate_did="$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')"
               test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
-              curl --fail --silent --show-error --max-time 15 https://api.feed.tinycloud.xyz/health
-              exit 0
+              if curl --fail --silent --show-error --max-time 15 \
+                -H "Authorization: Bearer $FEED_HOST_DIAGNOSTICS_TOKEN" \
+                "$FEED_HOST_ORIGIN/admin/diagnostics" -o /tmp/feed-host-diagnostics.json \
+                && jq --argjson now "$(date -u +%s)" --exit-status '
+                  [.actors[]?.lastWorkerClaim?.ts
+                    | select(type == "string")
+                    | sub("\\.[0-9]+Z$"; "Z")
+                    | fromdateiso8601]
+                  | any(.[]; . >= ($now - 300) and . <= ($now + 60))
+                ' /tmp/feed-host-diagnostics.json >/dev/null; then
+                curl --fail --silent --show-error --max-time 15 https://api.feed.tinycloud.xyz/health
+                exit 0
+              fi
             fi
             sleep 5
           done
-          echo "Feed Host did not become healthy after deployment."
+          echo "Feed Host did not become healthy with a worker claim from the last five minutes."
           exit 1
