@@ -155,6 +155,21 @@ jobs:
         run: |
           echo "delegate_did=$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')" >> "$GITHUB_OUTPUT"
 
+      - name: Capture rollback compose
+        run: |
+          phala cvms get feed-host --json > /tmp/feed-host-before.json
+          jq --raw-output --exit-status '
+            .compose_file
+            | if type == "string" then .
+              elif type == "object" then tojson
+              else empty
+              end
+          ' /tmp/feed-host-before.json > /tmp/feed-host-rollback.yml
+          test -s /tmp/feed-host-rollback.yml
+          docker compose -f /tmp/feed-host-rollback.yml config > /tmp/feed-host-rollback-resolved.yml
+          grep -E 'image: ghcr.io/tinycloudlabs/feed-host@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback-resolved.yml
+          grep -E 'image: ghcr.io/tinycloudlabs/feed-worker@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback-resolved.yml
+
       - name: Render immutable production compose file
         run: |
           cp harness/feed-host/docker-compose.yml /tmp/feed-host-compose.yml
@@ -165,6 +180,7 @@ jobs:
           docker compose -f /tmp/feed-host-compose.yml config --quiet
 
       - name: Deploy Feed Host to Phala
+        id: deploy
         run: |
           phala deploy \
             --cvm-id feed-host \
@@ -189,7 +205,13 @@ jobs:
               test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
               if curl --fail --silent --show-error --max-time 15 \
                 -H "Authorization: Bearer $FEED_HOST_DIAGNOSTICS_TOKEN" \
-                "$FEED_HOST_ORIGIN/admin/diagnostics" -o /tmp/feed-host-diagnostics.json \
+                "$FEED_HOST_ORIGIN/admin/diagnostics?detail=alerts" -o /tmp/feed-host-diagnostics.json \
+                && jq --exit-status '
+                  .detail == "alerts"
+                    and (.actors | type == "object")
+                    and ([.actors[]] | length > 0)
+                    and all(.actors[]; (.alerts | type == "object"))
+                ' /tmp/feed-host-diagnostics.json >/dev/null \
                 && jq --argjson now "$(date -u +%s)" --exit-status '
                   [.actors[]?.lastWorkerClaim?.ts
                     | select(type == "string")
@@ -204,4 +226,29 @@ jobs:
             sleep 5
           done
           echo "Feed Host did not become healthy with a worker claim from the last five minutes."
+          exit 1
+
+      - name: Roll back failed Feed Host rollout
+        if: ${{ failure() && steps.deploy.outcome == 'success' }}
+        run: |
+          echo "::warning::Rollout verification failed; restoring the previously deployed image digests."
+          phala deploy \
+            --cvm-id feed-host \
+            --compose /tmp/feed-host-rollback.yml \
+            -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN" \
+            -e FEED_HOST_WORKER_TOKEN="$FEED_HOST_WORKER_TOKEN" \
+            -e FEED_PROACTIVE_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
+            -e FEED_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
+            -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+            -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+          for _ in {1..90}; do
+            status="$(phala cvms get feed-host --json | jq --raw-output --exit-status '.status')"
+            if [[ "$status" = "running" ]] \
+              && curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health" >/dev/null; then
+              echo "::warning::Previous Feed Host deployment restored successfully."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Feed Host rollback did not become healthy."
           exit 1
