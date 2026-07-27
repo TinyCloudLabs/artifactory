@@ -166,9 +166,11 @@ jobs:
               end
           ' /tmp/feed-host-before.json > /tmp/feed-host-rollback.yml
           test -s /tmp/feed-host-rollback.yml
-          docker compose -f /tmp/feed-host-rollback.yml config > /tmp/feed-host-rollback-resolved.yml
-          grep -E 'image: ghcr.io/tinycloudlabs/feed-host@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback-resolved.yml
-          grep -E 'image: ghcr.io/tinycloudlabs/feed-worker@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback-resolved.yml
+          # The Phala snapshot includes provider-managed shell scripts whose
+          # dollar expressions are not Docker Compose interpolation syntax.
+          # Validate only the immutable application images we need to restore.
+          grep -Eq 'ghcr.io/tinycloudlabs/feed-host@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback.yml
+          grep -Eq 'ghcr.io/tinycloudlabs/feed-worker@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback.yml
 
       - name: Render immutable production compose file
         run: |
