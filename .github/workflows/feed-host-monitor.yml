@@ -7,6 +7,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: feed-host-monitor
+  cancel-in-progress: true
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -26,13 +30,32 @@ jobs:
             echo "::warning::FEED_HOST_DIAGNOSTICS_TOKEN secret not set; skipping diagnostics probe."
             exit 0
           fi
-          status="$(curl --silent --output /tmp/diag.json --write-out '%{http_code}' --max-time 15 \
-            -H "Authorization: Bearer $TOKEN" "$FEED_HOST_ORIGIN/admin/diagnostics")"
+          set +e
+          status="$(curl --silent --show-error --output /tmp/diag.json --write-out '%{http_code}' --max-time 15 \
+            -H "Authorization: Bearer $TOKEN" "$FEED_HOST_ORIGIN/admin/diagnostics?detail=alerts")"
+          curl_exit=$?
+          set -e
+          if [[ "$curl_exit" -ne 0 ]]; then
+            echo "::error::Feed Host diagnostics request failed (curl exit $curl_exit, HTTP ${status:-000})."
+            exit "$curl_exit"
+          fi
           if [[ "$status" == "404" ]]; then
             echo "::warning::diagnostics endpoint not enabled on the deployed host yet (404); skipping."
             exit 0
           fi
-          test "$status" == "200"
+          if [[ "$status" != "200" ]]; then
+            echo "::error::Feed Host diagnostics returned HTTP $status."
+            exit 1
+          fi
+          jq --exit-status '
+            .detail == "alerts"
+              and (.actors | type == "object")
+              and ([.actors[]] | length > 0)
+              and all(.actors[]; (.alerts | type == "object"))
+          ' /tmp/diag.json >/dev/null || {
+            echo "::error::Feed Host returned an incomplete alerts diagnostics payload."
+            exit 1
+          }
           firing="$(jq '[.actors[]?.alerts // {} | to_entries[] | select(.value == true) | .key] | unique' /tmp/diag.json)"
           echo "alerts firing: $firing"
           # Acknowledged alerts (known, tracked issues) downgrade to warnings so the
