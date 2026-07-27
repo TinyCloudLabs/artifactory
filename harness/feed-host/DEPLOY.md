@@ -75,7 +75,7 @@ transitions through `updating` to `running`, it requires all of the following:
 
 1. the direct Host health endpoint succeeds;
 2. the post-rollout `delegateDID` matches the recorded identity;
-3. authenticated `/admin/diagnostics?detail=alerts` contains an
+3. authenticated `/admin/diagnostics` contains an
    `actors.*.lastWorkerClaim.ts` less than five minutes old; and
 4. the public `https://api.feed.tinycloud.xyz/health` route succeeds.
 
@@ -85,10 +85,16 @@ clear the `FEED_MONITOR_ACKED_ALERTS` repository variable as soon as
 `workerClaimStale` is false so the scheduled monitor resumes failing on a
 regression.
 
-Before replacing either image, CI captures and validates the currently deployed
+Before replacing either image, CI captures the currently deployed immutable
+image digests and renders them into the repository's canonical production
 Compose file. If rollout verification fails after deployment, the final step
-redeploys those prior immutable image digests and waits for Host health to
-recover. The workflow remains failed so the rejected rollout is still visible.
+redeploys that rollback file and waits for Host health to recover. The workflow
+remains failed so the rejected rollout is still visible.
+
+Production is pinned to Feed `2e6fe9f` while the later generation-observability
+reland is investigated. Do not advance the submodule past that revision without
+a rollout proving both a fresh worker claim and authenticated diagnostics inside
+the 15-second probe budget.
 
 ## Manual local stub parity check
 
@@ -157,7 +163,7 @@ docker compose -p feed-colocated-local \
   logs feed-worker
 curl --fail --silent --show-error \
   -H 'Authorization: Bearer local-diagnostics-token' \
-  'http://127.0.0.1:8787/admin/diagnostics?detail=alerts' \
+  http://127.0.0.1:8787/admin/diagnostics \
   | jq -e '[.actors[]?.lastWorkerClaim] | any(.[]; . != null)'
 ```
 
