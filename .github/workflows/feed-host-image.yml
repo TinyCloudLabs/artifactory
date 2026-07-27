@@ -155,7 +155,7 @@ jobs:
         run: |
           echo "delegate_did=$(curl --fail --silent --show-error "$FEED_HOST_ORIGIN/delegation-policy" | jq --raw-output --exit-status '.delegateDID')" >> "$GITHUB_OUTPUT"
 
-      - name: Capture rollback compose
+      - name: Capture rollback image digests
         run: |
           phala cvms get feed-host --json > /tmp/feed-host-before.json
           jq --raw-output --exit-status '
@@ -164,13 +164,17 @@ jobs:
               elif type == "object" then tojson
               else empty
               end
-          ' /tmp/feed-host-before.json > /tmp/feed-host-rollback.yml
-          test -s /tmp/feed-host-rollback.yml
-          # The Phala snapshot includes provider-managed shell scripts whose
-          # dollar expressions are not Docker Compose interpolation syntax.
-          # Validate only the immutable application images we need to restore.
-          grep -Eq 'ghcr.io/tinycloudlabs/feed-host@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback.yml
-          grep -Eq 'ghcr.io/tinycloudlabs/feed-worker@sha256:[a-f0-9]{64}' /tmp/feed-host-rollback.yml
+          ' /tmp/feed-host-before.json > /tmp/feed-host-before.yml
+          host_image="$(grep -Eo 'ghcr.io/tinycloudlabs/feed-host@sha256:[a-f0-9]{64}' /tmp/feed-host-before.yml | head -n 1)"
+          worker_image="$(grep -Eo 'ghcr.io/tinycloudlabs/feed-worker@sha256:[a-f0-9]{64}' /tmp/feed-host-before.yml | head -n 1)"
+          test -n "$host_image"
+          test -n "$worker_image"
+          cp harness/feed-host/docker-compose.yml /tmp/feed-host-rollback.yml
+          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-host@sha256:.*$|    image: $host_image|" /tmp/feed-host-rollback.yml
+          sed -i "s|^[[:space:]]*image: ghcr.io/tinycloudlabs/feed-worker@sha256:.*$|    image: $worker_image|" /tmp/feed-host-rollback.yml
+          grep -F "image: $host_image" /tmp/feed-host-rollback.yml
+          grep -F "image: $worker_image" /tmp/feed-host-rollback.yml
+          docker compose -f /tmp/feed-host-rollback.yml config --quiet
 
       - name: Render immutable production compose file
         run: |

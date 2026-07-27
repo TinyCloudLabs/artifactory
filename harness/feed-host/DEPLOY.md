@@ -85,10 +85,11 @@ clear the `FEED_MONITOR_ACKED_ALERTS` repository variable as soon as
 `workerClaimStale` is false so the scheduled monitor resumes failing on a
 regression.
 
-Before replacing either image, CI captures and validates the currently deployed
+Before replacing either image, CI captures the currently deployed immutable
+image digests and renders them into the repository's canonical production
 Compose file. If rollout verification fails after deployment, the final step
-redeploys those prior immutable image digests and waits for Host health to
-recover. The workflow remains failed so the rejected rollout is still visible.
+redeploys that rollback file and waits for Host health to recover. The workflow
+remains failed so the rejected rollout is still visible.
 
 Production is pinned to Feed `2e6fe9f` while the later generation-observability
 reland is investigated. Do not advance the submodule past that revision without
