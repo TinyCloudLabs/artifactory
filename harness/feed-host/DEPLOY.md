@@ -75,7 +75,7 @@ transitions through `updating` to `running`, it requires all of the following:
 
 1. the direct Host health endpoint succeeds;
 2. the post-rollout `delegateDID` matches the recorded identity;
-3. authenticated `/admin/diagnostics` contains an
+3. authenticated `/admin/diagnostics?detail=alerts` contains an
    `actors.*.lastWorkerClaim.ts` less than five minutes old; and
 4. the public `https://api.feed.tinycloud.xyz/health` route succeeds.
 
@@ -91,10 +91,11 @@ Compose file. If rollout verification fails after deployment, the final step
 redeploys that rollback file and waits for Host health to recover. The workflow
 remains failed so the rejected rollout is still visible.
 
-Production is pinned to Feed `2e6fe9f` while the later generation-observability
-reland is investigated. Do not advance the submodule past that revision without
-a rollout proving both a fresh worker claim and authenticated diagnostics inside
-the 15-second probe budget.
+The production alert probe is deliberately SQL-free: it reports cached
+integrity state and the in-memory worker claim without contending for the
+actor's single-statement TinyCloud SQL session. Queue and generation detail
+remain available through full `/admin/diagnostics`, but release automation and
+scheduled monitoring must use `?detail=alerts`.
 
 ## Manual local stub parity check
 
@@ -163,7 +164,7 @@ docker compose -p feed-colocated-local \
   logs feed-worker
 curl --fail --silent --show-error \
   -H 'Authorization: Bearer local-diagnostics-token' \
-  http://127.0.0.1:8787/admin/diagnostics \
+  'http://127.0.0.1:8787/admin/diagnostics?detail=alerts' \
   | jq -e '[.actors[]?.lastWorkerClaim] | any(.[]; . != null)'
 ```
 

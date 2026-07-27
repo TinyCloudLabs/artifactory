@@ -212,9 +212,10 @@ jobs:
               test "$delegate_did" = "${{ steps.before.outputs.delegate_did }}"
               if curl --fail --silent --show-error --max-time 15 \
                 -H "Authorization: Bearer $FEED_HOST_DIAGNOSTICS_TOKEN" \
-                "$FEED_HOST_ORIGIN/admin/diagnostics" -o /tmp/feed-host-diagnostics.json \
+                "$FEED_HOST_ORIGIN/admin/diagnostics?detail=alerts" -o /tmp/feed-host-diagnostics.json \
                 && jq --exit-status '
-                  (.actors | type == "object")
+                  (.detail == "alerts")
+                    and (.actors | type == "object")
                     and ([.actors[]] | length > 0)
                     and all(.actors[]; (.alerts | type == "object"))
                 ' /tmp/feed-host-diagnostics.json >/dev/null \
