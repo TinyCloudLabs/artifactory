@@ -197,7 +197,8 @@ jobs:
       - name: Verify Feed Host rollout
         run: |
           saw_update=0
-          for _ in {1..90}; do
+          rollout_deadline=$((SECONDS + 600))
+          while (( SECONDS < rollout_deadline )); do
             status="$(phala cvms get feed-host --json | jq --raw-output --exit-status '.status')"
             if [[ "$status" = "updating" ]]; then
               saw_update=1
@@ -242,7 +243,8 @@ jobs:
             -e FEED_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
             -e GEMINI_API_KEY="$GEMINI_API_KEY" \
             -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
-          for _ in {1..90}; do
+          rollback_deadline=$((SECONDS + 600))
+          while (( SECONDS < rollback_deadline )); do
             status="$(phala cvms get feed-host --json | jq --raw-output --exit-status '.status')"
             if [[ "$status" = "running" ]] \
               && curl --fail --silent --show-error --max-time 15 "$FEED_HOST_ORIGIN/health" >/dev/null; then
