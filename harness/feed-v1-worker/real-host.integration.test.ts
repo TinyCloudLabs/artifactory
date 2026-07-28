@@ -147,6 +147,7 @@ function integrationConfig(hostUrl: string, runsDir: string): WorkerConfig {
     sourceBatchLimit: 1,
     transcriptDirs: [],
     pollMs: 10,
+    idlePollMsMax: 60_000,
     runsDir,
     model: "stub-model",
     generator: "stub",

@@ -29,6 +29,7 @@ export type WorkerConfig = {
   sourceBatchLimit: number;
   transcriptDirs: string[];
   pollMs: number;
+  idlePollMsMax: number;
   runsDir: string;
   model: string;
   generator: GeneratorKind;
@@ -220,6 +221,7 @@ export function configFromEnv(argv: string[] = []): WorkerConfig {
     ),
     transcriptDirs,
     pollMs: boundedIntegerEnv(process.env.FEED_WORKER_POLL_MS, 4_000, 1, MAX_BACKOFF_MS),
+    idlePollMsMax: boundedIntegerEnv(process.env.FEED_WORKER_IDLE_POLL_MS_MAX, MAX_BACKOFF_MS, 1, 600_000),
     runsDir: process.env.FEED_WORKER_RUNS_DIR || ".feed-v1-worker/runs",
     model: process.env.FEED_WORKER_MODEL || process.env.MEET_GEN_MODEL || "sonnet",
     generator: process.env.FEED_WORKER_GENERATOR === "stub" ? "stub" : "claude",
@@ -1058,6 +1060,19 @@ function classifyFailure(error: unknown): { code: string; retryable: boolean; de
   return { code: "generation_failed", retryable: true, detail: scrubErrorNote(error) };
 }
 
+// Every claim poll costs the Host one signed tinycloud.sql/read against the
+// production node, so an empty queue must not be polled at the active cadence
+// (TC-315). Doubles per empty claim up to the cap; the loop resets to pollMs
+// the moment a claim returns work. The cap never drops below pollMs so a
+// misconfigured FEED_WORKER_IDLE_POLL_MS_MAX cannot speed polling up.
+export function nextIdlePollMs(
+  currentMs: number,
+  config: Pick<WorkerConfig, "pollMs" | "idlePollMsMax">,
+): number {
+  const cap = Math.max(config.pollMs, config.idlePollMsMax);
+  return Math.min(Math.max(currentMs, config.pollMs) * 2, cap);
+}
+
 export async function runWorker(config: WorkerConfig): Promise<void> {
   if (config.sourceMode === "local" && config.transcriptDirs.length === 0) {
     throw new Error("TRANSCRIPT_DIRS is required when FEED_WORKER_SOURCE=local");
@@ -1078,22 +1093,26 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
     sourceBatchLimit: config.sourceBatchLimit,
     ...(config.sourceMode === "local" ? { transcriptDirCount: config.transcriptDirs.length } : {}),
     pollMs: config.pollMs,
+    idlePollMsMax: config.idlePollMsMax,
     leaseSeconds: config.leaseSeconds,
     ffmpegPath: config.ffmpegPath,
     once: config.once,
   });
 
   let backoffMs = config.pollMs;
+  let idleMs = config.pollMs;
   while (true) {
     try {
       const claim = await client.claim();
       backoffMs = config.pollMs;
       if (claim.request) {
+        idleMs = config.pollMs;
         await processRequest(claim.request, claim.committedCursor, client, ledger, config);
         if (config.once) return;
         continue;
       }
-      await Bun.sleep(config.pollMs);
+      await Bun.sleep(idleMs);
+      idleMs = nextIdlePollMs(idleMs, config);
     } catch (error) {
       if (
         (error instanceof WorkerApiError || error instanceof PublicationConflictError || error instanceof ArtifactPayloadError) &&
