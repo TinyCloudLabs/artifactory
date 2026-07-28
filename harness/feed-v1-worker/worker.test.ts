@@ -22,6 +22,7 @@ import {
   FeedHostClient,
   configFromEnv,
   LedgerWriter,
+  nextIdlePollMs,
   PublicationConflictError,
   processRequest,
   runWorker,
@@ -252,6 +253,7 @@ function workerConfig(baseDir: string): WorkerConfig {
     sourceBatchLimit: 5,
     transcriptDirs: [join(baseDir, "transcripts")],
     pollMs: 10,
+    idlePollMsMax: 60_000,
     runsDir: join(baseDir, "runs"),
     model: "stub-model",
     generator: "stub",
@@ -521,6 +523,41 @@ describe("Feed Host worker API client", () => {
     expect(() => configFromEnv()).toThrow("FEED_WORKER_PACKAGE_VERSION is required");
     process.env.FEED_WORKER_PACKAGE_VERSION = "reviewed-v1";
     expect(() => configFromEnv()).toThrow("FEED_WORKER_PACKAGE_DIGEST is required");
+  });
+
+  test("idle claim polling doubles from pollMs to the cap and never drops below pollMs", () => {
+    const config = { pollMs: 4_000, idlePollMsMax: 60_000 };
+    const delays: number[] = [];
+    let idleMs = config.pollMs;
+    for (let i = 0; i < 7; i++) {
+      delays.push(idleMs);
+      idleMs = nextIdlePollMs(idleMs, config);
+    }
+    expect(delays).toEqual([4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000]);
+    // A cap configured below the active cadence must not speed idle polling up.
+    expect(nextIdlePollMs(500, { pollMs: 4_000, idlePollMsMax: 1_000 })).toBe(4_000);
+  });
+
+  test("idle poll cap reads FEED_WORKER_IDLE_POLL_MS_MAX with a 60s default", () => {
+    const priorCap = process.env.FEED_WORKER_IDLE_POLL_MS_MAX;
+    const priorPackageVersion = process.env.FEED_WORKER_PACKAGE_VERSION;
+    const priorPackageDigest = process.env.FEED_WORKER_PACKAGE_DIGEST;
+    cleanup.push(() => {
+      if (priorCap === undefined) delete process.env.FEED_WORKER_IDLE_POLL_MS_MAX;
+      else process.env.FEED_WORKER_IDLE_POLL_MS_MAX = priorCap;
+      if (priorPackageVersion === undefined) delete process.env.FEED_WORKER_PACKAGE_VERSION;
+      else process.env.FEED_WORKER_PACKAGE_VERSION = priorPackageVersion;
+      if (priorPackageDigest === undefined) delete process.env.FEED_WORKER_PACKAGE_DIGEST;
+      else process.env.FEED_WORKER_PACKAGE_DIGEST = priorPackageDigest;
+    });
+    process.env.FEED_WORKER_PACKAGE_VERSION = "worker-env-test-v1";
+    process.env.FEED_WORKER_PACKAGE_DIGEST = "sha256:worker-env-test-package";
+    delete process.env.FEED_WORKER_IDLE_POLL_MS_MAX;
+    expect(configFromEnv().idlePollMsMax).toBe(60_000);
+    process.env.FEED_WORKER_IDLE_POLL_MS_MAX = "120000";
+    expect(configFromEnv().idlePollMsMax).toBe(120_000);
+    process.env.FEED_WORKER_IDLE_POLL_MS_MAX = "not-a-number";
+    expect(configFromEnv().idlePollMsMax).toBe(60_000);
   });
 
   test("claim handles empty and claimed responses with bearer auth and the exact worker body", async () => {
