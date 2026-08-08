@@ -50,13 +50,21 @@ jobs:
           jq --exit-status '
             (.detail == "alerts")
               and (.actors | type == "object")
-              and ([.actors[]] | length > 0)
-              and all(.actors[]; (.alerts | type == "object"))
+              and all(.actors[]?; (.alerts | type == "object"))
           ' /tmp/diag.json >/dev/null || {
             echo "::error::Feed Host returned an incomplete alerts diagnostics payload."
             exit 1
           }
           firing="$(jq '[.actors[]?.alerts // {} | to_entries[] | select(.value == true) | .key] | unique' /tmp/diag.json)"
+          # The host silently omits actors whose delegations expired or never
+          # completed, so an empty actors object usually means "the production
+          # delegation lapsed", not "the payload is broken". Surface that as a
+          # normal alert so it can be acknowledged like any other while a
+          # re-sign-in is pending, instead of hard-failing every 15 minutes.
+          if [[ "$(jq '.actors | length' /tmp/diag.json)" -eq 0 ]]; then
+            echo "::warning::diagnostics reports no active actors (delegation expired or none accepted)."
+            firing="$(jq '. + ["noActiveActors"] | unique' <<<"$firing")"
+          fi
           echo "alerts firing: $firing"
           # Acknowledged alerts (known, tracked issues) downgrade to warnings so the
           # monitor only FAILS on new/unacknowledged alerts. Manage the list with:
