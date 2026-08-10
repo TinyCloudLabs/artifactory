@@ -56,6 +56,9 @@ artifacts-v2/
 # delegation activates). Identity-bearing — same stance as artifacts/.
 /harness/agent/.agent-state/
 
+# Feed v1 worker run checkpoints, statuses, and event logs (local runtime state)
+/.feed-v1-worker/
+
 # Local contract bridge for the Feed submodule's sibling-repo imports. Created
 # by ensure_feed_deps; points only at this checkout's tracked skills directory.
 /submodules/artifactory/
