@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "../../skills/_shared/lib/artifact.ts";
 import { validateFeedArtifact } from "../../skills/_shared/lib/feed-v1.ts";
+import { starterPackageById } from "../../skills/_shared/lib/starter-packages.ts";
 import {
   ArtifactQualityRejectedError,
   attachHeroImage,
@@ -110,11 +111,16 @@ function mockWorkerHost(options: {
   completeDelayMs?: number;
   cancelOnPublish?: boolean;
   sourceItems?: ListenSourceItem[];
+  workflowId?: string;
 } = {}): MockWorkerHost {
   const calls: ApiCall[] = [];
   const artifacts: unknown[] = [];
   const logs: Array<{ event: string; resultCode?: unknown }> = [];
   const request = generationRequest();
+  if (options.workflowId) {
+    request.workflowId = options.workflowId;
+    request.packageId = options.workflowId;
+  }
   let emptyClaims = options.emptyClaims ?? 0;
 
   const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -620,6 +626,30 @@ describe("Feed Host worker API client", () => {
 });
 
 describe("feed-v1 worker flow", () => {
+  test("executes the claimed starter package and publishes its reviewed provenance", async () => {
+    const dir = await makeTranscriptDir();
+    const config = workerConfig(dir);
+    const host = mockWorkerHost({ workflowId: "feed-daily-brief" });
+    const client = clientFor(host, config);
+    const claim = await client.claim();
+    await processRequest(claim.request!, claim.committedCursor, client, new LedgerWriter(config.runsDir), config);
+
+    expect(host.artifacts).toHaveLength(1);
+    const published = validateFeedArtifact(host.artifacts[0]);
+    expect(published.ok).toBe(true);
+    if (!published.ok) return;
+    const declared = starterPackageById("feed-daily-brief")!;
+    expect(published.value.body).toMatchObject({ audienceRole: "operator", priorities: expect.any(Array) });
+    expect(published.value.posts).toHaveLength(1);
+    expect(published.value.renderHints?.heroImage).toBe(STUB_HERO_DATA_URI);
+    expect(published.value.producedBy).toMatchObject({
+      packageId: declared.packageId,
+      packageVersion: declared.version,
+      packageDigest: declared.digest,
+      disclosure: declared.disclosure,
+    });
+  });
+
   test("heartbeats, checkpoints a hero-bearing artifact, reconciles, and completes", async () => {
     const dir = await makeTranscriptDir();
     const config = workerConfig(dir);

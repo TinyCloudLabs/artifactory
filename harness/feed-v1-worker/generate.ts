@@ -85,6 +85,7 @@ export type GenerationInput = {
   draftGenerator?: DraftGenerator;
   critic?: CardCritic;
   criticProcessRunner?: ClaudeProcessRunner;
+  additionalDraftIssues?: (draft: DraftCard) => string[];
   sources?: GenerationSource[];
   maxChunkChars?: number;
   maxCorpusChars?: number;
@@ -599,6 +600,7 @@ function assessDraft(
   if (verifiedQuotes.length === 0) issues.push("card must include at least one deterministically verified exact source quote");
   if (dropped > 0) issues.push("every supplied source and pull quote must match the source text exactly");
   if (tags.length < 2 || tags.length > 5) issues.push("card must include 2-5 distinct nonempty tags");
+  issues.push(...(input.additionalDraftIssues?.(draft) ?? []));
 
   return {
     artifact: {
@@ -849,7 +851,7 @@ async function claudeDraft(
   return parseDraft(stdout);
 }
 
-async function runClaudeSubprocess(
+export async function runClaudeSubprocess(
   command: string[],
   instructions: string,
   operation: "generation" | "critic",

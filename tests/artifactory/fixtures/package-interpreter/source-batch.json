@@ -1,0 +1,13 @@
+{
+  "requestPrompt": "Turn this operating review into the most useful lens output.",
+  "sources": [
+    {
+      "sourceId": "conversation-package-eval",
+      "title": "Launch readiness review",
+      "startedAt": "2026-08-09T14:00:00.000Z",
+      "transcriptSha256": "sha256:1439aab635bee391b0f1f13f9de536d3616e3c02799e320d61900b9a0cdb1402",
+      "truncated": false,
+      "transcript": "# Launch readiness review\n\nAvery (00:01): The launch date stays Friday only if the migration rehearsal finishes by Wednesday and the rollback owner signs off.\nMorgan (00:02): Our usual baseline is two failed imports per thousand, but yesterday we saw eighteen failures per thousand after enabling the new parser.\nAvery (00:03): We have two real options: keep the parser and add a compatibility gate, or roll it back and delay the customer migration.\nMorgan (00:04): The repeatable process is to snapshot the queue, run the rehearsal against the canary tenant, compare error rates, and stop when failures exceed five per thousand.\nAvery (00:05): The open question is whether the compatibility gate can be tested before Wednesday without borrowing the incident-response team."
+    }
+  ]
+}
