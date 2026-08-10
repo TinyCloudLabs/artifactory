@@ -6,6 +6,7 @@ import {
   compileSkillPackage,
   PackageSourceError,
 } from "../../packages/artifactory/src/package-compiler.ts";
+import type { WorkflowTrigger } from "../../skills/_shared/lib/feed-v1.ts";
 
 const SKILLS_ROOT = resolve(import.meta.dir, "../../skills");
 
@@ -53,7 +54,7 @@ type StarterWorkflowPack = {
   workflowId: string;
   format: string;
   category?: string;
-  trigger: { kind: string; cadence: string };
+  trigger: WorkflowTrigger;
   sourcePolicy: { window: string; quietResult: string };
   continuity: {
     keyTemplate: string;
@@ -127,6 +128,7 @@ describe("starter workflow package registry", () => {
 
       expect(compiled.package.packageId).toBe(entry.packageId);
       expect(compiled.package.admissionState).toBe("reviewed_first_party");
+      expect(compiled.package.trigger).toEqual(workflow.trigger);
       expect(compiled.manifest.artifactTypes).toEqual([entry.artifactType]);
       expect(compiled.manifest.renderShapes).toEqual(["longform"]);
       expect(compiled.manifest.workflowExecutor).toBe("stub");

@@ -13,6 +13,7 @@ import type {
   SkillExecutionBundle,
   SpendClass,
   RuntimeClass,
+  WorkflowTrigger,
 } from "../../../skills/_shared/lib/feed-v1.ts";
 import {
   DEFAULT_REVIEWED_BUNDLE_POLICY_PATH,
@@ -35,6 +36,7 @@ export type PackageMaterial = {
 export type WorkflowPack = {
   workflowId: string;
   stages: ReviewedStageCapability[];
+  trigger?: WorkflowTrigger;
   [key: string]: unknown;
 };
 
@@ -297,6 +299,7 @@ export async function compileSkillPackage(
     workflowDigest,
     admissionState: manifest.admissionState,
     disclosure: manifest.disclosure,
+    ...(workflowPack.trigger ? { trigger: workflowPack.trigger } : {}),
   };
 
   const policyDecision = admitReviewedBundle(
@@ -621,6 +624,9 @@ async function loadWorkflowPack(workflowPath: string): Promise<WorkflowPack> {
   }
   const obj = parsed as Record<string, unknown>;
   const workflowId = requiredString(obj.workflowId, "workflowId", workflowPath);
+  const trigger = obj.trigger === undefined
+    ? undefined
+    : normalizeWorkflowTrigger(obj.trigger, `${workflowPath}.trigger`);
   const stages = requiredArray(obj.stages, "stages", workflowPath).map((entry, index) =>
     normalizeWorkflowStage(entry, `${workflowPath}.stages[${index}]`),
   );
@@ -631,6 +637,22 @@ async function loadWorkflowPack(workflowPath: string): Promise<WorkflowPack> {
     ...obj,
     workflowId,
     stages,
+    trigger,
+  };
+}
+
+function normalizeWorkflowTrigger(value: unknown, sourcePath: string): WorkflowTrigger {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new PackageSourceError("workflow trigger must be an object", { sourcePath });
+  }
+  const obj = value as Record<string, unknown>;
+  return {
+    kind: validateStringUnion(
+      obj.kind,
+      ["scheduled", "source_event", "on_demand"],
+      `${sourcePath}.kind`,
+    ) as WorkflowTrigger["kind"],
+    cadence: requiredString(obj.cadence, "cadence", sourcePath),
   };
 }
 

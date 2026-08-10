@@ -10,12 +10,13 @@ import {
 // starter is edited (new digest/version), this test fails until the module is
 // regenerated — the module must never drift from the pinned reviewed bundle.
 describe("reviewed starter package module", () => {
-  test("matches the compiled starter packages exactly (identity + disclosure)", async () => {
+  test("matches the compiled starter packages exactly (identity + disclosure + trigger)", async () => {
     expect(REVIEWED_STARTER_PACKAGES).toHaveLength(6);
     for (const declared of REVIEWED_STARTER_PACKAGES) {
       const compiled = await compileSkillPackage(`skills/${declared.packageId}`);
       const { presentation, ...identity } = declared;
       expect(identity).toEqual(compiled.package);
+      expect(declared.trigger).toEqual(compiled.workflowPack.trigger);
       expect(presentation).toBeDefined();
     }
   });

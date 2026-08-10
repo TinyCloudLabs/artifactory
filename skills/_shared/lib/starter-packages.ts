@@ -22,6 +22,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-daily-brief.stub.json",
     workflowDigest: "sha256:b60023c21c35a3ff09d1860f1eee5b199e95261768a5886194960dbef8448487",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "scheduled",
+      cadence: "daily",
+    },
     disclosure: {
       userCopy: "Creates a daily role-aware briefing from authorized context, with confidence, implications, and continuity.\n",
       credentialOwner: "none",
@@ -48,6 +52,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-short-insights.stub.json",
     workflowDigest: "sha256:61d6fed576448c643b38d6e014fde758cd3d22124c554a6728a2663321d02fff",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "source_event",
+      cadence: "on_new_authorized_content",
+    },
     disclosure: {
       userCopy: "Reads only unseen authorized transcript content and creates distinct evidence-backed insights and Feed posts.\n",
       credentialOwner: "none",
@@ -74,6 +82,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-exception-alert.stub.json",
     workflowDigest: "sha256:3a57a28dd5bebe9d29c89458da3b0a681ffc929907800620867823c7aa28eee3",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "source_event",
+      cadence: "on_new_authorized_content",
+    },
     disclosure: {
       userCopy: "Checks authorized context for meaningful deviations and stays silent when nothing requires attention.\n",
       credentialOwner: "none",
@@ -100,6 +112,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-synthesis-report.stub.json",
     workflowDigest: "sha256:8cc22f31525b81be610fec749614dc2a0efb230ce55b8c3cf420840d7e8ea761",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "on_demand",
+      cadence: "human_or_authorized_agent",
+    },
     disclosure: {
       userCopy: "Creates an on-demand synthesis from selected authorized context and preserves evidence, uncertainty, and dissent.\n",
       credentialOwner: "none",
@@ -126,6 +142,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-decision-memo.stub.json",
     workflowDigest: "sha256:de877625018ee11322a8c7dd7cbc1483acde26c1d6a0ae4bf3cb8c68a474ca3c",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "on_demand",
+      cadence: "human_or_authorized_agent",
+    },
     disclosure: {
       userCopy: "Creates an on-demand decision memo from selected authorized context with options, tradeoffs, evidence, and open questions.\n",
       credentialOwner: "none",
@@ -152,6 +172,10 @@ export const REVIEWED_STARTER_PACKAGES: FeedWorkflowPackage[] = [
     workflowRef: "workflows/feed-playbook.stub.json",
     workflowDigest: "sha256:ce5b5ab58946bef9adc30b0f40392e469eda053b0e36ca603a8fa863eef06ce1",
     admissionState: "reviewed_first_party",
+    trigger: {
+      kind: "on_demand",
+      cadence: "human_or_authorized_agent",
+    },
     disclosure: {
       userCopy: "Turns an operational process from selected authorized conversations into an evidence-backed playbook and actionable Feed posts.\n",
       credentialOwner: "none",

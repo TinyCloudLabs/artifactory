@@ -243,6 +243,11 @@ export type WorkflowPresentation = {
   exampleTitles: string[];
 };
 
+export type WorkflowTrigger = {
+  kind: "scheduled" | "source_event" | "on_demand";
+  cadence: string;
+};
+
 export type FeedWorkflowPackage = {
   schemaVersion: "feed.workflow_package.v1";
   packageId: string;
@@ -254,6 +259,9 @@ export type FeedWorkflowPackage = {
   workflowDigest: HashString;
   admissionState: "candidate" | "enabled_local" | "reviewed_first_party" | "blocked";
   disclosure: WorkflowDisclosure;
+  // Optional so existing packages and stored rows stay valid. When present,
+  // this is machine truth; presentation trigger/cadence labels are display-only.
+  trigger?: WorkflowTrigger;
   // Optional so existing compiled packages and stored rows stay valid.
   presentation?: WorkflowPresentation;
 };
