@@ -53,7 +53,15 @@ jobs:
         run: |
           echo "feed=$(git -C submodules/feed rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "worker_version=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-          worker_digest="$(git archive --format=tar HEAD harness/feed-v1-worker skills/_shared | sha256sum | awk '{print $1}')"
+          worker_digest="$(git archive --format=tar HEAD \
+            package.json bun.lock \
+            harness/feed-v1-worker \
+            packages/artifactory/src packages/artifactory/policies \
+            skills/_shared \
+            skills/feed-daily-brief skills/feed-decision-memo \
+            skills/feed-exception-alert skills/feed-playbook \
+            skills/feed-short-insights skills/feed-synthesis-report \
+            | sha256sum | awk '{print $1}')"
           echo "worker_digest=sha256:$worker_digest" >> "$GITHUB_OUTPUT"
 
       - name: Validate production compose

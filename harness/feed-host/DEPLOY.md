@@ -108,7 +108,15 @@ git submodule update --init submodules/feed
 export FEED_ACTOR_ID='did:pkh:your-test-actor'
 export FEED_HOST_WORKER_TOKEN='local-worker-token'
 export FEED_WORKER_PACKAGE_VERSION="$(git rev-parse HEAD)"
-export FEED_WORKER_PACKAGE_DIGEST="sha256:$(git archive --format=tar HEAD harness/feed-v1-worker skills/_shared | shasum -a 256 | awk '{print $1}')"
+export FEED_WORKER_PACKAGE_DIGEST="sha256:$(git archive --format=tar HEAD \
+  package.json bun.lock \
+  harness/feed-v1-worker \
+  packages/artifactory/src packages/artifactory/policies \
+  skills/_shared \
+  skills/feed-daily-brief skills/feed-decision-memo \
+  skills/feed-exception-alert skills/feed-playbook \
+  skills/feed-short-insights skills/feed-synthesis-report \
+  | shasum -a 256 | awk '{print $1}')"
 
 cat >/tmp/feed-colocated-local.yml <<'YAML'
 services:

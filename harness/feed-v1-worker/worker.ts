@@ -9,6 +9,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { toFeedArtifact } from "../../skills/_shared/lib/feed-v1-convert.ts";
 import type { FeedArtifact, TranscriptSourceRef } from "../../skills/_shared/lib/feed-v1.ts";
+import { REVIEWED_STARTER_PACKAGES } from "../../skills/_shared/lib/starter-packages.ts";
 import {
   ArtifactQualityRejectedError,
   generateInsightArtifact,
@@ -356,13 +357,13 @@ export class FeedHostClient {
     return value as T;
   }
 
-  async claim(): Promise<ClaimResult> {
+  async claim(workflowId = this.config.workflowId): Promise<ClaimResult> {
     return this.post<ClaimResult>(
       "claim",
       "/api/worker/generation-requests/claim",
       {
         actorId: this.actorId(),
-        workflowId: this.config.workflowId,
+        workflowId,
         claimOwner: this.config.claimOwner,
         leaseSeconds: this.config.leaseSeconds,
         maxAttempts: this.config.maxAttempts,
@@ -1124,6 +1125,32 @@ export function nextIdlePollMs(
   return Math.min(Math.max(currentMs, config.pollMs) * 2, cap);
 }
 
+/**
+ * The Host claim API is deliberately workflow-scoped. In the normal deployed
+ * configuration one worker therefore has to visit every reviewed queue; a
+ * non-default FEED_WORKER_WORKFLOW_ID remains a single-queue operational
+ * override for targeted workers and local debugging.
+ */
+export function claimWorkflowIds(configuredWorkflowId: string): string[] {
+  if (configuredWorkflowId !== DEFAULT_WORKFLOW_ID) return [configuredWorkflowId];
+  return [
+    DEFAULT_WORKFLOW_ID,
+    ...REVIEWED_STARTER_PACKAGES.map((pkg) => pkg.packageId),
+  ];
+}
+
+export async function claimNextAvailableWorkflow(
+  client: Pick<FeedHostClient, "claim">,
+  workflowIds: string[],
+): Promise<ClaimResult | undefined> {
+  if (workflowIds.length === 0) throw new Error("worker must have at least one workflow queue to claim");
+  for (const workflowId of workflowIds) {
+    const candidate = await client.claim(workflowId);
+    if (candidate.request) return candidate;
+  }
+  return undefined;
+}
+
 export async function runWorker(config: WorkerConfig): Promise<void> {
   if (config.sourceMode === "local" && config.transcriptDirs.length === 0) {
     throw new Error("TRANSCRIPT_DIRS is required when FEED_WORKER_SOURCE=local");
@@ -1137,6 +1164,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
   logLine("info", "worker_started", {
     hostUrl: config.hostUrl,
     workflowId: config.workflowId,
+    claimWorkflowIds: claimWorkflowIds(config.workflowId),
     claimOwner: config.claimOwner,
     generator: config.generator,
     model: config.model,
@@ -1152,11 +1180,17 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
   let backoffMs = config.pollMs;
   let idleMs = config.pollMs;
+  const workflowIds = claimWorkflowIds(config.workflowId);
   while (true) {
     try {
-      const claim = await client.claim();
+      // Keep the legacy queue first. The current Host also allows a
+      // workflow-scoped claim to bind an older unscoped request, so visiting
+      // the default queue before starter queues preserves the deployed
+      // extract-insights fallback for all requests already waiting at scan
+      // start.
+      const claim = await claimNextAvailableWorkflow(client, workflowIds);
       backoffMs = config.pollMs;
-      if (claim.request) {
+      if (claim?.request) {
         idleMs = config.pollMs;
         await processRequest(claim.request, claim.committedCursor, client, ledger, config);
         if (config.once) return;

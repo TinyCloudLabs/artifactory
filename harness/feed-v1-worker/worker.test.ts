@@ -21,6 +21,8 @@ import {
 } from "./generate.ts";
 import {
   FeedHostClient,
+  claimNextAvailableWorkflow,
+  claimWorkflowIds,
   configFromEnv,
   LedgerWriter,
   nextIdlePollMs,
@@ -544,6 +546,36 @@ describe("Feed Host worker API client", () => {
     expect(nextIdlePollMs(500, { pollMs: 4_000, idlePollMsMax: 1_000 })).toBe(4_000);
   });
 
+  test("default workers claim the legacy and all reviewed starter queues", () => {
+    expect(claimWorkflowIds("artifactory.extract-insights")).toEqual([
+      "artifactory.extract-insights",
+      "feed-daily-brief",
+      "feed-short-insights",
+      "feed-exception-alert",
+      "feed-synthesis-report",
+      "feed-decision-memo",
+      "feed-playbook",
+    ]);
+    expect(claimWorkflowIds("feed-daily-brief")).toEqual(["feed-daily-brief"]);
+  });
+
+  test("workflow queue scans keep the legacy fallback first and stop on work", async () => {
+    const seen: string[] = [];
+    const client = {
+      claim: async (workflowId: string): Promise<import("./worker.ts").ClaimResult> => {
+        seen.push(workflowId);
+        return {
+          request: workflowId === "feed-short-insights" ? generationRequest() : null,
+          committedCursor: null,
+        };
+      },
+    };
+    const workflowIds = ["artifactory.extract-insights", "feed-daily-brief", "feed-short-insights"];
+    const available = await claimNextAvailableWorkflow(client, workflowIds);
+    expect(seen).toEqual(workflowIds);
+    expect(available?.request).not.toBeNull();
+  });
+
   test("idle poll cap reads FEED_WORKER_IDLE_POLL_MS_MAX with a 60s default", () => {
     const priorCap = process.env.FEED_WORKER_IDLE_POLL_MS_MAX;
     const priorPackageVersion = process.env.FEED_WORKER_PACKAGE_VERSION;
@@ -631,7 +663,8 @@ describe("feed-v1 worker flow", () => {
     const config = workerConfig(dir);
     const host = mockWorkerHost({ workflowId: "feed-daily-brief" });
     const client = clientFor(host, config);
-    const claim = await client.claim();
+    const claim = await client.claim("feed-daily-brief");
+    expect(host.calls[0]?.body.workflowId).toBe("feed-daily-brief");
     await processRequest(claim.request!, claim.committedCursor, client, new LedgerWriter(config.runsDir), config);
 
     expect(host.artifacts).toHaveLength(1);
