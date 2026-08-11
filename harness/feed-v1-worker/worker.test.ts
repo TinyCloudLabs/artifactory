@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Artifact } from "../../skills/_shared/lib/artifact.ts";
 import { validateFeedArtifact } from "../../skills/_shared/lib/feed-v1.ts";
+import { starterPackageById } from "../../skills/_shared/lib/starter-packages.ts";
 import {
   ArtifactQualityRejectedError,
   attachHeroImage,
@@ -20,6 +21,8 @@ import {
 } from "./generate.ts";
 import {
   FeedHostClient,
+  claimNextAvailableWorkflow,
+  claimWorkflowIds,
   configFromEnv,
   LedgerWriter,
   nextIdlePollMs,
@@ -110,11 +113,16 @@ function mockWorkerHost(options: {
   completeDelayMs?: number;
   cancelOnPublish?: boolean;
   sourceItems?: ListenSourceItem[];
+  workflowId?: string;
 } = {}): MockWorkerHost {
   const calls: ApiCall[] = [];
   const artifacts: unknown[] = [];
   const logs: Array<{ event: string; resultCode?: unknown }> = [];
   const request = generationRequest();
+  if (options.workflowId) {
+    request.workflowId = options.workflowId;
+    request.packageId = options.workflowId;
+  }
   let emptyClaims = options.emptyClaims ?? 0;
 
   const fetchImpl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -538,6 +546,36 @@ describe("Feed Host worker API client", () => {
     expect(nextIdlePollMs(500, { pollMs: 4_000, idlePollMsMax: 1_000 })).toBe(4_000);
   });
 
+  test("default workers claim the legacy and all reviewed starter queues", () => {
+    expect(claimWorkflowIds("artifactory.extract-insights")).toEqual([
+      "artifactory.extract-insights",
+      "feed-daily-brief",
+      "feed-short-insights",
+      "feed-exception-alert",
+      "feed-synthesis-report",
+      "feed-decision-memo",
+      "feed-playbook",
+    ]);
+    expect(claimWorkflowIds("feed-daily-brief")).toEqual(["feed-daily-brief"]);
+  });
+
+  test("workflow queue scans keep the legacy fallback first and stop on work", async () => {
+    const seen: string[] = [];
+    const client = {
+      claim: async (workflowId: string): Promise<import("./worker.ts").ClaimResult> => {
+        seen.push(workflowId);
+        return {
+          request: workflowId === "feed-short-insights" ? generationRequest() : null,
+          committedCursor: null,
+        };
+      },
+    };
+    const workflowIds = ["artifactory.extract-insights", "feed-daily-brief", "feed-short-insights"];
+    const available = await claimNextAvailableWorkflow(client, workflowIds);
+    expect(seen).toEqual(workflowIds);
+    expect(available?.request).not.toBeNull();
+  });
+
   test("idle poll cap reads FEED_WORKER_IDLE_POLL_MS_MAX with a 60s default", () => {
     const priorCap = process.env.FEED_WORKER_IDLE_POLL_MS_MAX;
     const priorPackageVersion = process.env.FEED_WORKER_PACKAGE_VERSION;
@@ -620,6 +658,31 @@ describe("Feed Host worker API client", () => {
 });
 
 describe("feed-v1 worker flow", () => {
+  test("executes the claimed starter package and publishes its reviewed provenance", async () => {
+    const dir = await makeTranscriptDir();
+    const config = workerConfig(dir);
+    const host = mockWorkerHost({ workflowId: "feed-daily-brief" });
+    const client = clientFor(host, config);
+    const claim = await client.claim("feed-daily-brief");
+    expect(host.calls[0]?.body.workflowId).toBe("feed-daily-brief");
+    await processRequest(claim.request!, claim.committedCursor, client, new LedgerWriter(config.runsDir), config);
+
+    expect(host.artifacts).toHaveLength(1);
+    const published = validateFeedArtifact(host.artifacts[0]);
+    expect(published.ok).toBe(true);
+    if (!published.ok) return;
+    const declared = starterPackageById("feed-daily-brief")!;
+    expect(published.value.body).toMatchObject({ audienceRole: "operator", priorities: expect.any(Array) });
+    expect(published.value.posts).toHaveLength(1);
+    expect(published.value.renderHints?.heroImage).toBe(STUB_HERO_DATA_URI);
+    expect(published.value.producedBy).toMatchObject({
+      packageId: declared.packageId,
+      packageVersion: declared.version,
+      packageDigest: declared.digest,
+      disclosure: declared.disclosure,
+    });
+  });
+
   test("heartbeats, checkpoints a hero-bearing artifact, reconciles, and completes", async () => {
     const dir = await makeTranscriptDir();
     const config = workerConfig(dir);

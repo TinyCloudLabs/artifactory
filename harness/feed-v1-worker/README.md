@@ -27,6 +27,10 @@ reconciles the Feed projection, and completes the request.
 `FEED_WORKER_SOURCE=host` is the default and production setting. The worker
 requests at most `FEED_WORKER_SOURCE_BATCH_LIMIT` sources per claimed request
 (default 5, Host maximum 10) and carries the returned cursor into completion.
+Because the Host claim API is workflow-scoped, the default worker polls the
+legacy extract-insights queue first and then all six reviewed starter-package
+queues. Setting `FEED_WORKER_WORKFLOW_ID` to a non-default id limits a worker to
+that one queue as an operational override.
 
 Every published card has a sharp headline, a 150-300 word markdown body, an
 exact verified pull quote with attribution, at least one exact verified source

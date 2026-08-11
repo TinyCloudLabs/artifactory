@@ -9,6 +9,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { toFeedArtifact } from "../../skills/_shared/lib/feed-v1-convert.ts";
 import type { FeedArtifact, TranscriptSourceRef } from "../../skills/_shared/lib/feed-v1.ts";
+import { REVIEWED_STARTER_PACKAGES } from "../../skills/_shared/lib/starter-packages.ts";
 import {
   ArtifactQualityRejectedError,
   generateInsightArtifact,
@@ -19,6 +20,12 @@ import {
   type GenerationSource,
   type GeneratorKind,
 } from "./generate.ts";
+import {
+  DEFAULT_WORKFLOW_ID,
+  executePackageProfile,
+  loadPackageExecutionProfile,
+  PackageExecutionProfileError,
+} from "./package-execution.ts";
 
 export type WorkerConfig = {
   hostUrl: string;
@@ -226,7 +233,7 @@ export function configFromEnv(argv: string[] = []): WorkerConfig {
     model: process.env.FEED_WORKER_MODEL || process.env.MEET_GEN_MODEL || "sonnet",
     generator: process.env.FEED_WORKER_GENERATOR === "stub" ? "stub" : "claude",
     maxAttempts: boundedIntegerEnv(process.env.FEED_WORKER_MAX_ATTEMPTS, 2, 1, 10),
-    workflowId: process.env.FEED_WORKER_WORKFLOW_ID || "artifactory.extract-insights",
+    workflowId: process.env.FEED_WORKER_WORKFLOW_ID || DEFAULT_WORKFLOW_ID,
     claimOwner: process.env.FEED_WORKER_CLAIM_OWNER || `feed-v1-worker-${process.pid}`,
     leaseSeconds,
     heartbeatMs: boundedIntegerEnv(
@@ -350,13 +357,13 @@ export class FeedHostClient {
     return value as T;
   }
 
-  async claim(): Promise<ClaimResult> {
+  async claim(workflowId = this.config.workflowId): Promise<ClaimResult> {
     return this.post<ClaimResult>(
       "claim",
       "/api/worker/generation-requests/claim",
       {
         actorId: this.actorId(),
-        workflowId: this.config.workflowId,
+        workflowId,
         claimOwner: this.config.claimOwner,
         leaseSeconds: this.config.leaseSeconds,
         maxAttempts: this.config.maxAttempts,
@@ -676,52 +683,87 @@ export async function processRequest(
       if (config.sourceMode === "local" || (generationSources?.length ?? 0) > 0) {
         const startedAt = performance.now();
         try {
-          const artifact = await generate({
-            requestId,
-            prompt: request.prompt,
-            transcriptDirs: config.transcriptDirs,
-            sources: generationSources,
-            model: config.model,
-            generator: config.generator,
-            ffmpegPath: config.ffmpegPath,
-            log: (message, fields, level = "info") => logLine(level, message, { requestId, ...fields }),
-          });
+          if (!request.runId) throw new Error(`claimed request ${requestId} has no runId`);
+          const claimedWorkflowId = request.workflowId ?? config.workflowId;
+          if (request.packageId && request.packageId !== claimedWorkflowId) {
+            throw new PackageExecutionProfileError(
+              `claimed packageId=${request.packageId} does not match workflowId=${claimedWorkflowId}`,
+            );
+          }
+          const log = (message: string, fields?: Record<string, unknown>, level: "info" | "warn" | "error" = "info") =>
+            logLine(level, message, { requestId, ...fields });
+          const producer = config.generator === "stub"
+            ? {
+                runtimeClass: "stub" as const,
+                providerClass: "none" as const,
+                credentialOwner: "none" as const,
+                egressClass: "none" as const,
+              }
+            : {
+                runtimeClass: config.sourceMode === "host" ? "hosted_private" as const : "local" as const,
+                providerClass: "user_byok" as const,
+                credentialOwner: workerCredentialMode(),
+                egressClass: "media_provider" as const,
+              };
+          let artifact: Awaited<ReturnType<typeof generateInsightArtifact>>;
+          let feedArtifact: FeedArtifact;
+          if (claimedWorkflowId === DEFAULT_WORKFLOW_ID) {
+            artifact = await generate({
+              requestId,
+              prompt: request.prompt,
+              transcriptDirs: config.transcriptDirs,
+              sources: generationSources,
+              model: config.model,
+              generator: config.generator,
+              ffmpegPath: config.ffmpegPath,
+              log,
+            });
+            const sourceRefs = sources ? sourceRefsForBatch(sources, artifact, request.createdAt) : undefined;
+            feedArtifact = await toFeedArtifact(artifact, {
+              skill: "extract-insights",
+              runId: request.runId,
+              sourceRefs,
+              packageId: request.packageId ?? config.workflowId,
+              packageVersion: config.packageVersion,
+              packageDigest: config.packageDigest,
+              producer,
+              model: artifact.generation_model ?? config.model,
+              disclosureCopy: config.sourceMode === "host"
+                ? "Generated privately by the Feed worker from delegated Listen sources using configured model providers."
+                : "Generated by the explicitly selected local transcript fallback.",
+            });
+          } else {
+            const profile = await loadPackageExecutionProfile(claimedWorkflowId);
+            const executed = await executePackageProfile({
+              profile,
+              requestId,
+              runId: request.runId,
+              prompt: request.prompt,
+              settings: requestSettings(request.scope),
+              transcriptDirs: config.transcriptDirs,
+              sources: generationSources,
+              resolveSourceRefs: sources
+                ? (generated) => sourceRefsForBatch(sources, generated, request.createdAt)
+                : undefined,
+              model: config.model,
+              generator: config.generator,
+              producer,
+              ffmpegPath: config.ffmpegPath,
+              log,
+            });
+            artifact = executed.legacyArtifact;
+            feedArtifact = executed.feedArtifact;
+          }
           heartbeat.throwIfFailed();
           await ledger.event(requestId, "generated", {
+            packageId: feedArtifact.producedBy.packageId,
             quotesVerified: artifact.quality.quotes_verified,
             criticPass: artifact.quality.critic_pass,
             heroAttached: Boolean(artifact.hero_image),
             ms: Math.round(performance.now() - startedAt),
           });
 
-          if (!request.runId) throw new Error(`claimed request ${requestId} has no runId`);
-          const sourceRefs = sources ? sourceRefsForBatch(sources, artifact, request.createdAt) : undefined;
           if (sources) cursorAfter = committedCursorForArtifact(sources, artifact);
-          const feedArtifact = await toFeedArtifact(artifact, {
-            skill: "extract-insights",
-            runId: request.runId,
-            sourceRefs,
-            packageId: request.packageId ?? config.workflowId,
-            packageVersion: config.packageVersion,
-            packageDigest: config.packageDigest,
-            producer: config.generator === "stub"
-              ? {
-                  runtimeClass: "stub",
-                  providerClass: "none",
-                  credentialOwner: "none",
-                  egressClass: "none",
-                }
-              : {
-                  runtimeClass: config.sourceMode === "host" ? "hosted_private" : "local",
-                  providerClass: "user_byok",
-                  credentialOwner: workerCredentialMode(),
-                  egressClass: "media_provider",
-                },
-            model: artifact.generation_model ?? config.model,
-            disclosureCopy: config.sourceMode === "host"
-              ? "Generated privately by the Feed worker from delegated Listen sources using configured model providers."
-              : "Generated by the explicitly selected local transcript fallback.",
-          });
           feedArtifacts.push(feedArtifact);
           if (config.sourceMode === "local") {
             cursorAfter = { completedRequestId: requestId, generatedAt: artifact.generated_at, source: "local" };
@@ -1044,6 +1086,9 @@ function isLeaseLost(error: unknown): boolean {
 }
 
 function classifyFailure(error: unknown): { code: string; retryable: boolean; detail: string } {
+  if (error instanceof PackageExecutionProfileError) {
+    return { code: error.code, retryable: error.retryable, detail: scrubErrorNote(error) };
+  }
   if (error instanceof HeroGenerationError) {
     return { code: error.code, retryable: error.retryable, detail: error.detail };
   }
@@ -1060,6 +1105,13 @@ function classifyFailure(error: unknown): { code: string; retryable: boolean; de
   return { code: "generation_failed", retryable: true, detail: scrubErrorNote(error) };
 }
 
+function requestSettings(scope: Record<string, unknown>): Record<string, unknown> {
+  const settings = scope.settings;
+  return settings !== null && typeof settings === "object" && !Array.isArray(settings)
+    ? settings as Record<string, unknown>
+    : {};
+}
+
 // Every claim poll costs the Host one signed tinycloud.sql/read against the
 // production node, so an empty queue must not be polled at the active cadence
 // (TC-315). Doubles per empty claim up to the cap; the loop resets to pollMs
@@ -1071,6 +1123,32 @@ export function nextIdlePollMs(
 ): number {
   const cap = Math.max(config.pollMs, config.idlePollMsMax);
   return Math.min(Math.max(currentMs, config.pollMs) * 2, cap);
+}
+
+/**
+ * The Host claim API is deliberately workflow-scoped. In the normal deployed
+ * configuration one worker therefore has to visit every reviewed queue; a
+ * non-default FEED_WORKER_WORKFLOW_ID remains a single-queue operational
+ * override for targeted workers and local debugging.
+ */
+export function claimWorkflowIds(configuredWorkflowId: string): string[] {
+  if (configuredWorkflowId !== DEFAULT_WORKFLOW_ID) return [configuredWorkflowId];
+  return [
+    DEFAULT_WORKFLOW_ID,
+    ...REVIEWED_STARTER_PACKAGES.map((pkg) => pkg.packageId),
+  ];
+}
+
+export async function claimNextAvailableWorkflow(
+  client: Pick<FeedHostClient, "claim">,
+  workflowIds: string[],
+): Promise<ClaimResult | undefined> {
+  if (workflowIds.length === 0) throw new Error("worker must have at least one workflow queue to claim");
+  for (const workflowId of workflowIds) {
+    const candidate = await client.claim(workflowId);
+    if (candidate.request) return candidate;
+  }
+  return undefined;
 }
 
 export async function runWorker(config: WorkerConfig): Promise<void> {
@@ -1086,6 +1164,7 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
   logLine("info", "worker_started", {
     hostUrl: config.hostUrl,
     workflowId: config.workflowId,
+    claimWorkflowIds: claimWorkflowIds(config.workflowId),
     claimOwner: config.claimOwner,
     generator: config.generator,
     model: config.model,
@@ -1101,11 +1180,17 @@ export async function runWorker(config: WorkerConfig): Promise<void> {
 
   let backoffMs = config.pollMs;
   let idleMs = config.pollMs;
+  const workflowIds = claimWorkflowIds(config.workflowId);
   while (true) {
     try {
-      const claim = await client.claim();
+      // Keep the legacy queue first. The current Host also allows a
+      // workflow-scoped claim to bind an older unscoped request, so visiting
+      // the default queue before starter queues preserves the deployed
+      // extract-insights fallback for all requests already waiting at scan
+      // start.
+      const claim = await claimNextAvailableWorkflow(client, workflowIds);
       backoffMs = config.pollMs;
-      if (claim.request) {
+      if (claim?.request) {
         idleMs = config.pollMs;
         await processRequest(claim.request, claim.committedCursor, client, ledger, config);
         if (config.once) return;

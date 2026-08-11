@@ -26,8 +26,18 @@ RUN npm install --no-save --omit=dev @anthropic-ai/claude-code@2.1.177 \
   && ffmpeg -version >/dev/null
 
 WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --production --frozen-lockfile
 COPY harness/feed-v1-worker ./harness/feed-v1-worker
+COPY packages/artifactory/src ./packages/artifactory/src
+COPY packages/artifactory/policies ./packages/artifactory/policies
 COPY skills/_shared ./skills/_shared
+COPY skills/feed-daily-brief ./skills/feed-daily-brief
+COPY skills/feed-decision-memo ./skills/feed-decision-memo
+COPY skills/feed-exception-alert ./skills/feed-exception-alert
+COPY skills/feed-playbook ./skills/feed-playbook
+COPY skills/feed-short-insights ./skills/feed-short-insights
+COPY skills/feed-synthesis-report ./skills/feed-synthesis-report
 
 RUN useradd --create-home --uid 10001 feed-worker \
   && mkdir -p /home/feed-worker/.feed-v1-worker/runs \
