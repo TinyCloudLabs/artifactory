@@ -8,7 +8,7 @@
 #
 # Deploy:
 #   phala deploy -c harness/agent/docker-compose.yml -n distillery-agent \
-#     -e harness/agent/agent.env -t tdx.small
+#     -e harness/agent/agent.env -t tdx.small --no-public-logs
 #
 # Required env (agent.env, client-side encrypted — see agent.env.example):
 #   AGENT_API_TOKEN          per-install bearer token (the feed sends it)
