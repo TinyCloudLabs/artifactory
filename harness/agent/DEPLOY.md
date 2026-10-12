@@ -26,7 +26,8 @@ volume → the same DID):
 ```sh
 phala deploy --cvm-id f606e95d-2717-40e8-bf6a-68031d86a089 \
   -c harness/agent/docker-compose.yml \
-  -e harness/agent/agent.env
+  -e harness/agent/agent.env \
+  --no-public-logs
 ```
 
 The sections below are the from-scratch runbook (e.g. a fresh CVM).
@@ -110,6 +111,7 @@ phala deploy \
   -n distillery-agent \
   -e harness/agent/agent.env \
   -t tdx.small \
+  --no-public-logs \
   --wait
 ```
 
