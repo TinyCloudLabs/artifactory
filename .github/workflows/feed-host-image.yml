@@ -199,6 +199,8 @@ jobs:
           phala deploy \
             --cvm-id feed-host \
             --compose /tmp/feed-host-compose.yml \
+            --no-public-logs \
+            --no-public-sysinfo \
             -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN" \
             -e FEED_HOST_WORKER_TOKEN="$FEED_HOST_WORKER_TOKEN" \
             -e FEED_PROACTIVE_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
@@ -250,6 +252,8 @@ jobs:
           phala deploy \
             --cvm-id feed-host \
             --compose /tmp/feed-host-rollback.yml \
+            --no-public-logs \
+            --no-public-sysinfo \
             -e FEED_HOST_DIAGNOSTICS_TOKEN="$FEED_HOST_DIAGNOSTICS_TOKEN" \
             -e FEED_HOST_WORKER_TOKEN="$FEED_HOST_WORKER_TOKEN" \
             -e FEED_PROACTIVE_ACTOR_ID="$FEED_PROACTIVE_ACTOR" \
